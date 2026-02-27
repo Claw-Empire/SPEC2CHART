@@ -55,8 +55,8 @@ const PORT_RADIUS: f32 = 4.5;
 const PORT_HIT_RADIUS: f32 = 12.0;
 const BOX_SELECT_FILL: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 20);
 const BOX_SELECT_STROKE: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 100);
-const TOOLBAR_WIDTH: f32 = 200.0;
-const PROPERTIES_WIDTH: f32 = 260.0;
+const TOOLBAR_WIDTH: f32 = 220.0;
+const PROPERTIES_WIDTH: f32 = 280.0;
 
 // Extra colors for UI
 const ACCENT: Color32 = Color32::from_rgb(137, 180, 250);
@@ -163,9 +163,9 @@ impl FlowchartApp {
 
         // Set style with more spacing
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        style.spacing.button_padding = egui::vec2(12.0, 6.0);
-        style.spacing.window_margin = egui::Margin::same(12);
+        style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        style.spacing.button_padding = egui::vec2(14.0, 8.0);
+        style.spacing.window_margin = egui::Margin::same(16);
         cc.egui_ctx.set_style(style);
 
         let doc = FlowchartDocument::default();
@@ -194,9 +194,7 @@ impl FlowchartApp {
     // -----------------------------------------------------------------------
 
     fn draw_section_header(ui: &mut egui::Ui, label: &str) {
-        ui.add_space(4.0);
         ui.label(egui::RichText::new(label).size(10.0).color(TEXT_DIM).strong());
-        ui.add_space(2.0);
     }
 
     fn draw_shape_button(&self, ui: &mut egui::Ui, shape: NodeShape, name: &str, width: f32, height: f32) -> egui::Response {
@@ -381,21 +379,22 @@ impl FlowchartApp {
             .exact_width(TOOLBAR_WIDTH)
             .frame(egui::Frame {
                 fill: MANTLE,
-                inner_margin: egui::Margin::same(12),
+                inner_margin: egui::Margin::same(16),
                 stroke: Stroke::new(1.0, SURFACE1),
                 ..Default::default()
             })
             .show(ctx, |ui| {
                 // App title
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Light Figma").size(16.0).strong().color(TEXT_PRIMARY));
+                    ui.label(egui::RichText::new("Light Figma").size(18.0).strong().color(TEXT_PRIMARY));
                 });
-                ui.add_space(8.0);
+                ui.add_space(16.0);
 
-                // File actions as icon-like compact row
+                // File actions
                 Self::draw_section_header(ui, "FILE");
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let btn_size = egui::vec2(76.0, 28.0);
+                    let btn_size = egui::vec2(84.0, 32.0);
                     if ui.add_sized(btn_size, egui::Button::new(
                         egui::RichText::new("Save").size(12.0)
                     )).clicked() {
@@ -430,12 +429,13 @@ impl FlowchartApp {
                         }
                     }
                 });
-                ui.add_space(4.0);
+                ui.add_space(12.0);
 
-                // Export as compact row
+                // Export
                 Self::draw_section_header(ui, "EXPORT");
+                ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
-                    let btn_size = egui::vec2(50.0, 26.0);
+                    let btn_size = egui::vec2(54.0, 30.0);
                     for (label, ext, export_fn) in [
                         ("PNG", "png", "png" as &str),
                         ("SVG", "svg", "svg"),
@@ -465,10 +465,11 @@ impl FlowchartApp {
                         }
                     }
                 });
-                ui.add_space(4.0);
+                ui.add_space(12.0);
 
-                // Tools section
+                // Tools
                 Self::draw_section_header(ui, "TOOLS");
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let select_text = if self.tool == Tool::Select {
                         egui::RichText::new("Select").size(12.0).strong().color(ACCENT)
@@ -481,7 +482,7 @@ impl FlowchartApp {
                         egui::RichText::new("Connect").size(12.0).color(TEXT_SECONDARY)
                     };
 
-                    let btn_size = egui::vec2(76.0, 28.0);
+                    let btn_size = egui::vec2(84.0, 32.0);
                     if ui.add_sized(btn_size, egui::Button::new(select_text)
                         .fill(if self.tool == Tool::Select { SURFACE1 } else { SURFACE0 })
                     ).clicked() {
@@ -493,13 +494,13 @@ impl FlowchartApp {
                         self.tool = Tool::Connect;
                     }
                 });
-                ui.add_space(2.0);
-                ui.label(egui::RichText::new("V Select  \u{00b7}  E Connect").size(9.0).color(TEXT_DIM));
                 ui.add_space(4.0);
+                ui.label(egui::RichText::new("V Select  \u{00b7}  E Connect").size(9.0).color(TEXT_DIM));
+                ui.add_space(12.0);
 
-                // Shapes section with visual preview buttons
+                // Shapes
                 Self::draw_section_header(ui, "SHAPES");
-                ui.add_space(2.0);
+                ui.add_space(6.0);
 
                 let shapes = [
                     (NodeShape::Rectangle, "Rectangle"),
@@ -511,8 +512,8 @@ impl FlowchartApp {
 
                 // Draw shapes in a 2-column grid with visual previews
                 let available_width = ui.available_width();
-                let btn_width = (available_width - 8.0) / 2.0;
-                let btn_height = 48.0;
+                let btn_width = (available_width - 10.0) / 2.0;
+                let btn_height = 56.0;
 
                 let mut i = 0;
                 while i < shapes.len() {
@@ -551,20 +552,21 @@ impl FlowchartApp {
                     i += 2;
                 }
 
-                ui.add_space(8.0);
+                ui.add_space(12.0);
 
-                // View section
+                // View
                 Self::draw_section_header(ui, "VIEW");
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.show_grid, "");
                     ui.label(egui::RichText::new("Grid").size(12.0).color(TEXT_SECONDARY));
-                    ui.add_space(8.0);
+                    ui.add_space(12.0);
                     ui.checkbox(&mut self.snap_to_grid, "");
                     ui.label(egui::RichText::new("Snap").size(12.0).color(TEXT_SECONDARY));
                 });
-                ui.add_space(4.0);
+                ui.add_space(8.0);
 
-                // Zoom control
+                // Zoom
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(format!("{:.0}%", self.viewport.zoom * 100.0))
                         .size(12.0).color(TEXT_DIM).monospace());
@@ -596,13 +598,13 @@ impl FlowchartApp {
             .exact_width(PROPERTIES_WIDTH)
             .frame(egui::Frame {
                 fill: MANTLE,
-                inner_margin: egui::Margin::same(12),
+                inner_margin: egui::Margin::same(16),
                 stroke: Stroke::new(1.0, SURFACE1),
                 ..Default::default()
             })
             .show(ctx, |ui| {
                 ui.label(egui::RichText::new("PROPERTIES").size(10.0).color(TEXT_DIM).strong());
-                ui.add_space(8.0);
+                ui.add_space(12.0);
 
                 let sel_nodes = self.selection.node_ids.len();
                 let sel_edges = self.selection.edge_ids.len();
@@ -631,11 +633,13 @@ impl FlowchartApp {
                             };
                             ui.label(egui::RichText::new(shape_name).size(13.0).strong().color(ACCENT));
                         });
-                        ui.add_space(8.0);
+                        ui.add_space(12.0);
 
                         // Content section
                         Self::draw_section_header(ui, "CONTENT");
+                        ui.add_space(4.0);
                         ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                        ui.add_space(2.0);
                         let label_response = ui.add(egui::TextEdit::singleline(&mut node.label)
                             .desired_width(f32::INFINITY)
                             .font(FontId::proportional(13.0)));
@@ -643,49 +647,56 @@ impl FlowchartApp {
                             label_response.request_focus();
                             self.focus_label_edit = false;
                         }
-                        ui.add_space(4.0);
+                        ui.add_space(8.0);
                         ui.label(egui::RichText::new("Description").size(11.0).color(TEXT_DIM));
+                        ui.add_space(2.0);
                         ui.add(egui::TextEdit::multiline(&mut node.description)
                             .desired_width(f32::INFINITY)
                             .desired_rows(3)
                             .font(FontId::proportional(12.0)));
-                        ui.add_space(8.0);
+                        ui.add_space(16.0);
 
                         // Style section
                         Self::draw_section_header(ui, "STYLE");
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let mut c = to_color32(node.style.fill_color);
                             ui.label(egui::RichText::new("Fill").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut c).changed() {
                                 node.style.fill_color = c.to_array();
                             }
-                            ui.add_space(12.0);
+                            ui.add_space(16.0);
                             let mut b = to_color32(node.style.border_color);
                             ui.label(egui::RichText::new("Border").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut b).changed() {
                                 node.style.border_color = b.to_array();
                             }
                         });
-                        ui.add_space(4.0);
+                        ui.add_space(8.0);
                         ui.add(egui::Slider::new(&mut node.style.border_width, 0.0..=10.0)
                             .text("Border"));
+                        ui.add_space(4.0);
                         ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0)
                             .text("Font"));
-                        ui.add_space(8.0);
+                        ui.add_space(16.0);
 
                         // Size section
                         Self::draw_section_header(ui, "DIMENSIONS");
+                        ui.add_space(4.0);
                         ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
+                        ui.add_space(4.0);
                         ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
                     }
                 } else if sel_edges == 1 {
                     let edge_id = *self.selection.edge_ids.iter().next().unwrap();
                     if let Some(edge) = self.document.find_edge_mut(&edge_id) {
                         ui.label(egui::RichText::new("Edge").size(13.0).strong().color(ACCENT));
-                        ui.add_space(8.0);
+                        ui.add_space(12.0);
 
                         Self::draw_section_header(ui, "CONTENT");
+                        ui.add_space(4.0);
                         ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                        ui.add_space(2.0);
                         ui.add(egui::TextEdit::singleline(&mut edge.label)
                             .desired_width(f32::INFINITY)
                             .font(FontId::proportional(13.0)));
