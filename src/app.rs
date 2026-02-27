@@ -262,6 +262,17 @@ impl FlowchartApp {
                         }
                     }
                 }
+                if ui.button("Export PDF").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("PDF Document", &["pdf"])
+                        .set_file_name("flowchart.pdf")
+                        .save_file()
+                    {
+                        if let Err(e) = export::export_pdf(&self.document, &path) {
+                            eprintln!("PDF export error: {}", e);
+                        }
+                    }
+                }
 
                 ui.separator();
 

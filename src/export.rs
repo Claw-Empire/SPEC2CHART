@@ -1,4 +1,4 @@
-use crate::model::{FlowchartDocument, NodeShape};
+use crate::model::{FlowchartDocument, Node, NodeShape};
 use std::path::Path;
 
 /// Padding around the bounding box in pixels.
@@ -460,4 +460,193 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+// ---------------------------------------------------------------------------
+// PDF Export
+// ---------------------------------------------------------------------------
+
+/// Pixels to millimeters conversion factor (approximately 96 DPI).
+const PX_TO_MM: f32 = 0.264583;
+
+/// Convert an RGBA [u8;4] color to a printpdf RGB Color.
+fn rgba_to_pdf_color(c: [u8; 4]) -> printpdf::Color {
+    printpdf::Color::Rgb(printpdf::Rgb::new(
+        c[0] as f32 / 255.0,
+        c[1] as f32 / 255.0,
+        c[2] as f32 / 255.0,
+        None,
+    ))
+}
+
+/// Draw a single node as a PDF rectangle (or polygon) on the given layer.
+/// PDF coordinates have origin at bottom-left, so we flip Y.
+fn draw_pdf_node(
+    layer: &printpdf::PdfLayerReference,
+    node: &Node,
+    min_x: f32,
+    min_y: f32,
+    page_height_mm: f32,
+) {
+    use printpdf::{Mm, Point, Polygon};
+    use printpdf::path::PaintMode;
+
+    let nx = (node.position[0] - min_x) * PX_TO_MM;
+    let ny = (node.position[1] - min_y) * PX_TO_MM;
+    let nw = node.size[0] * PX_TO_MM;
+    let nh = node.size[1] * PX_TO_MM;
+
+    // Flip Y: PDF bottom-left origin => top_y = page_height - ny, bottom_y = page_height - (ny+nh)
+    let top_y = page_height_mm - ny;
+    let bottom_y = page_height_mm - (ny + nh);
+
+    // Set colors
+    layer.set_fill_color(rgba_to_pdf_color(node.style.fill_color));
+    layer.set_outline_color(rgba_to_pdf_color(node.style.border_color));
+    layer.set_outline_thickness(node.style.border_width * PX_TO_MM);
+
+    match node.shape {
+        NodeShape::Rectangle | NodeShape::RoundedRect => {
+            // printpdf::Rect uses bottom-left (ll) and top-right (ur) in Mm
+            let rect = printpdf::Rect::new(
+                Mm(nx),
+                Mm(bottom_y),
+                Mm(nx + nw),
+                Mm(top_y),
+            )
+            .with_mode(PaintMode::FillStroke);
+            layer.add_rect(rect);
+        }
+        NodeShape::Circle => {
+            // Approximate circle with a polygon (32 sides)
+            let cx = nx + nw / 2.0;
+            let cy = (top_y + bottom_y) / 2.0;
+            let rx = nw / 2.0;
+            let ry = nh / 2.0;
+            let segments = 32;
+            let points: Vec<(Point, bool)> = (0..segments)
+                .map(|i| {
+                    let angle = 2.0 * std::f32::consts::PI * (i as f32) / (segments as f32);
+                    let px = cx + rx * angle.cos();
+                    let py = cy + ry * angle.sin();
+                    (Point::new(Mm(px), Mm(py)), false)
+                })
+                .collect();
+            let polygon = Polygon {
+                rings: vec![points],
+                mode: PaintMode::FillStroke,
+                winding_order: printpdf::path::WindingOrder::NonZero,
+            };
+            layer.add_polygon(polygon);
+        }
+        NodeShape::Diamond => {
+            let cx = nx + nw / 2.0;
+            let cy = (top_y + bottom_y) / 2.0;
+            let hw = nw / 2.0;
+            let hh = nh / 2.0;
+            let points = vec![
+                (Point::new(Mm(cx), Mm(cy + hh)), false),
+                (Point::new(Mm(cx + hw), Mm(cy)), false),
+                (Point::new(Mm(cx), Mm(cy - hh)), false),
+                (Point::new(Mm(cx - hw), Mm(cy)), false),
+            ];
+            let polygon = Polygon {
+                rings: vec![points],
+                mode: PaintMode::FillStroke,
+                winding_order: printpdf::path::WindingOrder::NonZero,
+            };
+            layer.add_polygon(polygon);
+        }
+        NodeShape::Parallelogram => {
+            let skew = nw * 0.15;
+            let points = vec![
+                (Point::new(Mm(nx + skew), Mm(top_y)), false),
+                (Point::new(Mm(nx + nw), Mm(top_y)), false),
+                (Point::new(Mm(nx + nw - skew), Mm(bottom_y)), false),
+                (Point::new(Mm(nx), Mm(bottom_y)), false),
+            ];
+            let polygon = Polygon {
+                rings: vec![points],
+                mode: PaintMode::FillStroke,
+                winding_order: printpdf::path::WindingOrder::NonZero,
+            };
+            layer.add_polygon(polygon);
+        }
+    }
+}
+
+pub fn export_pdf(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
+    use printpdf::{BuiltinFont, Mm, PdfDocument};
+    use std::fs::File;
+    use std::io::BufWriter;
+
+    let (min_x, min_y, max_x, max_y) = bounding_box(doc)
+        .ok_or_else(|| "Nothing to export: document has no nodes".to_string())?;
+
+    let width_mm = (max_x - min_x) * PX_TO_MM;
+    let height_mm = (max_y - min_y) * PX_TO_MM;
+
+    let (pdf_doc, page_idx, layer_idx) =
+        PdfDocument::new("Flowchart", Mm(width_mm), Mm(height_mm), "Layer 1");
+
+    let font = pdf_doc
+        .add_builtin_font(BuiltinFont::Helvetica)
+        .map_err(|e| e.to_string())?;
+
+    let layer = pdf_doc.get_page(page_idx).get_layer(layer_idx);
+
+    // Draw edges first (behind nodes)
+    for edge in &doc.edges {
+        let src_node = doc.find_node(&edge.source.node_id);
+        let tgt_node = doc.find_node(&edge.target.node_id);
+        if let (Some(sn), Some(tn)) = (src_node, tgt_node) {
+            let src = sn.port_position(edge.source.side);
+            let tgt = tn.port_position(edge.target.side);
+            let sx = (src.x - min_x) * PX_TO_MM;
+            let sy = height_mm - (src.y - min_y) * PX_TO_MM;
+            let tx = (tgt.x - min_x) * PX_TO_MM;
+            let ty = height_mm - (tgt.y - min_y) * PX_TO_MM;
+
+            layer.set_outline_color(rgba_to_pdf_color(edge.style.color));
+            layer.set_outline_thickness(edge.style.width * PX_TO_MM);
+
+            let line = printpdf::Line {
+                points: vec![
+                    (printpdf::Point::new(Mm(sx), Mm(sy)), false),
+                    (printpdf::Point::new(Mm(tx), Mm(ty)), false),
+                ],
+                is_closed: false,
+            };
+            layer.add_line(line);
+        }
+    }
+
+    // Draw nodes
+    for node in &doc.nodes {
+        draw_pdf_node(&layer, node, min_x, min_y, height_mm);
+    }
+
+    // Draw node labels
+    for node in &doc.nodes {
+        if !node.label.is_empty() {
+            let nx = (node.position[0] - min_x) * PX_TO_MM;
+            let ny = (node.position[1] - min_y) * PX_TO_MM;
+            let nw = node.size[0] * PX_TO_MM;
+            let nh = node.size[1] * PX_TO_MM;
+
+            // Center text (approximate: use_text places text at baseline-left)
+            // Rough centering: shift left by ~half the text width
+            let font_size_mm = node.style.font_size * PX_TO_MM;
+            let approx_text_width = node.label.len() as f32 * font_size_mm * 0.5;
+            let text_x = nx + nw / 2.0 - approx_text_width / 2.0;
+            let text_y = height_mm - (ny + nh / 2.0) - font_size_mm * 0.3;
+
+            layer.set_fill_color(rgba_to_pdf_color(node.style.text_color));
+            layer.use_text(&node.label, font_size_mm * 2.83465, Mm(text_x), Mm(text_y), &font);
+        }
+    }
+
+    let file = File::create(path).map_err(|e| e.to_string())?;
+    let mut writer = BufWriter::new(file);
+    pdf_doc.save(&mut writer).map_err(|e| e.to_string())
 }
