@@ -3,6 +3,7 @@ use egui::{
     SidePanel, Stroke, StrokeKind, Vec2,
 };
 
+use crate::export;
 use crate::history::UndoStack;
 use crate::io;
 use crate::model::*;
@@ -231,6 +232,26 @@ impl FlowchartApp {
                         }
                     }
                 });
+                ui.separator();
+
+                // Export section
+                ui.vertical_centered(|ui| {
+                    ui.heading("Export");
+                });
+                ui.separator();
+
+                if ui.button("Export PNG").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("PNG Image", &["png"])
+                        .set_file_name("flowchart.png")
+                        .save_file()
+                    {
+                        if let Err(e) = export::export_png(&self.document, &path) {
+                            eprintln!("PNG export error: {}", e);
+                        }
+                    }
+                }
+
                 ui.separator();
 
                 ui.vertical_centered(|ui| {
