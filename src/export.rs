@@ -304,3 +304,160 @@ fn put_pixel_safe(img: &mut image::RgbaImage, x: i32, y: i32, color: image::Rgba
         img.put_pixel(x as u32, y as u32, color);
     }
 }
+
+// ---------------------------------------------------------------------------
+// SVG Export
+// ---------------------------------------------------------------------------
+
+pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
+    let (min_x, min_y, max_x, max_y) = bounding_box(doc)
+        .ok_or_else(|| "Nothing to export: document has no nodes".to_string())?;
+
+    let width = max_x - min_x;
+    let height = max_y - min_y;
+
+    let mut svg = String::new();
+    svg.push_str(&format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">
+<rect width="100%" height="100%" fill="white"/>
+"#,
+        width.ceil() as i32,
+        height.ceil() as i32,
+        width.ceil() as i32,
+        height.ceil() as i32,
+    ));
+
+    // Draw edges first (behind nodes)
+    for edge in &doc.edges {
+        let src_node = doc.find_node(&edge.source.node_id);
+        let tgt_node = doc.find_node(&edge.target.node_id);
+        if let (Some(sn), Some(tn)) = (src_node, tgt_node) {
+            let src = sn.port_position(edge.source.side);
+            let tgt = tn.port_position(edge.target.side);
+            let sx = src.x - min_x;
+            let sy = src.y - min_y;
+            let tx = tgt.x - min_x;
+            let ty = tgt.y - min_y;
+            let color = rgba_to_svg_color(edge.style.color);
+            let opacity = edge.style.color[3] as f32 / 255.0;
+            svg.push_str(&format!(
+                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}" stroke-opacity="{:.2}"/>"#,
+                sx, sy, tx, ty, color, edge.style.width, opacity,
+            ));
+            svg.push('\n');
+
+            // Edge label at midpoint
+            if !edge.label.is_empty() {
+                let mx = (sx + tx) / 2.0;
+                let my = (sy + ty) / 2.0;
+                svg.push_str(&format!(
+                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12" fill="{}">{}</text>"#,
+                    mx, my, color, xml_escape(&edge.label),
+                ));
+                svg.push('\n');
+            }
+        }
+    }
+
+    // Draw nodes
+    for node in &doc.nodes {
+        let nx = node.position[0] - min_x;
+        let ny = node.position[1] - min_y;
+        let nw = node.size[0];
+        let nh = node.size[1];
+
+        let fill = rgba_to_svg_color(node.style.fill_color);
+        let fill_opacity = node.style.fill_color[3] as f32 / 255.0;
+        let stroke = rgba_to_svg_color(node.style.border_color);
+        let stroke_opacity = node.style.border_color[3] as f32 / 255.0;
+        let stroke_width = node.style.border_width;
+
+        match node.shape {
+            NodeShape::Rectangle => {
+                svg.push_str(&format!(
+                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                    nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                ));
+            }
+            NodeShape::RoundedRect => {
+                svg.push_str(&format!(
+                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="10" ry="10" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                    nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                ));
+            }
+            NodeShape::Circle => {
+                let cx = nx + nw / 2.0;
+                let cy = ny + nh / 2.0;
+                let r = nw.min(nh) / 2.0;
+                svg.push_str(&format!(
+                    r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                    cx, cy, r, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                ));
+            }
+            NodeShape::Diamond => {
+                let cx = nx + nw / 2.0;
+                let cy = ny + nh / 2.0;
+                let hw = nw / 2.0;
+                let hh = nh / 2.0;
+                let points_str = format!(
+                    "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                    cx, cy - hh,
+                    cx + hw, cy,
+                    cx, cy + hh,
+                    cx - hw, cy,
+                );
+                svg.push_str(&format!(
+                    r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                    points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                ));
+            }
+            NodeShape::Parallelogram => {
+                let skew = nw * 0.15;
+                let points_str = format!(
+                    "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                    nx + skew, ny,
+                    nx + nw, ny,
+                    nx + nw - skew, ny + nh,
+                    nx, ny + nh,
+                );
+                svg.push_str(&format!(
+                    r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                    points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                ));
+            }
+        }
+        svg.push('\n');
+
+        // Text label centered in node
+        if !node.label.is_empty() {
+            let text_color = rgba_to_svg_color(node.style.text_color);
+            let text_opacity = node.style.text_color[3] as f32 / 255.0;
+            let text_x = nx + nw / 2.0;
+            let text_y = ny + nh / 2.0;
+            svg.push_str(&format!(
+                r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="{:.0}" fill="{}" fill-opacity="{:.2}">{}</text>"#,
+                text_x, text_y, node.style.font_size, text_color, text_opacity, xml_escape(&node.label),
+            ));
+            svg.push('\n');
+        }
+    }
+
+    svg.push_str("</svg>\n");
+
+    std::fs::write(path, svg).map_err(|e| e.to_string())
+}
+
+/// Convert [r,g,b,a] to an SVG-compatible hex color string (ignoring alpha).
+fn rgba_to_svg_color(c: [u8; 4]) -> String {
+    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+}
+
+/// Minimal XML escaping for text content.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}

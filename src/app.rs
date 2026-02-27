@@ -251,6 +251,17 @@ impl FlowchartApp {
                         }
                     }
                 }
+                if ui.button("Export SVG").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("SVG Image", &["svg"])
+                        .set_file_name("flowchart.svg")
+                        .save_file()
+                    {
+                        if let Err(e) = export::export_svg(&self.document, &path) {
+                            eprintln!("SVG export error: {}", e);
+                        }
+                    }
+                }
 
                 ui.separator();
 
