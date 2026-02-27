@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use egui::Pos2;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -114,7 +116,7 @@ impl Node {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Port {
     pub node_id: NodeId,
     pub side: PortSide,
@@ -189,8 +191,8 @@ impl Viewport {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Selection {
-    pub node_ids: Vec<NodeId>,
-    pub edge_ids: Vec<EdgeId>,
+    pub node_ids: HashSet<NodeId>,
+    pub edge_ids: HashSet<EdgeId>,
 }
 
 impl Selection {
@@ -212,23 +214,30 @@ impl Selection {
     }
 
     pub fn toggle_node(&mut self, id: NodeId) {
-        if let Some(pos) = self.node_ids.iter().position(|n| *n == id) {
-            self.node_ids.remove(pos);
-        } else {
-            self.node_ids.push(id);
+        if !self.node_ids.remove(&id) {
+            self.node_ids.insert(id);
+        }
+    }
+
+    pub fn toggle_edge(&mut self, id: EdgeId) {
+        if !self.edge_ids.remove(&id) {
+            self.edge_ids.insert(id);
         }
     }
 
     pub fn select_node(&mut self, id: NodeId) {
         self.clear();
-        self.node_ids.push(id);
+        self.node_ids.insert(id);
     }
 
     pub fn select_edge(&mut self, id: EdgeId) {
         self.clear();
-        self.edge_ids.push(id);
+        self.edge_ids.insert(id);
     }
 }
+
+/// All four port sides, useful for iterating over every port on a node.
+pub const ALL_SIDES: [PortSide; 4] = [PortSide::Top, PortSide::Bottom, PortSide::Left, PortSide::Right];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FlowchartDocument {
@@ -237,6 +246,16 @@ pub struct FlowchartDocument {
 }
 
 impl FlowchartDocument {
+    /// Build a HashMap from NodeId to index for O(1) lookups.
+    /// Call once per frame and reuse for edge drawing and hit testing.
+    pub fn node_index(&self) -> HashMap<NodeId, usize> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id, i))
+            .collect()
+    }
+
     pub fn find_node(&self, id: &NodeId) -> Option<&Node> {
         self.nodes.iter().find(|n| n.id == *id)
     }

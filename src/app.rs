@@ -66,12 +66,11 @@ const TEXT_DIM: Color32 = Color32::from_rgb(108, 112, 134);
 const SURFACE0: Color32 = Color32::from_rgb(49, 50, 68);
 const SURFACE1: Color32 = Color32::from_rgb(69, 71, 90);
 const MANTLE: Color32 = Color32::from_rgb(24, 24, 37);
-#[allow(dead_code)]
-const GREEN: Color32 = Color32::from_rgb(166, 227, 161);
-#[allow(dead_code)]
-const PEACH: Color32 = Color32::from_rgb(250, 179, 135);
-#[allow(dead_code)]
-const RED: Color32 = Color32::from_rgb(243, 139, 168);
+
+/// Convert an [u8; 4] RGBA array to an egui Color32, avoiding repeated verbose calls.
+fn to_color32(rgba: [u8; 4]) -> Color32 {
+    Color32::from_rgba_premultiplied(rgba[0], rgba[1], rgba[2], rgba[3])
+}
 
 // ---------------------------------------------------------------------------
 // FlowchartApp
@@ -303,8 +302,8 @@ impl FlowchartApp {
         if ctx.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
             && !self.selection.is_empty()
         {
-            let node_ids: Vec<NodeId> = self.selection.node_ids.clone();
-            let edge_ids: Vec<EdgeId> = self.selection.edge_ids.clone();
+            let node_ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let edge_ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
             for id in &node_ids {
                 self.document.remove_node(id);
             }
@@ -336,7 +335,7 @@ impl FlowchartApp {
                 node.id = NodeId::new();
                 let pos = node.pos() + offset;
                 node.set_pos(pos);
-                self.selection.node_ids.push(node.id);
+                self.selection.node_ids.insert(node.id);
                 self.document.nodes.push(node);
             }
             self.history.push(&self.document);
@@ -346,10 +345,10 @@ impl FlowchartApp {
         if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.matches_exact(cmd)) {
             self.selection.clear();
             for node in &self.document.nodes {
-                self.selection.node_ids.push(node.id);
+                self.selection.node_ids.insert(node.id);
             }
             for edge in &self.document.edges {
-                self.selection.edge_ids.push(edge.id);
+                self.selection.edge_ids.insert(edge.id);
             }
         }
     }
@@ -426,7 +425,7 @@ impl FlowchartApp {
                         )).clicked() {
                             if let Some(path) = rfd::FileDialog::new()
                                 .add_filter(label, &[ext])
-                                .set_file_name(&format!("flowchart.{}", ext))
+                                .set_file_name(format!("flowchart.{}", ext))
                                 .save_file()
                             {
                                 let result = match export_fn {
@@ -501,7 +500,7 @@ impl FlowchartApp {
                                     let center_canvas = self.viewport.screen_to_canvas(center_screen);
                                     let node = Node::new(shape, center_canvas);
                                     self.selection.clear();
-                                    self.selection.node_ids.push(node.id);
+                                    self.selection.node_ids.insert(node.id);
                                     self.document.nodes.push(node);
                                     self.history.push(&self.document);
                                 }
@@ -593,7 +592,7 @@ impl FlowchartApp {
                 } else if total > 1 {
                     ui.label(egui::RichText::new(format!("{} items selected", total)).size(13.0).color(TEXT_SECONDARY));
                 } else if sel_nodes == 1 {
-                    let node_id = self.selection.node_ids[0];
+                    let node_id = *self.selection.node_ids.iter().next().unwrap();
                     if let Some(node) = self.document.find_node_mut(&node_id) {
                         // Node type badge
                         ui.horizontal(|ui| {
@@ -625,19 +624,13 @@ impl FlowchartApp {
                         // Style section
                         Self::draw_section_header(ui, "STYLE");
                         ui.horizontal(|ui| {
-                            let mut c = Color32::from_rgba_premultiplied(
-                                node.style.fill_color[0], node.style.fill_color[1],
-                                node.style.fill_color[2], node.style.fill_color[3],
-                            );
+                            let mut c = to_color32(node.style.fill_color);
                             ui.label(egui::RichText::new("Fill").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut c).changed() {
                                 node.style.fill_color = c.to_array();
                             }
                             ui.add_space(12.0);
-                            let mut b = Color32::from_rgba_premultiplied(
-                                node.style.border_color[0], node.style.border_color[1],
-                                node.style.border_color[2], node.style.border_color[3],
-                            );
+                            let mut b = to_color32(node.style.border_color);
                             ui.label(egui::RichText::new("Border").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut b).changed() {
                                 node.style.border_color = b.to_array();
@@ -656,7 +649,7 @@ impl FlowchartApp {
                         ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
                     }
                 } else if sel_edges == 1 {
-                    let edge_id = self.selection.edge_ids[0];
+                    let edge_id = *self.selection.edge_ids.iter().next().unwrap();
                     if let Some(edge) = self.document.find_edge_mut(&edge_id) {
                         ui.label(egui::RichText::new("Edge").size(13.0).strong().color(ACCENT));
                         ui.add_space(8.0);
@@ -670,10 +663,7 @@ impl FlowchartApp {
 
                         Self::draw_section_header(ui, "STYLE");
                         ui.horizontal(|ui| {
-                            let mut c = Color32::from_rgba_premultiplied(
-                                edge.style.color[0], edge.style.color[1],
-                                edge.style.color[2], edge.style.color[3],
-                            );
+                            let mut c = to_color32(edge.style.color);
                             ui.label(egui::RichText::new("Color").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut c).changed() {
                                 edge.style.color = c.to_array();
@@ -776,15 +766,7 @@ impl FlowchartApp {
                         if let Some(edge_id) = self.hit_test_edge(canvas_pos) {
                             let cmd_held = ui.ctx().input(|i| i.modifiers.command);
                             if cmd_held {
-                                self.selection.toggle_node(NodeId(edge_id.0)); // edge toggle not in API so handle manually
-                                // Actually toggle edge:
-                                if self.selection.contains_edge(&edge_id) {
-                                    self.selection
-                                        .edge_ids
-                                        .retain(|e| *e != edge_id);
-                                } else {
-                                    self.selection.edge_ids.push(edge_id);
-                                }
+                                self.selection.toggle_edge(edge_id);
                             } else {
                                 self.selection.select_edge(edge_id);
                             }
@@ -868,7 +850,7 @@ impl FlowchartApp {
                         if let Some(target) = self.hit_test_port(canvas_pos) {
                             // Don't connect a node to itself on the same port
                             if source.node_id != target.node_id {
-                                let edge = Edge::new(source.clone(), target);
+                                let edge = Edge::new(*source, target);
                                 self.document.edges.push(edge);
                                 self.history.push(&self.document);
                             }
@@ -881,7 +863,7 @@ impl FlowchartApp {
                             if sel_rect.intersects(node.rect())
                                 && !self.selection.contains_node(&node.id)
                             {
-                                self.selection.node_ids.push(node.id);
+                                self.selection.node_ids.insert(node.id);
                             }
                         }
                     }
@@ -895,7 +877,7 @@ impl FlowchartApp {
                             }
                             let node = Node::new(*shape, canvas_pos);
                             self.selection.clear();
-                            self.selection.node_ids.push(node.id);
+                            self.selection.node_ids.insert(node.id);
                             self.document.nodes.push(node);
                             self.history.push(&self.document);
                         }
@@ -1109,7 +1091,8 @@ impl FlowchartApp {
         let vp_rect = Rect::from_two_pos(vp_min, vp_max);
 
         // Clip the viewport rect to the minimap bounds
-        if let Some(clipped) = vp_rect.intersect(minimap_rect).is_positive().then(|| vp_rect.intersect(minimap_rect)) {
+        let clipped = vp_rect.intersect(minimap_rect);
+        if clipped.is_positive() {
             painter.rect_filled(
                 clipped,
                 CornerRadius::ZERO,
@@ -1134,6 +1117,14 @@ impl FlowchartApp {
 
         // Don't draw grid if too small
         if grid_screen < 8.0 {
+            return;
+        }
+
+        // Limit grid drawing to prevent jank at low zoom
+        let max_dots = 5000;
+        let cols = (canvas_rect.width() / grid_screen) as usize;
+        let rows = (canvas_rect.height() / grid_screen) as usize;
+        if cols * rows > max_dots {
             return;
         }
 
@@ -1170,23 +1161,13 @@ impl FlowchartApp {
         let shadow_color = Color32::from_rgba_premultiplied(0, 0, 0, 40);
         painter.rect_filled(shadow_rect, CornerRadius::same(4), shadow_color);
 
-        let fill = Color32::from_rgba_premultiplied(
-            node.style.fill_color[0],
-            node.style.fill_color[1],
-            node.style.fill_color[2],
-            node.style.fill_color[3],
-        );
+        let fill = to_color32(node.style.fill_color);
 
         let is_selected = self.selection.contains_node(&node.id);
         let border_color = if is_selected {
             SELECTION_COLOR
         } else {
-            Color32::from_rgba_premultiplied(
-                node.style.border_color[0],
-                node.style.border_color[1],
-                node.style.border_color[2],
-                node.style.border_color[3],
-            )
+            to_color32(node.style.border_color)
         };
         let border_width = if is_selected {
             node.style.border_width.max(2.5)
@@ -1241,12 +1222,7 @@ impl FlowchartApp {
         }
 
         // Draw label text centered
-        let text_color = Color32::from_rgba_premultiplied(
-            node.style.text_color[0],
-            node.style.text_color[1],
-            node.style.text_color[2],
-            node.style.text_color[3],
-        );
+        let text_color = to_color32(node.style.text_color);
         let font_size = node.style.font_size * self.viewport.zoom;
         if font_size > 4.0 {
             painter.text(
@@ -1259,8 +1235,7 @@ impl FlowchartApp {
         }
 
         // Draw port circles on all 4 sides
-        let port_sides = [PortSide::Top, PortSide::Bottom, PortSide::Left, PortSide::Right];
-        for side in &port_sides {
+        for side in &ALL_SIDES {
             let canvas_port = node.port_position(*side);
             let screen_port = self.viewport.canvas_to_screen(canvas_port);
             let r = PORT_RADIUS * self.viewport.zoom.sqrt();
@@ -1291,12 +1266,7 @@ impl FlowchartApp {
         let edge_color = if is_selected {
             SELECTION_COLOR
         } else {
-            Color32::from_rgba_premultiplied(
-                edge.style.color[0],
-                edge.style.color[1],
-                edge.style.color[2],
-                edge.style.color[3],
-            )
+            to_color32(edge.style.color)
         };
         let width = edge.style.width * self.viewport.zoom.sqrt();
 
@@ -1383,10 +1353,9 @@ impl FlowchartApp {
 
     fn hit_test_port(&self, canvas_pos: Pos2) -> Option<Port> {
         let threshold = PORT_HIT_RADIUS / self.viewport.zoom;
-        let sides = [PortSide::Top, PortSide::Bottom, PortSide::Left, PortSide::Right];
         // Iterate in reverse so topmost node wins
         for node in self.document.nodes.iter().rev() {
-            for side in &sides {
+            for side in &ALL_SIDES {
                 let port_pos = node.port_position(*side);
                 if (canvas_pos - port_pos).length() < threshold {
                     return Some(Port {
@@ -1408,7 +1377,7 @@ impl FlowchartApp {
                 let src = sn.port_position(edge.source.side);
                 let tgt = tn.port_position(edge.target.side);
                 let offset = 60.0;
-                let (cp1, cp2) = control_points_for_side_canvas(src, tgt, edge.source.side, offset);
+                let (cp1, cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
                 // Sample the bezier at several points and check distance
                 for i in 0..=20 {
                     let t = i as f32 / 20.0;
@@ -1476,16 +1445,6 @@ fn control_points_for_side(
     let len = (dx * dx + dy * dy).sqrt().max(1.0);
     let cp2 = Pos2::new(tgt.x + dx / len * offset, tgt.y + dy / len * offset);
     (cp1, cp2)
-}
-
-/// Same as control_points_for_side but for canvas-space coords (used in edge hit testing).
-fn control_points_for_side_canvas(
-    src: Pos2,
-    tgt: Pos2,
-    source_side: PortSide,
-    offset: f32,
-) -> (Pos2, Pos2) {
-    control_points_for_side(src, tgt, source_side, offset)
 }
 
 /// Evaluate a cubic bezier at parameter t in [0,1].

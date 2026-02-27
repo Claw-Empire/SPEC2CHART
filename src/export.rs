@@ -46,8 +46,8 @@ pub fn export_png(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
     let height = (max_y - min_y).ceil() as u32;
 
     // Clamp to reasonable size
-    let width = width.min(8000).max(1);
-    let height = height.min(8000).max(1);
+    let width = width.clamp(1, 8000);
+    let height = height.clamp(1, 8000);
 
     let mut img = image::RgbaImage::from_pixel(width, height, image::Rgba([255, 255, 255, 255]));
 
