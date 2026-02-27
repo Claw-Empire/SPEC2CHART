@@ -1,8 +1,10 @@
+use std::collections::VecDeque;
+
 use crate::model::FlowchartDocument;
 
 #[derive(Debug, Clone)]
 pub struct UndoStack {
-    states: Vec<FlowchartDocument>,
+    states: VecDeque<FlowchartDocument>,
     current: usize,
     max_size: usize,
 }
@@ -10,7 +12,7 @@ pub struct UndoStack {
 impl UndoStack {
     pub fn new(max_size: usize) -> Self {
         Self {
-            states: Vec::new(),
+            states: VecDeque::new(),
             current: 0,
             max_size,
         }
@@ -18,9 +20,9 @@ impl UndoStack {
 
     pub fn push(&mut self, doc: &FlowchartDocument) {
         self.states.truncate(self.current);
-        self.states.push(doc.clone());
+        self.states.push_back(doc.clone());
         if self.states.len() > self.max_size {
-            self.states.remove(0);
+            self.states.pop_front();
         }
         self.current = self.states.len();
     }

@@ -905,14 +905,38 @@ impl FlowchartApp {
             }
         }
 
-        // ---- Draw edges ----
+        // Build index once per frame for O(1) node lookups
+        let node_idx = self.document.node_index();
+
+        // Get hover position for port visibility optimization
+        let hover_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+
+        // ---- Draw edges (only visible ones) ----
         for edge in &self.document.edges {
-            self.draw_edge(edge, &painter);
+            // Quick visibility check for edges
+            let src_visible = node_idx.get(&edge.source.node_id).and_then(|&i| self.document.nodes.get(i))
+                .map(|n| {
+                    let sr = Rect::from_min_size(self.viewport.canvas_to_screen(n.pos()), n.size_vec() * self.viewport.zoom);
+                    sr.expand(100.0).intersects(canvas_rect)
+                }).unwrap_or(false);
+            let tgt_visible = node_idx.get(&edge.target.node_id).and_then(|&i| self.document.nodes.get(i))
+                .map(|n| {
+                    let sr = Rect::from_min_size(self.viewport.canvas_to_screen(n.pos()), n.size_vec() * self.viewport.zoom);
+                    sr.expand(100.0).intersects(canvas_rect)
+                }).unwrap_or(false);
+            if src_visible || tgt_visible {
+                self.draw_edge(edge, &painter, &node_idx);
+            }
         }
 
-        // ---- Draw nodes ----
+        // ---- Draw nodes (only visible ones) ----
         for node in &self.document.nodes {
-            self.draw_node(node, &painter);
+            let screen_pos = self.viewport.canvas_to_screen(node.pos());
+            let screen_size = node.size_vec() * self.viewport.zoom;
+            let screen_rect = Rect::from_min_size(screen_pos, screen_size).expand(20.0);
+            if screen_rect.intersects(canvas_rect) {
+                self.draw_node(node, &painter, hover_pos);
+            }
         }
 
         // ---- Draw previews ----
@@ -940,7 +964,7 @@ impl FlowchartApp {
             current_screen,
         } = &self.drag
         {
-            if let Some(src_node) = self.document.find_node(&source.node_id) {
+            if let Some(src_node) = node_idx.get(&source.node_id).and_then(|&i| self.document.nodes.get(i)) {
                 let src_pos = src_node.port_position(source.side);
                 let src_screen = self.viewport.canvas_to_screen(src_pos);
                 let dst = *current_screen;
@@ -1150,7 +1174,7 @@ impl FlowchartApp {
     // Draw Node
     // -----------------------------------------------------------------------
 
-    fn draw_node(&self, node: &Node, painter: &egui::Painter) {
+    fn draw_node(&self, node: &Node, painter: &egui::Painter, hover_pos: Option<Pos2>) {
         let top_left = self.viewport.canvas_to_screen(node.pos());
         let size = node.size_vec() * self.viewport.zoom;
         let screen_rect = Rect::from_min_size(top_left, size);
@@ -1234,13 +1258,23 @@ impl FlowchartApp {
             );
         }
 
-        // Draw port circles on all 4 sides
-        for side in &ALL_SIDES {
-            let canvas_port = node.port_position(*side);
-            let screen_port = self.viewport.canvas_to_screen(canvas_port);
-            let r = PORT_RADIUS * self.viewport.zoom.sqrt();
-            painter.circle_filled(screen_port, r, PORT_FILL);
-            painter.circle_stroke(screen_port, r, Stroke::new(1.5, SELECTION_COLOR));
+        // Draw port circles - only when mouse nearby or in Connect mode
+        let show_ports = self.tool == Tool::Connect || {
+            if let Some(hover) = hover_pos {
+                let expanded = screen_rect.expand(30.0);
+                expanded.contains(hover)
+            } else {
+                false
+            }
+        };
+        if show_ports {
+            for side in &ALL_SIDES {
+                let canvas_port = node.port_position(*side);
+                let screen_port = self.viewport.canvas_to_screen(canvas_port);
+                let r = PORT_RADIUS * self.viewport.zoom.sqrt();
+                painter.circle_filled(screen_port, r, PORT_FILL);
+                painter.circle_stroke(screen_port, r, Stroke::new(1.5, SELECTION_COLOR));
+            }
         }
     }
 
@@ -1248,9 +1282,9 @@ impl FlowchartApp {
     // Draw Edge
     // -----------------------------------------------------------------------
 
-    fn draw_edge(&self, edge: &Edge, painter: &egui::Painter) {
-        let src_node = self.document.find_node(&edge.source.node_id);
-        let tgt_node = self.document.find_node(&edge.target.node_id);
+    fn draw_edge(&self, edge: &Edge, painter: &egui::Painter, node_idx: &std::collections::HashMap<NodeId, usize>) {
+        let src_node = node_idx.get(&edge.source.node_id).and_then(|&i| self.document.nodes.get(i));
+        let tgt_node = node_idx.get(&edge.target.node_id).and_then(|&i| self.document.nodes.get(i));
         let (src_node, tgt_node) = match (src_node, tgt_node) {
             (Some(s), Some(t)) => (s, t),
             _ => return,
@@ -1410,6 +1444,19 @@ impl FlowchartApp {
 impl eframe::App for FlowchartApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_shortcuts(ctx);
+
+        // Only repaint continuously during drag operations
+        match self.drag {
+            DragState::None => {
+                // Idle: repaint at low rate for cursor changes
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            _ => {
+                // Active drag: repaint continuously
+                ctx.request_repaint();
+            }
+        }
+
         self.draw_toolbar(ctx);
         self.draw_properties_panel(ctx);
 
