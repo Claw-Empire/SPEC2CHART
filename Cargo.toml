@@ -18,5 +18,4 @@ rfd = "0.15"
 [package.metadata.bundle]
 name = "Light Figma"
 identifier = "com.lightfigma.app"
-icon = ["icons/icon.icns"]
 category = "public.app-category.graphics-design"
