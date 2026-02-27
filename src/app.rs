@@ -46,16 +46,32 @@ pub enum DragState {
 // Constants
 // ---------------------------------------------------------------------------
 
-const CANVAS_BG: Color32 = Color32::from_rgb(30, 30, 30);
-const GRID_COLOR: Color32 = Color32::from_rgba_premultiplied(60, 60, 60, 40);
-const SELECTION_COLOR: Color32 = Color32::from_rgb(80, 160, 255);
-const PORT_FILL: Color32 = Color32::WHITE;
-const PORT_RADIUS: f32 = 5.0;
+// Catppuccin Mocha palette
+const CANVAS_BG: Color32 = Color32::from_rgb(30, 30, 46);
+const GRID_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 50);
+const SELECTION_COLOR: Color32 = Color32::from_rgb(137, 180, 250);
+const PORT_FILL: Color32 = Color32::from_rgb(49, 50, 68);
+const PORT_RADIUS: f32 = 4.5;
 const PORT_HIT_RADIUS: f32 = 12.0;
-const BOX_SELECT_FILL: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 30);
-const BOX_SELECT_STROKE: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 120);
-const TOOLBAR_WIDTH: f32 = 180.0;
-const PROPERTIES_WIDTH: f32 = 240.0;
+const BOX_SELECT_FILL: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 20);
+const BOX_SELECT_STROKE: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 100);
+const TOOLBAR_WIDTH: f32 = 200.0;
+const PROPERTIES_WIDTH: f32 = 260.0;
+
+// Extra colors for UI
+const ACCENT: Color32 = Color32::from_rgb(137, 180, 250);
+const TEXT_PRIMARY: Color32 = Color32::from_rgb(205, 214, 244);
+const TEXT_SECONDARY: Color32 = Color32::from_rgb(166, 173, 200);
+const TEXT_DIM: Color32 = Color32::from_rgb(108, 112, 134);
+const SURFACE0: Color32 = Color32::from_rgb(49, 50, 68);
+const SURFACE1: Color32 = Color32::from_rgb(69, 71, 90);
+const MANTLE: Color32 = Color32::from_rgb(24, 24, 37);
+#[allow(dead_code)]
+const GREEN: Color32 = Color32::from_rgb(166, 227, 161);
+#[allow(dead_code)]
+const PEACH: Color32 = Color32::from_rgb(250, 179, 135);
+#[allow(dead_code)]
+const RED: Color32 = Color32::from_rgb(243, 139, 168);
 
 // ---------------------------------------------------------------------------
 // FlowchartApp
@@ -77,7 +93,76 @@ pub struct FlowchartApp {
 }
 
 impl FlowchartApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Set custom dark theme
+        let mut visuals = egui::Visuals::dark();
+
+        // Catppuccin Mocha-inspired palette
+        let base = Color32::from_rgb(30, 30, 46);        // #1e1e2e
+        let mantle = Color32::from_rgb(24, 24, 37);      // #181825
+        let crust = Color32::from_rgb(17, 17, 27);       // #11111b
+        let surface0 = Color32::from_rgb(49, 50, 68);    // #313244
+        let surface1 = Color32::from_rgb(69, 71, 90);    // #45475a
+        let surface2 = Color32::from_rgb(88, 91, 112);   // #585b70
+        let text = Color32::from_rgb(205, 214, 244);      // #cdd6f4
+        let subtext = Color32::from_rgb(166, 173, 200);   // #a6adc8
+        let blue = Color32::from_rgb(137, 180, 250);      // #89b4fa
+        let lavender = Color32::from_rgb(180, 190, 254);  // #b4befe
+
+        visuals.panel_fill = mantle;
+        visuals.window_fill = base;
+        visuals.extreme_bg_color = crust;
+        visuals.faint_bg_color = surface0;
+
+        // Widget styling
+        visuals.widgets.noninteractive.bg_fill = surface0;
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, subtext);
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(0.5, surface1);
+        visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.inactive.bg_fill = surface0;
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, text);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(0.5, surface1);
+        visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.hovered.bg_fill = surface1;
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, text);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, blue);
+        visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.active.bg_fill = surface2;
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0, text);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0, lavender);
+        visuals.widgets.active.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.open.bg_fill = surface1;
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0, text);
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0, blue);
+        visuals.widgets.open.corner_radius = CornerRadius::same(6);
+
+        visuals.selection.bg_fill = Color32::from_rgba_premultiplied(137, 180, 250, 40);
+        visuals.selection.stroke = Stroke::new(1.0, blue);
+
+        visuals.window_corner_radius = CornerRadius::same(8);
+        visuals.window_shadow = egui::Shadow {
+            offset: [0, 4],
+            blur: 12,
+            spread: 0,
+            color: Color32::from_rgba_premultiplied(0, 0, 0, 60),
+        };
+        visuals.window_stroke = Stroke::new(1.0, surface1);
+
+        visuals.override_text_color = Some(text);
+
+        cc.egui_ctx.set_visuals(visuals);
+
+        // Set style with more spacing
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(12.0, 6.0);
+        style.spacing.window_margin = egui::Margin::same(12);
+        cc.egui_ctx.set_style(style);
+
         let doc = FlowchartDocument::default();
         let mut history = UndoStack::new(100);
         history.push(&doc);
@@ -94,6 +179,88 @@ impl FlowchartApp {
             grid_size: 20.0,
             space_held: false,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // UI Helpers
+    // -----------------------------------------------------------------------
+
+    fn draw_section_header(ui: &mut egui::Ui, label: &str) {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(label).size(10.0).color(TEXT_DIM).strong());
+        ui.add_space(2.0);
+    }
+
+    fn draw_shape_button(&self, ui: &mut egui::Ui, shape: NodeShape, name: &str, width: f32, height: f32) -> egui::Response {
+        let (response, painter) = ui.allocate_painter(egui::vec2(width, height), Sense::click_and_drag());
+        let rect = response.rect;
+
+        // Background
+        let bg = if response.hovered() { SURFACE1 } else { SURFACE0 };
+        painter.rect_filled(rect, CornerRadius::same(6), bg);
+        if response.hovered() {
+            painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+        }
+
+        // Draw shape preview in the upper portion
+        let preview_center = Pos2::new(rect.center().x, rect.min.y + height * 0.38);
+        let pw = width * 0.35;
+        let ph = height * 0.32;
+        let shape_stroke = Stroke::new(1.5, ACCENT);
+        let shape_fill = Color32::from_rgba_premultiplied(137, 180, 250, 15);
+
+        match shape {
+            NodeShape::Rectangle => {
+                let r = Rect::from_center_size(preview_center, egui::vec2(pw, ph));
+                painter.rect_filled(r, CornerRadius::ZERO, shape_fill);
+                painter.rect_stroke(r, CornerRadius::ZERO, shape_stroke, StrokeKind::Outside);
+            }
+            NodeShape::RoundedRect => {
+                let r = Rect::from_center_size(preview_center, egui::vec2(pw, ph));
+                painter.rect_filled(r, CornerRadius::same(4), shape_fill);
+                painter.rect_stroke(r, CornerRadius::same(4), shape_stroke, StrokeKind::Outside);
+            }
+            NodeShape::Diamond => {
+                let c = preview_center;
+                let hw = pw * 0.5;
+                let hh = ph * 0.5;
+                let pts = vec![
+                    Pos2::new(c.x, c.y - hh),
+                    Pos2::new(c.x + hw, c.y),
+                    Pos2::new(c.x, c.y + hh),
+                    Pos2::new(c.x - hw, c.y),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+            NodeShape::Circle => {
+                let r = pw.min(ph) * 0.5;
+                painter.circle_filled(preview_center, r, shape_fill);
+                painter.circle_stroke(preview_center, r, shape_stroke);
+            }
+            NodeShape::Parallelogram => {
+                let skew = pw * 0.2;
+                let half_w = pw * 0.5;
+                let half_h = ph * 0.5;
+                let pts = vec![
+                    Pos2::new(preview_center.x - half_w + skew, preview_center.y - half_h),
+                    Pos2::new(preview_center.x + half_w, preview_center.y - half_h),
+                    Pos2::new(preview_center.x + half_w - skew, preview_center.y + half_h),
+                    Pos2::new(preview_center.x - half_w, preview_center.y + half_h),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+        }
+
+        // Label below shape
+        painter.text(
+            Pos2::new(rect.center().x, rect.max.y - 10.0),
+            Align2::CENTER_CENTER,
+            name,
+            FontId::proportional(10.0),
+            if response.hovered() { TEXT_PRIMARY } else { TEXT_SECONDARY },
+        );
+
+        response
     }
 
     // -----------------------------------------------------------------------
@@ -195,15 +362,26 @@ impl FlowchartApp {
         SidePanel::left("toolbar")
             .resizable(false)
             .exact_width(TOOLBAR_WIDTH)
+            .frame(egui::Frame {
+                fill: MANTLE,
+                inner_margin: egui::Margin::same(12),
+                stroke: Stroke::new(1.0, SURFACE1),
+                ..Default::default()
+            })
             .show(ctx, |ui| {
-                // File section
-                ui.vertical_centered(|ui| {
-                    ui.heading("File");
-                });
-                ui.separator();
-
+                // App title
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
+                    ui.label(egui::RichText::new("Light Figma").size(16.0).strong().color(TEXT_PRIMARY));
+                });
+                ui.add_space(8.0);
+
+                // File actions as icon-like compact row
+                Self::draw_section_header(ui, "FILE");
+                ui.horizontal(|ui| {
+                    let btn_size = egui::vec2(76.0, 28.0);
+                    if ui.add_sized(btn_size, egui::Button::new(
+                        egui::RichText::new("Save").size(12.0)
+                    )).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("Flowchart", &["flow"])
                             .set_file_name("untitled.flow")
@@ -214,7 +392,9 @@ impl FlowchartApp {
                             }
                         }
                     }
-                    if ui.button("Load").clicked() {
+                    if ui.add_sized(btn_size, egui::Button::new(
+                        egui::RichText::new("Open").size(12.0)
+                    )).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("Flowchart", &["flow"])
                             .pick_file()
@@ -225,124 +405,159 @@ impl FlowchartApp {
                                     self.selection.clear();
                                     self.history.push(&self.document);
                                 }
-                                Err(e) => {
-                                    eprintln!("Load error: {}", e);
+                                Err(e) => eprintln!("Load error: {}", e),
+                            }
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Export as compact row
+                Self::draw_section_header(ui, "EXPORT");
+                ui.horizontal_wrapped(|ui| {
+                    let btn_size = egui::vec2(50.0, 26.0);
+                    for (label, ext, export_fn) in [
+                        ("PNG", "png", "png" as &str),
+                        ("SVG", "svg", "svg"),
+                        ("PDF", "pdf", "pdf"),
+                    ] {
+                        if ui.add_sized(btn_size, egui::Button::new(
+                            egui::RichText::new(label).size(11.0)
+                        )).clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter(label, &[ext])
+                                .set_file_name(&format!("flowchart.{}", ext))
+                                .save_file()
+                            {
+                                let result = match export_fn {
+                                    "png" => export::export_png(&self.document, &path),
+                                    "svg" => export::export_svg(&self.document, &path),
+                                    "pdf" => export::export_pdf(&self.document, &path),
+                                    _ => Ok(()),
+                                };
+                                if let Err(e) = result {
+                                    eprintln!("Export error: {}", e);
                                 }
                             }
                         }
                     }
                 });
-                ui.separator();
+                ui.add_space(4.0);
 
-                // Export section
-                ui.vertical_centered(|ui| {
-                    ui.heading("Export");
-                });
-                ui.separator();
-
-                if ui.button("Export PNG").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("PNG Image", &["png"])
-                        .set_file_name("flowchart.png")
-                        .save_file()
-                    {
-                        if let Err(e) = export::export_png(&self.document, &path) {
-                            eprintln!("PNG export error: {}", e);
-                        }
-                    }
-                }
-                if ui.button("Export SVG").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("SVG Image", &["svg"])
-                        .set_file_name("flowchart.svg")
-                        .save_file()
-                    {
-                        if let Err(e) = export::export_svg(&self.document, &path) {
-                            eprintln!("SVG export error: {}", e);
-                        }
-                    }
-                }
-                if ui.button("Export PDF").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("PDF Document", &["pdf"])
-                        .set_file_name("flowchart.pdf")
-                        .save_file()
-                    {
-                        if let Err(e) = export::export_pdf(&self.document, &path) {
-                            eprintln!("PDF export error: {}", e);
-                        }
-                    }
-                }
-
-                ui.separator();
-
-                ui.vertical_centered(|ui| {
-                    ui.heading("Tools");
-                });
-                ui.separator();
-
-                // Tool selector
+                // Tools section
+                Self::draw_section_header(ui, "TOOLS");
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.tool, Tool::Select, "Select");
-                    ui.selectable_value(&mut self.tool, Tool::Connect, "Connect");
-                });
-                ui.separator();
+                    let select_text = if self.tool == Tool::Select {
+                        egui::RichText::new("Select").size(12.0).strong().color(ACCENT)
+                    } else {
+                        egui::RichText::new("Select").size(12.0).color(TEXT_SECONDARY)
+                    };
+                    let connect_text = if self.tool == Tool::Connect {
+                        egui::RichText::new("Connect").size(12.0).strong().color(ACCENT)
+                    } else {
+                        egui::RichText::new("Connect").size(12.0).color(TEXT_SECONDARY)
+                    };
 
-                // Shape buttons
-                ui.label("Add Shape (click or drag)");
+                    let btn_size = egui::vec2(76.0, 28.0);
+                    if ui.add_sized(btn_size, egui::Button::new(select_text)
+                        .fill(if self.tool == Tool::Select { SURFACE1 } else { SURFACE0 })
+                    ).clicked() {
+                        self.tool = Tool::Select;
+                    }
+                    if ui.add_sized(btn_size, egui::Button::new(connect_text)
+                        .fill(if self.tool == Tool::Connect { SURFACE1 } else { SURFACE0 })
+                    ).clicked() {
+                        self.tool = Tool::Connect;
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Shapes section with visual preview buttons
+                Self::draw_section_header(ui, "SHAPES");
+                ui.add_space(2.0);
+
                 let shapes = [
                     (NodeShape::Rectangle, "Rectangle"),
-                    (NodeShape::RoundedRect, "Rounded Rect"),
+                    (NodeShape::RoundedRect, "Rounded"),
                     (NodeShape::Diamond, "Diamond"),
                     (NodeShape::Circle, "Circle"),
-                    (NodeShape::Parallelogram, "Parallelogram"),
+                    (NodeShape::Parallelogram, "Parallel"),
                 ];
-                for (shape, name) in &shapes {
-                    let response = ui.button(*name);
-                    if response.clicked() {
-                        // Add node at center of canvas viewport
-                        let center_screen = Pos2::new(640.0, 400.0);
-                        let center_canvas = self.viewport.screen_to_canvas(center_screen);
-                        let node = Node::new(*shape, center_canvas);
-                        self.selection.clear();
-                        self.selection.node_ids.push(node.id);
-                        self.document.nodes.push(node);
-                        self.history.push(&self.document);
-                    }
-                    if response.drag_started() {
-                        if let Some(pos) = response.interact_pointer_pos() {
-                            self.drag = DragState::DraggingNewNode {
-                                shape: *shape,
-                                current_screen: pos,
-                            };
-                        }
-                    }
-                    if response.dragged() {
-                        if let DragState::DraggingNewNode {
-                            ref mut current_screen,
-                            ..
-                        } = self.drag
-                        {
-                            if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
-                                *current_screen = pos;
+
+                // Draw shapes in a 2-column grid with visual previews
+                let available_width = ui.available_width();
+                let btn_width = (available_width - 8.0) / 2.0;
+                let btn_height = 48.0;
+
+                let mut i = 0;
+                while i < shapes.len() {
+                    ui.horizontal(|ui| {
+                        for j in 0..2 {
+                            if i + j < shapes.len() {
+                                let (shape, name) = shapes[i + j];
+                                let response = self.draw_shape_button(ui, shape, name, btn_width, btn_height);
+                                if response.clicked() {
+                                    let center_screen = Pos2::new(640.0, 400.0);
+                                    let center_canvas = self.viewport.screen_to_canvas(center_screen);
+                                    let node = Node::new(shape, center_canvas);
+                                    self.selection.clear();
+                                    self.selection.node_ids.push(node.id);
+                                    self.document.nodes.push(node);
+                                    self.history.push(&self.document);
+                                }
+                                if response.drag_started() {
+                                    if let Some(pos) = response.interact_pointer_pos() {
+                                        self.drag = DragState::DraggingNewNode {
+                                            shape,
+                                            current_screen: pos,
+                                        };
+                                    }
+                                }
+                                if response.dragged() {
+                                    if let DragState::DraggingNewNode { ref mut current_screen, .. } = self.drag {
+                                        if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                            *current_screen = pos;
+                                        }
+                                    }
+                                }
                             }
                         }
+                    });
+                    i += 2;
+                }
+
+                ui.add_space(8.0);
+
+                // View section
+                Self::draw_section_header(ui, "VIEW");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.show_grid, "");
+                    ui.label(egui::RichText::new("Grid").size(12.0).color(TEXT_SECONDARY));
+                    ui.add_space(8.0);
+                    ui.checkbox(&mut self.snap_to_grid, "");
+                    ui.label(egui::RichText::new("Snap").size(12.0).color(TEXT_SECONDARY));
+                });
+                ui.add_space(4.0);
+
+                // Zoom control
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{:.0}%", self.viewport.zoom * 100.0))
+                        .size(12.0).color(TEXT_DIM).monospace());
+                    if ui.small_button("Reset").clicked() {
+                        self.viewport.zoom = 1.0;
+                        self.viewport.offset = [0.0, 0.0];
                     }
-                }
-                ui.separator();
+                });
 
-                // View options
-                ui.label("View");
-                ui.checkbox(&mut self.show_grid, "Show Grid");
-                ui.checkbox(&mut self.snap_to_grid, "Snap to Grid");
-                ui.separator();
-
-                // Zoom display
-                ui.label(format!("Zoom: {:.0}%", self.viewport.zoom * 100.0));
-                if ui.button("Reset Zoom").clicked() {
-                    self.viewport.zoom = 1.0;
-                    self.viewport.offset = [0.0, 0.0];
-                }
+                // Bottom spacer + node count
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(format!(
+                        "{} nodes  {}  edges",
+                        self.document.nodes.len(),
+                        self.document.edges.len()
+                    )).size(11.0).color(TEXT_DIM));
+                });
             });
     }
 
@@ -354,106 +569,117 @@ impl FlowchartApp {
         SidePanel::right("properties")
             .resizable(false)
             .exact_width(PROPERTIES_WIDTH)
+            .frame(egui::Frame {
+                fill: MANTLE,
+                inner_margin: egui::Margin::same(12),
+                stroke: Stroke::new(1.0, SURFACE1),
+                ..Default::default()
+            })
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("Properties");
-                });
-                ui.separator();
+                ui.label(egui::RichText::new("PROPERTIES").size(10.0).color(TEXT_DIM).strong());
+                ui.add_space(8.0);
 
                 let sel_nodes = self.selection.node_ids.len();
                 let sel_edges = self.selection.edge_ids.len();
                 let total = sel_nodes + sel_edges;
 
                 if total == 0 {
-                    ui.label("Nothing selected");
+                    ui.add_space(20.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new("No selection").size(13.0).color(TEXT_DIM));
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Click a node or edge\nto edit properties").size(11.0).color(TEXT_DIM));
+                    });
                 } else if total > 1 {
-                    ui.label(format!("{} items selected", total));
+                    ui.label(egui::RichText::new(format!("{} items selected", total)).size(13.0).color(TEXT_SECONDARY));
                 } else if sel_nodes == 1 {
                     let node_id = self.selection.node_ids[0];
                     if let Some(node) = self.document.find_node_mut(&node_id) {
-                        ui.label("Node");
-                        ui.separator();
-
-                        ui.label("Label:");
-                        ui.text_edit_singleline(&mut node.label);
-
-                        ui.label("Description:");
-                        ui.text_edit_multiline(&mut node.description);
-
-                        ui.separator();
-                        ui.label("Style");
-
-                        // Fill color
+                        // Node type badge
                         ui.horizontal(|ui| {
-                            ui.label("Fill:");
+                            let shape_name = match node.shape {
+                                NodeShape::Rectangle => "Rectangle",
+                                NodeShape::RoundedRect => "Rounded Rect",
+                                NodeShape::Diamond => "Diamond",
+                                NodeShape::Circle => "Circle",
+                                NodeShape::Parallelogram => "Parallelogram",
+                            };
+                            ui.label(egui::RichText::new(shape_name).size(13.0).strong().color(ACCENT));
+                        });
+                        ui.add_space(8.0);
+
+                        // Content section
+                        Self::draw_section_header(ui, "CONTENT");
+                        ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                        ui.add(egui::TextEdit::singleline(&mut node.label)
+                            .desired_width(f32::INFINITY)
+                            .font(FontId::proportional(13.0)));
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("Description").size(11.0).color(TEXT_DIM));
+                        ui.add(egui::TextEdit::multiline(&mut node.description)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(3)
+                            .font(FontId::proportional(12.0)));
+                        ui.add_space(8.0);
+
+                        // Style section
+                        Self::draw_section_header(ui, "STYLE");
+                        ui.horizontal(|ui| {
                             let mut c = Color32::from_rgba_premultiplied(
-                                node.style.fill_color[0],
-                                node.style.fill_color[1],
-                                node.style.fill_color[2],
-                                node.style.fill_color[3],
+                                node.style.fill_color[0], node.style.fill_color[1],
+                                node.style.fill_color[2], node.style.fill_color[3],
                             );
+                            ui.label(egui::RichText::new("Fill").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut c).changed() {
                                 node.style.fill_color = c.to_array();
                             }
-                        });
-
-                        // Border color
-                        ui.horizontal(|ui| {
-                            ui.label("Border:");
-                            let mut c = Color32::from_rgba_premultiplied(
-                                node.style.border_color[0],
-                                node.style.border_color[1],
-                                node.style.border_color[2],
-                                node.style.border_color[3],
+                            ui.add_space(12.0);
+                            let mut b = Color32::from_rgba_premultiplied(
+                                node.style.border_color[0], node.style.border_color[1],
+                                node.style.border_color[2], node.style.border_color[3],
                             );
-                            if ui.color_edit_button_srgba(&mut c).changed() {
-                                node.style.border_color = c.to_array();
+                            ui.label(egui::RichText::new("Border").size(11.0).color(TEXT_DIM));
+                            if ui.color_edit_button_srgba(&mut b).changed() {
+                                node.style.border_color = b.to_array();
                             }
                         });
+                        ui.add_space(4.0);
+                        ui.add(egui::Slider::new(&mut node.style.border_width, 0.0..=10.0)
+                            .text("Border"));
+                        ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0)
+                            .text("Font"));
+                        ui.add_space(8.0);
 
-                        ui.add(
-                            egui::Slider::new(&mut node.style.border_width, 0.0..=10.0)
-                                .text("Border Width"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut node.style.font_size, 8.0..=48.0)
-                                .text("Font Size"),
-                        );
-
-                        ui.separator();
-                        ui.label("Size");
-                        ui.add(
-                            egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("Width"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("Height"),
-                        );
+                        // Size section
+                        Self::draw_section_header(ui, "DIMENSIONS");
+                        ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
+                        ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
                     }
                 } else if sel_edges == 1 {
                     let edge_id = self.selection.edge_ids[0];
                     if let Some(edge) = self.document.find_edge_mut(&edge_id) {
-                        ui.label("Edge");
-                        ui.separator();
+                        ui.label(egui::RichText::new("Edge").size(13.0).strong().color(ACCENT));
+                        ui.add_space(8.0);
 
-                        ui.label("Label:");
-                        ui.text_edit_singleline(&mut edge.label);
+                        Self::draw_section_header(ui, "CONTENT");
+                        ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                        ui.add(egui::TextEdit::singleline(&mut edge.label)
+                            .desired_width(f32::INFINITY)
+                            .font(FontId::proportional(13.0)));
+                        ui.add_space(8.0);
 
+                        Self::draw_section_header(ui, "STYLE");
                         ui.horizontal(|ui| {
-                            ui.label("Color:");
                             let mut c = Color32::from_rgba_premultiplied(
-                                edge.style.color[0],
-                                edge.style.color[1],
-                                edge.style.color[2],
-                                edge.style.color[3],
+                                edge.style.color[0], edge.style.color[1],
+                                edge.style.color[2], edge.style.color[3],
                             );
+                            ui.label(egui::RichText::new("Color").size(11.0).color(TEXT_DIM));
                             if ui.color_edit_button_srgba(&mut c).changed() {
                                 edge.style.color = c.to_array();
                             }
                         });
-
-                        ui.add(
-                            egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"),
-                        );
+                        ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
                     }
                 }
             });
@@ -922,7 +1148,7 @@ impl FlowchartApp {
         while x < canvas_rect.max.x {
             let mut y = start_y;
             while y < canvas_rect.max.y {
-                painter.circle_filled(Pos2::new(x, y), 1.0, GRID_COLOR);
+                painter.circle_filled(Pos2::new(x, y), 0.8, GRID_COLOR);
                 y += grid_screen;
             }
             x += grid_screen;
@@ -937,6 +1163,12 @@ impl FlowchartApp {
         let top_left = self.viewport.canvas_to_screen(node.pos());
         let size = node.size_vec() * self.viewport.zoom;
         let screen_rect = Rect::from_min_size(top_left, size);
+
+        // Drop shadow (draw before the shape)
+        let shadow_offset = Vec2::new(2.0, 3.0) * self.viewport.zoom;
+        let shadow_rect = screen_rect.translate(shadow_offset);
+        let shadow_color = Color32::from_rgba_premultiplied(0, 0, 0, 40);
+        painter.rect_filled(shadow_rect, CornerRadius::same(4), shadow_color);
 
         let fill = Color32::from_rgba_premultiplied(
             node.style.fill_color[0],
@@ -1213,7 +1445,7 @@ impl eframe::App for FlowchartApp {
         self.draw_properties_panel(ctx);
 
         CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(egui::Frame::NONE.fill(CANVAS_BG))
             .show(ctx, |ui| {
                 self.draw_canvas(ui);
             });

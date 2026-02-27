@@ -49,11 +49,11 @@ pub struct NodeStyle {
 impl Default for NodeStyle {
     fn default() -> Self {
         Self {
-            fill_color: [255, 255, 255, 255],
-            border_color: [60, 60, 60, 255],
-            border_width: 2.0,
-            text_color: [30, 30, 30, 255],
-            font_size: 14.0,
+            fill_color: [49, 50, 68, 255],     // surface0
+            border_color: [69, 71, 90, 255],    // surface1
+            border_width: 1.5,
+            text_color: [205, 214, 244, 255],   // text
+            font_size: 13.0,
         }
     }
 }
