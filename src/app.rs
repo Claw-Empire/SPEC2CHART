@@ -776,6 +776,126 @@ impl FlowchartApp {
                 );
             }
         }
+
+        // ---- Draw mini-map ----
+        self.draw_minimap(&painter, canvas_rect);
+    }
+
+    // -----------------------------------------------------------------------
+    // Mini-map
+    // -----------------------------------------------------------------------
+
+    fn draw_minimap(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        if self.document.nodes.is_empty() {
+            return;
+        }
+
+        let minimap_w: f32 = 180.0;
+        let minimap_h: f32 = 120.0;
+        let margin: f32 = 12.0;
+
+        let minimap_rect = Rect::from_min_size(
+            Pos2::new(
+                canvas_rect.max.x - minimap_w - margin,
+                canvas_rect.max.y - minimap_h - margin,
+            ),
+            Vec2::new(minimap_w, minimap_h),
+        );
+
+        // Semi-transparent dark background
+        painter.rect_filled(
+            minimap_rect,
+            CornerRadius::same(4),
+            Color32::from_rgba_premultiplied(20, 20, 20, 200),
+        );
+        painter.rect_stroke(
+            minimap_rect,
+            CornerRadius::same(4),
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(80, 80, 80, 180)),
+            StrokeKind::Outside,
+        );
+
+        // Compute bounding box of all nodes in canvas space
+        let mut bb_min = Pos2::new(f32::MAX, f32::MAX);
+        let mut bb_max = Pos2::new(f32::MIN, f32::MIN);
+        for node in &self.document.nodes {
+            let r = node.rect();
+            bb_min.x = bb_min.x.min(r.min.x);
+            bb_min.y = bb_min.y.min(r.min.y);
+            bb_max.x = bb_max.x.max(r.max.x);
+            bb_max.y = bb_max.y.max(r.max.y);
+        }
+
+        // Add some padding around the bounding box
+        let padding = 50.0;
+        bb_min.x -= padding;
+        bb_min.y -= padding;
+        bb_max.x += padding;
+        bb_max.y += padding;
+
+        let bb_w = (bb_max.x - bb_min.x).max(1.0);
+        let bb_h = (bb_max.y - bb_min.y).max(1.0);
+
+        // Inset the minimap rect slightly for drawing content
+        let inset = 4.0;
+        let draw_rect = minimap_rect.shrink(inset);
+        let draw_w = draw_rect.width();
+        let draw_h = draw_rect.height();
+
+        // Scale to fit the bounding box into the minimap draw area
+        let scale = (draw_w / bb_w).min(draw_h / bb_h);
+
+        // Center the content within the draw area
+        let content_w = bb_w * scale;
+        let content_h = bb_h * scale;
+        let offset_x = draw_rect.min.x + (draw_w - content_w) / 2.0;
+        let offset_y = draw_rect.min.y + (draw_h - content_h) / 2.0;
+
+        // Map a canvas-space point to minimap screen-space
+        let map_point = |cx: f32, cy: f32| -> Pos2 {
+            Pos2::new(
+                offset_x + (cx - bb_min.x) * scale,
+                offset_y + (cy - bb_min.y) * scale,
+            )
+        };
+
+        // Draw each node as a small dot
+        for node in &self.document.nodes {
+            let center = node.rect().center();
+            let screen_pt = map_point(center.x, center.y);
+            if minimap_rect.contains(screen_pt) {
+                painter.circle_filled(
+                    screen_pt,
+                    2.5,
+                    Color32::from_rgba_premultiplied(80, 160, 255, 220),
+                );
+            }
+        }
+
+        // Draw current viewport rectangle
+        // The viewport shows the region of canvas space visible on screen.
+        // screen_to_canvas maps the canvas_rect corners to canvas space.
+        let vp_tl = self.viewport.screen_to_canvas(canvas_rect.min);
+        let vp_br = self.viewport.screen_to_canvas(canvas_rect.max);
+
+        let vp_min = map_point(vp_tl.x, vp_tl.y);
+        let vp_max = map_point(vp_br.x, vp_br.y);
+        let vp_rect = Rect::from_two_pos(vp_min, vp_max);
+
+        // Clip the viewport rect to the minimap bounds
+        if let Some(clipped) = vp_rect.intersect(minimap_rect).is_positive().then(|| vp_rect.intersect(minimap_rect)) {
+            painter.rect_filled(
+                clipped,
+                CornerRadius::ZERO,
+                Color32::from_rgba_premultiplied(80, 160, 255, 30),
+            );
+            painter.rect_stroke(
+                clipped,
+                CornerRadius::ZERO,
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(80, 160, 255, 150)),
+                StrokeKind::Outside,
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
