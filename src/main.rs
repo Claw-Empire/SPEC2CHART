@@ -1,3 +1,6 @@
+mod history;
+mod model;
+
 use eframe::egui;
 
 fn main() -> eframe::Result<()> {
