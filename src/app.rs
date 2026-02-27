@@ -4,6 +4,7 @@ use egui::{
 };
 
 use crate::history::UndoStack;
+use crate::io;
 use crate::model::*;
 
 // ---------------------------------------------------------------------------
@@ -194,6 +195,44 @@ impl FlowchartApp {
             .resizable(false)
             .exact_width(TOOLBAR_WIDTH)
             .show(ctx, |ui| {
+                // File section
+                ui.vertical_centered(|ui| {
+                    ui.heading("File");
+                });
+                ui.separator();
+
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Flowchart", &["flow"])
+                            .set_file_name("untitled.flow")
+                            .save_file()
+                        {
+                            if let Err(e) = io::save_document(&self.document, &path) {
+                                eprintln!("Save error: {}", e);
+                            }
+                        }
+                    }
+                    if ui.button("Load").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Flowchart", &["flow"])
+                            .pick_file()
+                        {
+                            match io::load_document(&path) {
+                                Ok(doc) => {
+                                    self.document = doc;
+                                    self.selection.clear();
+                                    self.history.push(&self.document);
+                                }
+                                Err(e) => {
+                                    eprintln!("Load error: {}", e);
+                                }
+                            }
+                        }
+                    }
+                });
+                ui.separator();
+
                 ui.vertical_centered(|ui| {
                     ui.heading("Tools");
                 });
