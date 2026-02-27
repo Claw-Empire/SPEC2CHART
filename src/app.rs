@@ -89,6 +89,12 @@ pub struct FlowchartApp {
     pub grid_size: f32,
     /// Track whether space key is held (for pan mode)
     space_held: bool,
+    /// Cached canvas rect from last frame (for toolbar new-node placement)
+    canvas_rect: Rect,
+    /// Status toast message with creation time
+    status_message: Option<(String, std::time::Instant)>,
+    /// Flag to request focus on label text edit (e.g., on double-click)
+    focus_label_edit: bool,
 }
 
 impl FlowchartApp {
@@ -177,6 +183,9 @@ impl FlowchartApp {
             snap_to_grid: true,
             grid_size: 20.0,
             space_held: false,
+            canvas_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)),
+            status_message: None,
+            focus_label_edit: false,
         }
     }
 
@@ -341,6 +350,15 @@ impl FlowchartApp {
             self.history.push(&self.document);
         }
 
+        // V = select tool (when no modifier held)
+        if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.is_none()) {
+            self.tool = Tool::Select;
+        }
+        // E = connect tool (when no modifier held)
+        if ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.is_none()) {
+            self.tool = Tool::Connect;
+        }
+
         // Cmd+A = select all
         if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.matches_exact(cmd)) {
             self.selection.clear();
@@ -386,8 +404,11 @@ impl FlowchartApp {
                             .set_file_name("untitled.flow")
                             .save_file()
                         {
-                            if let Err(e) = io::save_document(&self.document, &path) {
-                                eprintln!("Save error: {}", e);
+                            match io::save_document(&self.document, &path) {
+                                Ok(()) => {
+                                    self.status_message = Some(("Saved!".to_string(), std::time::Instant::now()));
+                                }
+                                Err(e) => eprintln!("Save error: {}", e),
                             }
                         }
                     }
@@ -434,8 +455,11 @@ impl FlowchartApp {
                                     "pdf" => export::export_pdf(&self.document, &path),
                                     _ => Ok(()),
                                 };
-                                if let Err(e) = result {
-                                    eprintln!("Export error: {}", e);
+                                match result {
+                                    Ok(()) => {
+                                        self.status_message = Some((format!("Exported {}!", label), std::time::Instant::now()));
+                                    }
+                                    Err(e) => eprintln!("Export error: {}", e),
                                 }
                             }
                         }
@@ -469,6 +493,8 @@ impl FlowchartApp {
                         self.tool = Tool::Connect;
                     }
                 });
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new("V Select  \u{00b7}  E Connect").size(9.0).color(TEXT_DIM));
                 ui.add_space(4.0);
 
                 // Shapes section with visual preview buttons
@@ -496,7 +522,7 @@ impl FlowchartApp {
                                 let (shape, name) = shapes[i + j];
                                 let response = self.draw_shape_button(ui, shape, name, btn_width, btn_height);
                                 if response.clicked() {
-                                    let center_screen = Pos2::new(640.0, 400.0);
+                                    let center_screen = self.canvas_rect.center();
                                     let center_canvas = self.viewport.screen_to_canvas(center_screen);
                                     let node = Node::new(shape, center_canvas);
                                     self.selection.clear();
@@ -610,9 +636,13 @@ impl FlowchartApp {
                         // Content section
                         Self::draw_section_header(ui, "CONTENT");
                         ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
-                        ui.add(egui::TextEdit::singleline(&mut node.label)
+                        let label_response = ui.add(egui::TextEdit::singleline(&mut node.label)
                             .desired_width(f32::INFINITY)
                             .font(FontId::proportional(13.0)));
+                        if self.focus_label_edit {
+                            label_response.request_focus();
+                            self.focus_label_edit = false;
+                        }
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new("Description").size(11.0).color(TEXT_DIM));
                         ui.add(egui::TextEdit::multiline(&mut node.description)
@@ -682,6 +712,7 @@ impl FlowchartApp {
     fn draw_canvas(&mut self, ui: &mut egui::Ui) {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::all());
         let canvas_rect = response.rect;
+        self.canvas_rect = canvas_rect;
 
         // Fill background
         painter.rect_filled(canvas_rect, CornerRadius::ZERO, CANVAS_BG);
@@ -701,7 +732,7 @@ impl FlowchartApp {
         if scroll_delta != 0.0 {
             if let Some(mouse) = pointer_pos {
                 let old_zoom = self.viewport.zoom;
-                let factor = if scroll_delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
+                let factor = (1.0 + scroll_delta * 0.003).clamp(0.9, 1.1);
                 self.viewport.zoom = (self.viewport.zoom * factor).clamp(0.1, 10.0);
                 // Adjust offset so that the point under the mouse stays fixed
                 let ratio = self.viewport.zoom / old_zoom;
@@ -905,6 +936,48 @@ impl FlowchartApp {
             }
         }
 
+        // Handle double-click on node to focus label editing
+        if response.double_clicked() {
+            if let Some(mouse) = pointer_pos {
+                let canvas_pos = self.viewport.screen_to_canvas(mouse);
+                if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
+                    self.selection.select_node(node_id);
+                    self.focus_label_edit = true;
+                }
+            }
+        }
+
+        // Set cursor based on current state
+        let cursor = match &self.drag {
+            DragState::Panning { .. } => egui::CursorIcon::Grabbing,
+            DragState::DraggingNode { .. } => egui::CursorIcon::Grabbing,
+            DragState::DraggingNewNode { .. } => egui::CursorIcon::Copy,
+            DragState::CreatingEdge { .. } => egui::CursorIcon::Crosshair,
+            DragState::BoxSelect { .. } => egui::CursorIcon::Crosshair,
+            DragState::None => {
+                if self.space_held {
+                    egui::CursorIcon::Grab
+                } else if self.tool == Tool::Connect {
+                    egui::CursorIcon::Crosshair
+                } else {
+                    // Check what's under cursor
+                    if let Some(hover) = pointer_pos {
+                        let canvas_pos = self.viewport.screen_to_canvas(hover);
+                        if self.hit_test_port(canvas_pos).is_some() {
+                            egui::CursorIcon::Crosshair
+                        } else if self.document.node_at_pos(canvas_pos).is_some() {
+                            egui::CursorIcon::Grab
+                        } else {
+                            egui::CursorIcon::Default
+                        }
+                    } else {
+                        egui::CursorIcon::Default
+                    }
+                }
+            }
+        };
+        ui.ctx().set_cursor_icon(cursor);
+
         // Build index once per frame for O(1) node lookups
         let node_idx = self.document.node_index();
 
@@ -978,6 +1051,21 @@ impl FlowchartApp {
                     Stroke::new(2.0, SELECTION_COLOR),
                 );
                 painter.add(bezier);
+
+                // Highlight target port if hovering over one
+                let canvas_dst = self.viewport.screen_to_canvas(*current_screen);
+                if let Some(target_port) = self.hit_test_port(canvas_dst) {
+                    if target_port.node_id != source.node_id {
+                        // Valid target -- draw highlighted port
+                        if let Some(tgt_node) = node_idx.get(&target_port.node_id).and_then(|&i| self.document.nodes.get(i)) {
+                            let port_pos = self.viewport.canvas_to_screen(tgt_node.port_position(target_port.side));
+                            let r = PORT_RADIUS * self.viewport.zoom.sqrt() * 2.0;
+                            painter.circle_filled(port_pos, r * 1.5, Color32::from_rgba_premultiplied(137, 180, 250, 40));
+                            painter.circle_filled(port_pos, r, ACCENT);
+                            painter.circle_stroke(port_pos, r, Stroke::new(2.0, Color32::WHITE));
+                        }
+                    }
+                }
             }
         }
 
@@ -1006,6 +1094,23 @@ impl FlowchartApp {
                     Stroke::new(1.5, SELECTION_COLOR),
                     StrokeKind::Outside,
                 );
+            }
+        }
+
+        // ---- Draw status toast ----
+        if let Some((ref msg, time)) = self.status_message {
+            let elapsed = time.elapsed().as_secs_f32();
+            if elapsed < 2.0 {
+                let alpha = ((2.0 - elapsed) * 255.0).min(255.0) as u8;
+                let toast_pos = Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 40.0);
+                painter.text(
+                    toast_pos,
+                    Align2::CENTER_CENTER,
+                    msg,
+                    FontId::proportional(12.0),
+                    Color32::from_rgba_premultiplied(166, 227, 161, alpha),
+                );
+                ui.ctx().request_repaint(); // Keep repainting for animation
             }
         }
 
@@ -1185,9 +1290,21 @@ impl FlowchartApp {
         let shadow_color = Color32::from_rgba_premultiplied(0, 0, 0, 40);
         painter.rect_filled(shadow_rect, CornerRadius::same(4), shadow_color);
 
-        let fill = to_color32(node.style.fill_color);
-
         let is_selected = self.selection.contains_node(&node.id);
+
+        // Hover highlight (subtle glow)
+        let is_hovered = hover_pos.map_or(false, |hp| screen_rect.expand(2.0).contains(hp));
+        if is_hovered && !is_selected {
+            // Draw a subtle glow behind the node
+            painter.rect_stroke(
+                screen_rect.expand(2.0),
+                CornerRadius::same(4),
+                Stroke::new(1.5, Color32::from_rgba_premultiplied(137, 180, 250, 60)),
+                StrokeKind::Outside,
+            );
+        }
+
+        let fill = to_color32(node.style.fill_color);
         let border_color = if is_selected {
             SELECTION_COLOR
         } else {
@@ -1272,8 +1389,21 @@ impl FlowchartApp {
                 let canvas_port = node.port_position(*side);
                 let screen_port = self.viewport.canvas_to_screen(canvas_port);
                 let r = PORT_RADIUS * self.viewport.zoom.sqrt();
-                painter.circle_filled(screen_port, r, PORT_FILL);
-                painter.circle_stroke(screen_port, r, Stroke::new(1.5, SELECTION_COLOR));
+
+                // Check if this specific port is being hovered
+                let port_hovered = hover_pos.map_or(false, |hp| (hp - screen_port).length() < r * 3.0);
+
+                if port_hovered {
+                    // Highlighted port -- larger, brighter
+                    let glow_r = r * 2.5;
+                    painter.circle_filled(screen_port, glow_r, Color32::from_rgba_premultiplied(137, 180, 250, 30));
+                    painter.circle_filled(screen_port, r * 1.3, ACCENT);
+                    painter.circle_stroke(screen_port, r * 1.3, Stroke::new(2.0, Color32::WHITE));
+                } else {
+                    // Normal port
+                    painter.circle_filled(screen_port, r, PORT_FILL);
+                    painter.circle_stroke(screen_port, r, Stroke::new(1.5, SELECTION_COLOR));
+                }
             }
         }
     }
@@ -1443,16 +1573,24 @@ impl FlowchartApp {
 
 impl eframe::App for FlowchartApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Cleanup expired status messages
+        if let Some((_, time)) = &self.status_message {
+            if time.elapsed().as_secs_f32() > 2.5 {
+                self.status_message = None;
+            }
+        }
+
         self.handle_shortcuts(ctx);
 
-        // Only repaint continuously during drag operations
+        // Only repaint continuously during drag operations or active toasts
+        let has_active_toast = self.status_message.as_ref().map_or(false, |(_, t)| t.elapsed().as_secs_f32() < 2.5);
         match self.drag {
-            DragState::None => {
+            DragState::None if !has_active_toast => {
                 // Idle: repaint at low rate for cursor changes
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
             _ => {
-                // Active drag: repaint continuously
+                // Active drag or toast animation: repaint continuously
                 ctx.request_repaint();
             }
         }
