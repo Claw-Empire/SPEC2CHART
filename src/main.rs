@@ -1,3 +1,4 @@
+mod app;
 mod history;
 mod model;
 
@@ -13,22 +14,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Light Figma",
         options,
-        Box::new(|cc| Ok(Box::new(LightFigmaApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(app::FlowchartApp::new(cc)))),
     )
-}
-
-struct LightFigmaApp;
-
-impl LightFigmaApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self
-    }
-}
-
-impl eframe::App for LightFigmaApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Light Figma");
-        });
-    }
 }
