@@ -1,4 +1,4 @@
-use crate::model::{FlowchartDocument, Node, NodeShape};
+use crate::model::{Cardinality, FlowchartDocument, Node, NodeKind, NodeShape, ENTITY_HEADER_HEIGHT, ENTITY_ROW_HEIGHT};
 use std::path::Path;
 
 /// Padding around the bounding box in pixels.
@@ -62,43 +62,61 @@ pub fn export_png(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
         let border = image::Rgba(node.style.border_color);
         let border_w = node.style.border_width.round() as i32;
 
-        match node.shape {
-            NodeShape::Circle => {
-                let cx = nx + nw / 2;
-                let cy = ny + nh / 2;
-                let radius = nw.min(nh) / 2;
-                draw_filled_circle(&mut img, cx, cy, radius, fill);
-                draw_circle_outline(&mut img, cx, cy, radius, border, border_w);
+        match &node.kind {
+            NodeKind::Shape { shape, .. } => match shape {
+                NodeShape::Circle => {
+                    let cx = nx + nw / 2;
+                    let cy = ny + nh / 2;
+                    let radius = nw.min(nh) / 2;
+                    draw_filled_circle(&mut img, cx, cy, radius, fill);
+                    draw_circle_outline(&mut img, cx, cy, radius, border, border_w);
+                }
+                NodeShape::Diamond => {
+                    let cx = nx + nw / 2;
+                    let cy = ny + nh / 2;
+                    let hw = nw / 2;
+                    let hh = nh / 2;
+                    let points = vec![
+                        (cx, cy - hh),
+                        (cx + hw, cy),
+                        (cx, cy + hh),
+                        (cx - hw, cy),
+                    ];
+                    draw_filled_polygon(&mut img, &points, fill);
+                    draw_polygon_outline(&mut img, &points, border, border_w);
+                }
+                NodeShape::Parallelogram => {
+                    let skew = (nw as f32 * 0.15) as i32;
+                    let points = vec![
+                        (nx + skew, ny),
+                        (nx + nw, ny),
+                        (nx + nw - skew, ny + nh),
+                        (nx, ny + nh),
+                    ];
+                    draw_filled_polygon(&mut img, &points, fill);
+                    draw_polygon_outline(&mut img, &points, border, border_w);
+                }
+                _ => {
+                    draw_filled_rect(&mut img, nx, ny, nw, nh, fill);
+                    draw_rect_outline(&mut img, nx, ny, nw, nh, border, border_w);
+                }
+            },
+            NodeKind::StickyNote { .. } => {
+                draw_filled_rect(&mut img, nx, ny, nw, nh, fill);
             }
-            NodeShape::Diamond => {
-                let cx = nx + nw / 2;
-                let cy = ny + nh / 2;
-                let hw = nw / 2;
-                let hh = nh / 2;
-                let points = vec![
-                    (cx, cy - hh),
-                    (cx + hw, cy),
-                    (cx, cy + hh),
-                    (cx - hw, cy),
-                ];
-                draw_filled_polygon(&mut img, &points, fill);
-                draw_polygon_outline(&mut img, &points, border, border_w);
-            }
-            NodeShape::Parallelogram => {
-                let skew = (nw as f32 * 0.15) as i32;
-                let points = vec![
-                    (nx + skew, ny),
-                    (nx + nw, ny),
-                    (nx + nw - skew, ny + nh),
-                    (nx, ny + nh),
-                ];
-                draw_filled_polygon(&mut img, &points, fill);
-                draw_polygon_outline(&mut img, &points, border, border_w);
-            }
-            _ => {
-                // Rectangle and RoundedRect (draw as rectangle for simplicity)
+            NodeKind::Entity { .. } => {
+                // Draw body
                 draw_filled_rect(&mut img, nx, ny, nw, nh, fill);
                 draw_rect_outline(&mut img, nx, ny, nw, nh, border, border_w);
+                // Draw header bar
+                let header_h = ENTITY_HEADER_HEIGHT as i32;
+                draw_filled_rect(&mut img, nx, ny, nw, header_h, border);
+                // Header divider
+                let div_y = ny + header_h;
+                draw_line(&mut img, nx, div_y, nx + nw, div_y, border, 1);
+            }
+            NodeKind::Text { .. } => {
+                // No background for text nodes
             }
         }
     }
@@ -357,6 +375,31 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                 ));
                 svg.push('\n');
             }
+
+            // Crow's foot symbols
+            let ew = edge.style.width;
+            svg_crow_foot(&mut svg, sx, sy, tx, ty, edge.source_cardinality, &color, ew, true);
+            svg_crow_foot(&mut svg, sx, sy, tx, ty, edge.target_cardinality, &color, ew, false);
+
+            // Source/target text labels
+            if !edge.source_label.is_empty() {
+                let lx = sx + (tx - sx) * 0.08;
+                let ly = sy + (ty - sy) * 0.08 - 10.0;
+                svg.push_str(&format!(
+                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="{}">{}</text>"#,
+                    lx, ly, color, xml_escape(&edge.source_label),
+                ));
+                svg.push('\n');
+            }
+            if !edge.target_label.is_empty() {
+                let lx = sx + (tx - sx) * 0.92;
+                let ly = sy + (ty - sy) * 0.92 - 10.0;
+                svg.push_str(&format!(
+                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="{}">{}</text>"#,
+                    lx, ly, color, xml_escape(&edge.target_label),
+                ));
+                svg.push('\n');
+            }
         }
     }
 
@@ -373,79 +416,278 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
         let stroke_opacity = node.style.border_color[3] as f32 / 255.0;
         let stroke_width = node.style.border_width;
 
-        match node.shape {
-            NodeShape::Rectangle => {
-                svg.push_str(&format!(
-                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
-                    nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
-                ));
-            }
-            NodeShape::RoundedRect => {
-                svg.push_str(&format!(
-                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="10" ry="10" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
-                    nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
-                ));
-            }
-            NodeShape::Circle => {
-                let cx = nx + nw / 2.0;
-                let cy = ny + nh / 2.0;
-                let r = nw.min(nh) / 2.0;
-                svg.push_str(&format!(
-                    r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
-                    cx, cy, r, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
-                ));
-            }
-            NodeShape::Diamond => {
-                let cx = nx + nw / 2.0;
-                let cy = ny + nh / 2.0;
-                let hw = nw / 2.0;
-                let hh = nh / 2.0;
-                let points_str = format!(
-                    "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
-                    cx, cy - hh,
-                    cx + hw, cy,
-                    cx, cy + hh,
-                    cx - hw, cy,
-                );
-                svg.push_str(&format!(
-                    r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
-                    points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
-                ));
-            }
-            NodeShape::Parallelogram => {
-                let skew = nw * 0.15;
-                let points_str = format!(
-                    "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
-                    nx + skew, ny,
-                    nx + nw, ny,
-                    nx + nw - skew, ny + nh,
-                    nx, ny + nh,
-                );
-                svg.push_str(&format!(
-                    r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
-                    points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
-                ));
-            }
-        }
-        svg.push('\n');
+        match &node.kind {
+            NodeKind::Shape { shape, label, .. } => {
+                match shape {
+                    NodeShape::Rectangle => {
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::RoundedRect => {
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="10" ry="10" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Circle => {
+                        let cx = nx + nw / 2.0;
+                        let cy = ny + nh / 2.0;
+                        let r = nw.min(nh) / 2.0;
+                        svg.push_str(&format!(
+                            r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            cx, cy, r, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Diamond => {
+                        let cx = nx + nw / 2.0;
+                        let cy = ny + nh / 2.0;
+                        let hw = nw / 2.0;
+                        let hh = nh / 2.0;
+                        let points_str = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            cx, cy - hh,
+                            cx + hw, cy,
+                            cx, cy + hh,
+                            cx - hw, cy,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Parallelogram => {
+                        let skew = nw * 0.15;
+                        let points_str = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            nx + skew, ny,
+                            nx + nw, ny,
+                            nx + nw - skew, ny + nh,
+                            nx, ny + nh,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                }
+                svg.push('\n');
 
-        // Text label centered in node
-        if !node.label.is_empty() {
-            let text_color = rgba_to_svg_color(node.style.text_color);
-            let text_opacity = node.style.text_color[3] as f32 / 255.0;
-            let text_x = nx + nw / 2.0;
-            let text_y = ny + nh / 2.0;
-            svg.push_str(&format!(
-                r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="{:.0}" fill="{}" fill-opacity="{:.2}">{}</text>"#,
-                text_x, text_y, node.style.font_size, text_color, text_opacity, xml_escape(&node.label),
-            ));
-            svg.push('\n');
+                // Shape label centered
+                if !label.is_empty() {
+                    let text_color = rgba_to_svg_color(node.style.text_color);
+                    let text_opacity = node.style.text_color[3] as f32 / 255.0;
+                    let text_x = nx + nw / 2.0;
+                    let text_y = ny + nh / 2.0;
+                    svg.push_str(&format!(
+                        r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="{:.0}" fill="{}" fill-opacity="{:.2}">{}</text>"#,
+                        text_x, text_y, node.style.font_size, text_color, text_opacity, xml_escape(label),
+                    ));
+                    svg.push('\n');
+                }
+            }
+            NodeKind::StickyNote { text, .. } => {
+                svg.push_str(&format!(
+                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="8" ry="8" fill="{}" fill-opacity="{:.2}"/>"#,
+                    nx, ny, nw, nh, fill, fill_opacity,
+                ));
+                svg.push('\n');
+                if !text.is_empty() {
+                    let text_color = rgba_to_svg_color(node.style.text_color);
+                    let text_x = nx + 10.0;
+                    let text_y = ny + 20.0;
+                    svg.push_str(&format!(
+                        r#"<text x="{:.1}" y="{:.1}" font-family="sans-serif" font-size="{:.0}" fill="{}">{}</text>"#,
+                        text_x, text_y, node.style.font_size, text_color, xml_escape(text),
+                    ));
+                    svg.push('\n');
+                }
+            }
+            NodeKind::Entity { name, attributes } => {
+                // Body
+                svg.push_str(&format!(
+                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="3" ry="3" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                    nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                ));
+                svg.push('\n');
+                // Header
+                let header_h = ENTITY_HEADER_HEIGHT;
+                svg.push_str(&format!(
+                    r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="3" ry="3" fill="{}" fill-opacity="{:.2}"/>"#,
+                    nx, ny, nw, header_h, stroke, stroke_opacity,
+                ));
+                svg.push('\n');
+                // Header divider
+                let div_y = ny + header_h;
+                svg.push_str(&format!(
+                    r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="1"/>"#,
+                    nx, div_y, nx + nw, div_y, stroke,
+                ));
+                svg.push('\n');
+                // Entity name
+                svg.push_str(&format!(
+                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="{:.0}" fill="white" font-weight="bold">{}</text>"#,
+                    nx + nw / 2.0, ny + header_h / 2.0, node.style.font_size + 1.0, xml_escape(name),
+                ));
+                svg.push('\n');
+                // Attributes
+                let row_h = ENTITY_ROW_HEIGHT;
+                let text_color = rgba_to_svg_color(node.style.text_color);
+                for (i, attr) in attributes.iter().enumerate() {
+                    let row_y = div_y + (i as f32) * row_h + row_h / 2.0;
+                    let prefix = if attr.is_primary_key { "PK " } else if attr.is_foreign_key { "FK " } else { "" };
+                    svg.push_str(&format!(
+                        r#"<text x="{:.1}" y="{:.1}" dominant-baseline="middle" font-family="sans-serif" font-size="{:.0}" fill="{}">{}{}</text>"#,
+                        nx + 8.0, row_y, node.style.font_size, text_color, prefix, xml_escape(&attr.name),
+                    ));
+                    svg.push('\n');
+                    let dim_color = "#6c7086";
+                    svg.push_str(&format!(
+                        r#"<text x="{:.1}" y="{:.1}" text-anchor="end" dominant-baseline="middle" font-family="monospace" font-size="{:.0}" fill="{}">{}</text>"#,
+                        nx + nw - 8.0, row_y, node.style.font_size * 0.85, dim_color, xml_escape(&attr.attr_type),
+                    ));
+                    svg.push('\n');
+                }
+            }
+            NodeKind::Text { content } => {
+                if !content.is_empty() {
+                    let text_color = rgba_to_svg_color(node.style.text_color);
+                    let text_opacity = node.style.text_color[3] as f32 / 255.0;
+                    svg.push_str(&format!(
+                        r#"<text x="{:.1}" y="{:.1}" font-family="sans-serif" font-size="{:.0}" fill="{}" fill-opacity="{:.2}">{}</text>"#,
+                        nx, ny + node.style.font_size, node.style.font_size, text_color, text_opacity, xml_escape(content),
+                    ));
+                    svg.push('\n');
+                }
+            }
         }
     }
 
     svg.push_str("</svg>\n");
 
     std::fs::write(path, svg).map_err(|e| e.to_string())
+}
+
+/// Render a crow's foot cardinality symbol in SVG at an edge endpoint.
+/// If `is_source` is true, symbol is at (sx,sy); otherwise at (tx,ty).
+fn svg_crow_foot(
+    svg: &mut String,
+    sx: f32, sy: f32, tx: f32, ty: f32,
+    cardinality: Cardinality,
+    color: &str,
+    stroke_w: f32,
+    is_source: bool,
+) {
+    if cardinality == Cardinality::None {
+        return;
+    }
+    // Direction from the approach side toward the endpoint
+    let (ex, ey, fx, fy) = if is_source {
+        // endpoint is source, approach from target direction
+        (sx, sy, tx, ty)
+    } else {
+        // endpoint is target, approach from source direction
+        (tx, ty, sx, sy)
+    };
+    let dx = ex - fx;
+    let dy = ey - fy;
+    let len = (dx * dx + dy * dy).sqrt().max(0.001);
+    let dirx = dx / len;
+    let diry = dy / len;
+    let perpx = -diry;
+    let perpy = dirx;
+
+    let bar_half = 8.0;
+    let circle_r = 5.0;
+    let foot_spread = 8.0;
+    let foot_len = 12.0;
+    let outer_dist = 3.0;
+    let inner_dist = 15.0;
+
+    match cardinality {
+        Cardinality::None => {}
+        Cardinality::ExactlyOne => {
+            let ox = ex - dirx * outer_dist;
+            let oy = ey - diry * outer_dist;
+            let ix = ex - dirx * inner_dist;
+            let iy = ey - diry * inner_dist;
+            svg.push_str(&format!(
+                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}"/>"#,
+                ox + perpx * bar_half, oy + perpy * bar_half,
+                ox - perpx * bar_half, oy - perpy * bar_half, color, stroke_w,
+            ));
+            svg.push('\n');
+            svg.push_str(&format!(
+                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}"/>"#,
+                ix + perpx * bar_half, iy + perpy * bar_half,
+                ix - perpx * bar_half, iy - perpy * bar_half, color, stroke_w,
+            ));
+            svg.push('\n');
+        }
+        Cardinality::ZeroOrOne => {
+            let ox = ex - dirx * outer_dist;
+            let oy = ey - diry * outer_dist;
+            let ccx = ex - dirx * (inner_dist + circle_r);
+            let ccy = ey - diry * (inner_dist + circle_r);
+            svg.push_str(&format!(
+                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}"/>"#,
+                ox + perpx * bar_half, oy + perpy * bar_half,
+                ox - perpx * bar_half, oy - perpy * bar_half, color, stroke_w,
+            ));
+            svg.push('\n');
+            svg.push_str(&format!(
+                r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="none" stroke="{}" stroke-width="{:.1}"/>"#,
+                ccx, ccy, circle_r, color, stroke_w,
+            ));
+            svg.push('\n');
+        }
+        Cardinality::OneOrMany => {
+            let ix = ex - dirx * inner_dist;
+            let iy = ey - diry * inner_dist;
+            let cx = ex - dirx * foot_len;
+            let cy = ey - diry * foot_len;
+            // Crow's foot prongs
+            for sign in [-1.0_f32, 0.0, 1.0] {
+                let px = ex + perpx * foot_spread * sign;
+                let py = ey + perpy * foot_spread * sign;
+                svg.push_str(&format!(
+                    r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}"/>"#,
+                    cx, cy, px, py, color, stroke_w,
+                ));
+                svg.push('\n');
+            }
+            // Inner bar
+            svg.push_str(&format!(
+                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}"/>"#,
+                ix + perpx * bar_half, iy + perpy * bar_half,
+                ix - perpx * bar_half, iy - perpy * bar_half, color, stroke_w,
+            ));
+            svg.push('\n');
+        }
+        Cardinality::ZeroOrMany => {
+            let cx = ex - dirx * foot_len;
+            let cy = ey - diry * foot_len;
+            let ccx = ex - dirx * (inner_dist + circle_r);
+            let ccy = ey - diry * (inner_dist + circle_r);
+            // Crow's foot prongs
+            for sign in [-1.0_f32, 0.0, 1.0] {
+                let px = ex + perpx * foot_spread * sign;
+                let py = ey + perpy * foot_spread * sign;
+                svg.push_str(&format!(
+                    r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}"/>"#,
+                    cx, cy, px, py, color, stroke_w,
+                ));
+                svg.push('\n');
+            }
+            // Inner circle
+            svg.push_str(&format!(
+                r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="none" stroke="{}" stroke-width="{:.1}"/>"#,
+                ccx, ccy, circle_r, color, stroke_w,
+            ));
+            svg.push('\n');
+        }
+    }
 }
 
 /// Convert [r,g,b,a] to an SVG-compatible hex color string (ignoring alpha).
@@ -505,9 +747,75 @@ fn draw_pdf_node(
     layer.set_outline_color(rgba_to_pdf_color(node.style.border_color));
     layer.set_outline_thickness(node.style.border_width * PX_TO_MM);
 
-    match node.shape {
-        NodeShape::Rectangle | NodeShape::RoundedRect => {
-            // printpdf::Rect uses bottom-left (ll) and top-right (ur) in Mm
+    match &node.kind {
+        NodeKind::Shape { shape, .. } => match shape {
+            NodeShape::Rectangle | NodeShape::RoundedRect => {
+                let rect = printpdf::Rect::new(
+                    Mm(nx),
+                    Mm(bottom_y),
+                    Mm(nx + nw),
+                    Mm(top_y),
+                )
+                .with_mode(PaintMode::FillStroke);
+                layer.add_rect(rect);
+            }
+            NodeShape::Circle => {
+                let cx = nx + nw / 2.0;
+                let cy = (top_y + bottom_y) / 2.0;
+                let rx = nw / 2.0;
+                let ry = nh / 2.0;
+                let segments = 32;
+                let points: Vec<(Point, bool)> = (0..segments)
+                    .map(|i| {
+                        let angle = 2.0 * std::f32::consts::PI * (i as f32) / (segments as f32);
+                        let px = cx + rx * angle.cos();
+                        let py = cy + ry * angle.sin();
+                        (Point::new(Mm(px), Mm(py)), false)
+                    })
+                    .collect();
+                let polygon = Polygon {
+                    rings: vec![points],
+                    mode: PaintMode::FillStroke,
+                    winding_order: printpdf::path::WindingOrder::NonZero,
+                };
+                layer.add_polygon(polygon);
+            }
+            NodeShape::Diamond => {
+                let cx = nx + nw / 2.0;
+                let cy = (top_y + bottom_y) / 2.0;
+                let hw = nw / 2.0;
+                let hh = nh / 2.0;
+                let points = vec![
+                    (Point::new(Mm(cx), Mm(cy + hh)), false),
+                    (Point::new(Mm(cx + hw), Mm(cy)), false),
+                    (Point::new(Mm(cx), Mm(cy - hh)), false),
+                    (Point::new(Mm(cx - hw), Mm(cy)), false),
+                ];
+                let polygon = Polygon {
+                    rings: vec![points],
+                    mode: PaintMode::FillStroke,
+                    winding_order: printpdf::path::WindingOrder::NonZero,
+                };
+                layer.add_polygon(polygon);
+            }
+            NodeShape::Parallelogram => {
+                let skew = nw * 0.15;
+                let points = vec![
+                    (Point::new(Mm(nx + skew), Mm(top_y)), false),
+                    (Point::new(Mm(nx + nw), Mm(top_y)), false),
+                    (Point::new(Mm(nx + nw - skew), Mm(bottom_y)), false),
+                    (Point::new(Mm(nx), Mm(bottom_y)), false),
+                ];
+                let polygon = Polygon {
+                    rings: vec![points],
+                    mode: PaintMode::FillStroke,
+                    winding_order: printpdf::path::WindingOrder::NonZero,
+                };
+                layer.add_polygon(polygon);
+            }
+        },
+        NodeKind::StickyNote { .. } | NodeKind::Entity { .. } => {
+            // Draw as rectangle for both sticky notes and entities
             let rect = printpdf::Rect::new(
                 Mm(nx),
                 Mm(bottom_y),
@@ -517,60 +825,8 @@ fn draw_pdf_node(
             .with_mode(PaintMode::FillStroke);
             layer.add_rect(rect);
         }
-        NodeShape::Circle => {
-            // Approximate circle with a polygon (32 sides)
-            let cx = nx + nw / 2.0;
-            let cy = (top_y + bottom_y) / 2.0;
-            let rx = nw / 2.0;
-            let ry = nh / 2.0;
-            let segments = 32;
-            let points: Vec<(Point, bool)> = (0..segments)
-                .map(|i| {
-                    let angle = 2.0 * std::f32::consts::PI * (i as f32) / (segments as f32);
-                    let px = cx + rx * angle.cos();
-                    let py = cy + ry * angle.sin();
-                    (Point::new(Mm(px), Mm(py)), false)
-                })
-                .collect();
-            let polygon = Polygon {
-                rings: vec![points],
-                mode: PaintMode::FillStroke,
-                winding_order: printpdf::path::WindingOrder::NonZero,
-            };
-            layer.add_polygon(polygon);
-        }
-        NodeShape::Diamond => {
-            let cx = nx + nw / 2.0;
-            let cy = (top_y + bottom_y) / 2.0;
-            let hw = nw / 2.0;
-            let hh = nh / 2.0;
-            let points = vec![
-                (Point::new(Mm(cx), Mm(cy + hh)), false),
-                (Point::new(Mm(cx + hw), Mm(cy)), false),
-                (Point::new(Mm(cx), Mm(cy - hh)), false),
-                (Point::new(Mm(cx - hw), Mm(cy)), false),
-            ];
-            let polygon = Polygon {
-                rings: vec![points],
-                mode: PaintMode::FillStroke,
-                winding_order: printpdf::path::WindingOrder::NonZero,
-            };
-            layer.add_polygon(polygon);
-        }
-        NodeShape::Parallelogram => {
-            let skew = nw * 0.15;
-            let points = vec![
-                (Point::new(Mm(nx + skew), Mm(top_y)), false),
-                (Point::new(Mm(nx + nw), Mm(top_y)), false),
-                (Point::new(Mm(nx + nw - skew), Mm(bottom_y)), false),
-                (Point::new(Mm(nx), Mm(bottom_y)), false),
-            ];
-            let polygon = Polygon {
-                rings: vec![points],
-                mode: PaintMode::FillStroke,
-                winding_order: printpdf::path::WindingOrder::NonZero,
-            };
-            layer.add_polygon(polygon);
+        NodeKind::Text { .. } => {
+            // No shape to draw for text nodes
         }
     }
 }
@@ -628,21 +884,20 @@ pub fn export_pdf(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
 
     // Draw node labels
     for node in &doc.nodes {
-        if !node.label.is_empty() {
+        let label = node.display_label();
+        if !label.is_empty() {
             let nx = (node.position[0] - min_x) * PX_TO_MM;
             let ny = (node.position[1] - min_y) * PX_TO_MM;
             let nw = node.size[0] * PX_TO_MM;
             let nh = node.size[1] * PX_TO_MM;
 
-            // Center text (approximate: use_text places text at baseline-left)
-            // Rough centering: shift left by ~half the text width
             let font_size_mm = node.style.font_size * PX_TO_MM;
-            let approx_text_width = node.label.len() as f32 * font_size_mm * 0.5;
+            let approx_text_width = label.len() as f32 * font_size_mm * 0.5;
             let text_x = nx + nw / 2.0 - approx_text_width / 2.0;
             let text_y = height_mm - (ny + nh / 2.0) - font_size_mm * 0.3;
 
             layer.set_fill_color(rgba_to_pdf_color(node.style.text_color));
-            layer.use_text(&node.label, font_size_mm * 2.83465, Mm(text_x), Mm(text_y), &font);
+            layer.use_text(label, font_size_mm * 2.83465, Mm(text_x), Mm(text_y), &font);
         }
     }
 

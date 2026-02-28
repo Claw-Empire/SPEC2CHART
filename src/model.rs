@@ -32,6 +32,126 @@ pub enum NodeShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StickyColor {
+    Yellow,
+    Pink,
+    Green,
+    Blue,
+    Purple,
+}
+
+impl StickyColor {
+    pub const ALL: [StickyColor; 5] = [
+        StickyColor::Yellow,
+        StickyColor::Pink,
+        StickyColor::Green,
+        StickyColor::Blue,
+        StickyColor::Purple,
+    ];
+
+    pub fn fill_rgba(&self) -> [u8; 4] {
+        match self {
+            StickyColor::Yellow => [249, 226, 175, 255],
+            StickyColor::Pink => [243, 139, 168, 255],
+            StickyColor::Green => [166, 227, 161, 255],
+            StickyColor::Blue => [137, 180, 250, 255],
+            StickyColor::Purple => [203, 166, 247, 255],
+        }
+    }
+
+    pub fn text_rgba(&self) -> [u8; 4] {
+        [30, 30, 46, 255]
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            StickyColor::Yellow => "Yellow",
+            StickyColor::Pink => "Pink",
+            StickyColor::Green => "Green",
+            StickyColor::Blue => "Blue",
+            StickyColor::Purple => "Purple",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Cardinality {
+    None,
+    ExactlyOne,
+    ZeroOrOne,
+    OneOrMany,
+    ZeroOrMany,
+}
+
+impl Cardinality {
+    pub const ALL: [Cardinality; 5] = [
+        Cardinality::None,
+        Cardinality::ExactlyOne,
+        Cardinality::ZeroOrOne,
+        Cardinality::OneOrMany,
+        Cardinality::ZeroOrMany,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Cardinality::None => "None",
+            Cardinality::ExactlyOne => "1 (exactly one)",
+            Cardinality::ZeroOrOne => "0..1 (zero or one)",
+            Cardinality::OneOrMany => "1..N (one or many)",
+            Cardinality::ZeroOrMany => "0..N (zero or many)",
+        }
+    }
+
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Cardinality::None => "",
+            Cardinality::ExactlyOne => "1",
+            Cardinality::ZeroOrOne => "0..1",
+            Cardinality::OneOrMany => "1..N",
+            Cardinality::ZeroOrMany => "0..N",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Cardinality::None => "No cardinality constraint. A plain arrow is drawn.",
+            Cardinality::ExactlyOne => "Exactly one related record must exist.\nDrawn as two perpendicular bars: ||",
+            Cardinality::ZeroOrOne => "Zero or one related record may exist (optional).\nDrawn as a circle and bar: o|",
+            Cardinality::OneOrMany => "One or more related records must exist.\nDrawn as a bar and crow's foot fork: |<",
+            Cardinality::ZeroOrMany => "Zero or more related records may exist.\nDrawn as a circle and crow's foot fork: o<",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityAttribute {
+    pub name: String,
+    pub attr_type: String,
+    pub is_primary_key: bool,
+    pub is_foreign_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NodeKind {
+    Shape {
+        shape: NodeShape,
+        label: String,
+        description: String,
+    },
+    StickyNote {
+        text: String,
+        color: StickyColor,
+    },
+    Entity {
+        name: String,
+        attributes: Vec<EntityAttribute>,
+    },
+    Text {
+        content: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PortSide {
     Top,
     Bottom,
@@ -60,18 +180,22 @@ impl Default for NodeStyle {
     }
 }
 
+/// Entity node sizing constants.
+pub const ENTITY_HEADER_HEIGHT: f32 = 30.0;
+pub const ENTITY_ROW_HEIGHT: f32 = 22.0;
+pub const ENTITY_MIN_WIDTH: f32 = 160.0;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
-    pub shape: NodeShape,
+    pub kind: NodeKind,
     pub position: [f32; 2],
     pub size: [f32; 2],
-    pub label: String,
-    pub description: String,
     pub style: NodeStyle,
 }
 
 impl Node {
+    /// Create a flowchart shape node (backward-compatible constructor).
     pub fn new(shape: NodeShape, position: Pos2) -> Self {
         let size = match shape {
             NodeShape::Circle => [80.0, 80.0],
@@ -80,12 +204,89 @@ impl Node {
         };
         Self {
             id: NodeId::new(),
-            shape,
+            kind: NodeKind::Shape {
+                shape,
+                label: String::from("New Node"),
+                description: String::new(),
+            },
             position: [position.x, position.y],
             size,
-            label: String::from("New Node"),
-            description: String::new(),
             style: NodeStyle::default(),
+        }
+    }
+
+    pub fn new_sticky(color: StickyColor, position: Pos2) -> Self {
+        Self {
+            id: NodeId::new(),
+            kind: NodeKind::StickyNote {
+                text: String::new(),
+                color,
+            },
+            position: [position.x, position.y],
+            size: [150.0, 150.0],
+            style: NodeStyle {
+                fill_color: color.fill_rgba(),
+                border_color: [0, 0, 0, 30],
+                border_width: 0.0,
+                text_color: color.text_rgba(),
+                font_size: 14.0,
+            },
+        }
+    }
+
+    pub fn new_entity(position: Pos2) -> Self {
+        Self {
+            id: NodeId::new(),
+            kind: NodeKind::Entity {
+                name: String::from("Entity"),
+                attributes: vec![],
+            },
+            position: [position.x, position.y],
+            size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
+            style: NodeStyle {
+                fill_color: [49, 50, 68, 255],
+                border_color: [137, 180, 250, 255],
+                border_width: 1.5,
+                text_color: [205, 214, 244, 255],
+                font_size: 12.0,
+            },
+        }
+    }
+
+    pub fn new_text(position: Pos2) -> Self {
+        Self {
+            id: NodeId::new(),
+            kind: NodeKind::Text {
+                content: String::from("Text"),
+            },
+            position: [position.x, position.y],
+            size: [120.0, 40.0],
+            style: NodeStyle {
+                fill_color: [0, 0, 0, 0],
+                border_color: [0, 0, 0, 0],
+                border_width: 0.0,
+                text_color: [205, 214, 244, 255],
+                font_size: 16.0,
+            },
+        }
+    }
+
+    /// Returns the display label for any node kind.
+    pub fn display_label(&self) -> &str {
+        match &self.kind {
+            NodeKind::Shape { label, .. } => label,
+            NodeKind::StickyNote { text, .. } => text,
+            NodeKind::Entity { name, .. } => name,
+            NodeKind::Text { content, .. } => content,
+        }
+    }
+
+    /// Recalculate size for Entity nodes based on attribute count.
+    pub fn auto_size_entity(&mut self) {
+        if let NodeKind::Entity { attributes, .. } = &self.kind {
+            let rows = attributes.len().max(1) as f32;
+            self.size[1] = ENTITY_HEADER_HEIGHT + rows * ENTITY_ROW_HEIGHT + 4.0;
+            self.size[0] = self.size[0].max(ENTITY_MIN_WIDTH);
         }
     }
 
@@ -132,7 +333,7 @@ impl Default for EdgeStyle {
     fn default() -> Self {
         Self {
             color: [100, 100, 100, 255],
-            width: 2.0,
+            width: 2.5,
         }
     }
 }
@@ -143,6 +344,10 @@ pub struct Edge {
     pub source: Port,
     pub target: Port,
     pub label: String,
+    pub source_label: String,
+    pub target_label: String,
+    pub source_cardinality: Cardinality,
+    pub target_cardinality: Cardinality,
     pub style: EdgeStyle,
 }
 
@@ -153,6 +358,10 @@ impl Edge {
             source,
             target,
             label: String::new(),
+            source_label: String::new(),
+            target_label: String::new(),
+            source_cardinality: Cardinality::None,
+            target_cardinality: Cardinality::None,
             style: EdgeStyle::default(),
         }
     }

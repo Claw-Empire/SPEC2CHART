@@ -1,0 +1,100 @@
+{
+  "nodes": [
+    {
+      "id": "032a99ee-c67c-423e-b4e7-d82d146b34c6",
+      "kind": {
+        "Entity": {
+          "name": "User",
+          "attributes": [
+            { "name": "id", "attr_type": "INT", "is_primary_key": true, "is_foreign_key": false },
+            { "name": "name", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "email", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "password", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "created_at", "attr_type": "TIMESTAMP", "is_primary_key": false, "is_foreign_key": false }
+          ]
+        }
+      },
+      "position": [100.0, 150.0],
+      "size": [180.0, 144.0],
+      "style": {
+        "fill_color": [49, 50, 68, 255],
+        "border_color": [137, 180, 250, 255],
+        "border_width": 1.5,
+        "text_color": [205, 214, 244, 255],
+        "font_size": 12.0
+      }
+    },
+    {
+      "id": "84c2104c-c7b5-48b2-9e60-92e949a50552",
+      "kind": {
+        "Entity": {
+          "name": "Order",
+          "attributes": [
+            { "name": "id", "attr_type": "INT", "is_primary_key": true, "is_foreign_key": false },
+            { "name": "user_id", "attr_type": "INT", "is_primary_key": false, "is_foreign_key": true },
+            { "name": "app_id", "attr_type": "INT", "is_primary_key": false, "is_foreign_key": true },
+            { "name": "total", "attr_type": "DECIMAL", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "status", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "created_at", "attr_type": "TIMESTAMP", "is_primary_key": false, "is_foreign_key": false }
+          ]
+        }
+      },
+      "position": [420.0, 130.0],
+      "size": [180.0, 166.0],
+      "style": {
+        "fill_color": [49, 50, 68, 255],
+        "border_color": [137, 180, 250, 255],
+        "border_width": 1.5,
+        "text_color": [205, 214, 244, 255],
+        "font_size": 12.0
+      }
+    },
+    {
+      "id": "6bc8fadf-7e2d-43b8-b169-6072dbfc47be",
+      "kind": {
+        "Entity": {
+          "name": "App",
+          "attributes": [
+            { "name": "id", "attr_type": "INT", "is_primary_key": true, "is_foreign_key": false },
+            { "name": "name", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "platform", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false },
+            { "name": "version", "attr_type": "VARCHAR", "is_primary_key": false, "is_foreign_key": false }
+          ]
+        }
+      },
+      "position": [740.0, 160.0],
+      "size": [180.0, 122.0],
+      "style": {
+        "fill_color": [49, 50, 68, 255],
+        "border_color": [137, 180, 250, 255],
+        "border_width": 1.5,
+        "text_color": [205, 214, 244, 255],
+        "font_size": 12.0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "da9d7bc6-d609-4882-a9cb-175f0c84e8a9",
+      "source": { "node_id": "032a99ee-c67c-423e-b4e7-d82d146b34c6", "side": "Right" },
+      "target": { "node_id": "84c2104c-c7b5-48b2-9e60-92e949a50552", "side": "Left" },
+      "label": "places",
+      "source_label": "",
+      "target_label": "",
+      "source_cardinality": "ExactlyOne",
+      "target_cardinality": "ZeroOrMany",
+      "style": { "color": [137, 180, 250, 255], "width": 2.0 }
+    },
+    {
+      "id": "30b5538c-eeff-4706-81ba-a8b77a738f03",
+      "source": { "node_id": "6bc8fadf-7e2d-43b8-b169-6072dbfc47be", "side": "Left" },
+      "target": { "node_id": "84c2104c-c7b5-48b2-9e60-92e949a50552", "side": "Right" },
+      "label": "contains",
+      "source_label": "",
+      "target_label": "",
+      "source_cardinality": "ExactlyOne",
+      "target_cardinality": "ZeroOrMany",
+      "style": { "color": [137, 180, 250, 255], "width": 2.0 }
+    }
+  ]
+}
