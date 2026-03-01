@@ -185,6 +185,12 @@ pub const ENTITY_HEADER_HEIGHT: f32 = 30.0;
 pub const ENTITY_ROW_HEIGHT: f32 = 22.0;
 pub const ENTITY_MIN_WIDTH: f32 = 160.0;
 
+/// Minimum sizes per node kind (width, height).
+pub const MIN_SIZE_SHAPE: [f32; 2] = [40.0, 30.0];
+pub const MIN_SIZE_ENTITY: [f32; 2] = [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + ENTITY_ROW_HEIGHT];
+pub const MIN_SIZE_STICKY: [f32; 2] = [60.0, 60.0];
+pub const MIN_SIZE_TEXT: [f32; 2] = [40.0, 20.0];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -304,6 +310,16 @@ impl Node {
 
     pub fn rect(&self) -> egui::Rect {
         egui::Rect::from_min_size(self.pos(), self.size_vec())
+    }
+
+    /// Returns the minimum allowed [width, height] for this node kind.
+    pub fn min_size(&self) -> [f32; 2] {
+        match &self.kind {
+            NodeKind::Shape { .. } => MIN_SIZE_SHAPE,
+            NodeKind::Entity { .. } => MIN_SIZE_ENTITY,
+            NodeKind::StickyNote { .. } => MIN_SIZE_STICKY,
+            NodeKind::Text { .. } => MIN_SIZE_TEXT,
+        }
     }
 
     pub fn port_position(&self, side: PortSide) -> Pos2 {

@@ -25,6 +25,18 @@ pub enum DiagramMode {
     FigJam,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeHandle {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
 #[derive(Debug, Clone)]
 pub enum DragState {
     None,
@@ -46,6 +58,12 @@ pub enum DragState {
     DraggingNewNode {
         kind: NodeKind,
         current_screen: Pos2,
+    },
+    ResizingNode {
+        node_id: NodeId,
+        handle: ResizeHandle,
+        start_rect: [f32; 4], // [x, y, w, h]
+        start_mouse: Pos2,    // canvas pos at drag start
     },
 }
 
@@ -377,6 +395,32 @@ impl FlowchartApp {
             for edge in &self.document.edges {
                 self.selection.edge_ids.insert(edge.id);
             }
+        }
+
+        // Cmd+1 = fit to content
+        if ctx.input(|i| i.key_pressed(Key::Num1) && i.modifiers.matches_exact(cmd)) {
+            self.fit_to_content();
+        }
+
+        // Cmd+2 = zoom to selection
+        if ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.matches_exact(cmd)) {
+            self.zoom_to_selection();
+        }
+
+        // Cmd+= zoom in (25%)
+        if ctx.input(|i| (i.key_pressed(Key::Equals) || i.key_pressed(Key::Plus)) && i.modifiers.matches_exact(cmd)) {
+            self.step_zoom(1.25);
+        }
+
+        // Cmd+- zoom out (25%)
+        if ctx.input(|i| i.key_pressed(Key::Minus) && i.modifiers.matches_exact(cmd)) {
+            self.step_zoom(0.8);
+        }
+
+        // Cmd+0 = reset zoom to 100%
+        if ctx.input(|i| i.key_pressed(Key::Num0) && i.modifiers.matches_exact(cmd)) {
+            self.viewport.zoom = 1.0;
+            self.viewport.offset = [0.0, 0.0];
         }
     }
 
@@ -1103,8 +1147,19 @@ impl FlowchartApp {
                     }
                 } else {
                     // Select tool
-                    // Check if clicked on a port first (for connect mode)
-                    if let Some(port) = self.hit_test_port(canvas_pos) {
+                    // Check resize handles first (highest priority on selected node)
+                    if let Some((node_id, handle)) = self.hit_test_resize_handle(mouse) {
+                        if let Some(node) = self.document.find_node(&node_id) {
+                            self.drag = DragState::ResizingNode {
+                                node_id,
+                                handle,
+                                start_rect: [node.position[0], node.position[1], node.size[0], node.size[1]],
+                                start_mouse: canvas_pos,
+                            };
+                        }
+                    }
+                    // Check if clicked on a port (for connect mode)
+                    else if let Some(port) = self.hit_test_port(canvas_pos) {
                         // If we clicked a port even in Select mode, start edge creation
                         self.drag = DragState::CreatingEdge {
                             source: port,
@@ -1203,6 +1258,26 @@ impl FlowchartApp {
                             *current_screen = mouse;
                         }
                     }
+                    DragState::ResizingNode {
+                        node_id,
+                        handle,
+                        start_rect,
+                        start_mouse,
+                    } => {
+                        let canvas_mouse = self.viewport.screen_to_canvas(mouse);
+                        let delta = canvas_mouse - *start_mouse;
+                        let nid = *node_id;
+                        let h = *handle;
+                        let sr = *start_rect;
+                        if let Some(node) = self.document.find_node(&nid) {
+                            let min = node.min_size();
+                            let [nx, ny, nw, nh] = Self::compute_resize(h, sr, delta, min);
+                            if let Some(node) = self.document.find_node_mut(&nid) {
+                                node.position = [nx, ny];
+                                node.size = [nw, nh];
+                            }
+                        }
+                    }
                     DragState::BoxSelect { .. } | DragState::None => {}
                 }
             }
@@ -1212,7 +1287,7 @@ impl FlowchartApp {
         if response.drag_stopped() {
             if let Some(mouse) = pointer_pos {
                 match &self.drag {
-                    DragState::DraggingNode { .. } => {
+                    DragState::DraggingNode { .. } | DragState::ResizingNode { .. } => {
                         self.history.push(&self.document);
                     }
                     DragState::CreatingEdge { source, .. } => {
@@ -1319,6 +1394,7 @@ impl FlowchartApp {
             DragState::DraggingNewNode { .. } => egui::CursorIcon::Copy,
             DragState::CreatingEdge { .. } => egui::CursorIcon::Crosshair,
             DragState::BoxSelect { .. } => egui::CursorIcon::Crosshair,
+            DragState::ResizingNode { handle, .. } => Self::resize_cursor(*handle),
             DragState::None => {
                 if self.space_held {
                     egui::CursorIcon::Grab
@@ -1327,15 +1403,20 @@ impl FlowchartApp {
                 } else {
                     // Check what's under cursor
                     if let Some(hover) = pointer_pos {
-                        let canvas_pos = self.viewport.screen_to_canvas(hover);
-                        if self.hit_test_port(canvas_pos).is_some() {
-                            egui::CursorIcon::Crosshair
-                        } else if self.document.node_at_pos(canvas_pos).is_some() {
-                            egui::CursorIcon::Grab
-                        } else if self.hit_test_edge(canvas_pos).is_some() {
-                            egui::CursorIcon::PointingHand
+                        // Check resize handles first
+                        if let Some((_nid, handle)) = self.hit_test_resize_handle(hover) {
+                            Self::resize_cursor(handle)
                         } else {
-                            egui::CursorIcon::Default
+                            let canvas_pos = self.viewport.screen_to_canvas(hover);
+                            if self.hit_test_port(canvas_pos).is_some() {
+                                egui::CursorIcon::Crosshair
+                            } else if self.document.node_at_pos(canvas_pos).is_some() {
+                                egui::CursorIcon::Grab
+                            } else if self.hit_test_edge(canvas_pos).is_some() {
+                                egui::CursorIcon::PointingHand
+                            } else {
+                                egui::CursorIcon::Default
+                            }
                         }
                     } else {
                         egui::CursorIcon::Default
@@ -1376,6 +1457,17 @@ impl FlowchartApp {
             let screen_rect = Rect::from_min_size(screen_pos, screen_size).expand(20.0);
             if screen_rect.intersects(canvas_rect) {
                 self.draw_node(node, &painter, hover_pos);
+            }
+        }
+
+        // ---- Draw resize handles on single-selected node ----
+        if self.selection.node_ids.len() == 1 {
+            let sel_id = *self.selection.node_ids.iter().next().unwrap();
+            if let Some(node) = self.document.find_node(&sel_id) {
+                let top_left = self.viewport.canvas_to_screen(node.pos());
+                let size = node.size_vec() * self.viewport.zoom;
+                let screen_rect = Rect::from_min_size(top_left, size);
+                self.draw_resize_handles(&painter, screen_rect);
             }
         }
 
@@ -2310,6 +2402,174 @@ impl FlowchartApp {
     }
 
     // -----------------------------------------------------------------------
+    // Zoom Helpers
+    // -----------------------------------------------------------------------
+
+    /// Fit viewport to show all content with padding.
+    fn fit_to_content(&mut self) {
+        if self.document.nodes.is_empty() {
+            return;
+        }
+        self.fit_to_rects(
+            self.document.nodes.iter().map(|n| n.rect()).collect(),
+        );
+    }
+
+    /// Zoom viewport to fit selected nodes.
+    fn zoom_to_selection(&mut self) {
+        let rects: Vec<Rect> = self.selection.node_ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.rect())
+            .collect();
+        if rects.is_empty() {
+            return;
+        }
+        self.fit_to_rects(rects);
+    }
+
+    /// Fit viewport to show a set of rects with padding.
+    fn fit_to_rects(&mut self, rects: Vec<Rect>) {
+        if rects.is_empty() {
+            return;
+        }
+        let mut bb = rects[0];
+        for r in &rects[1..] {
+            bb = bb.union(*r);
+        }
+        let padding = 40.0;
+        bb = bb.expand(padding);
+
+        let canvas_w = self.canvas_rect.width();
+        let canvas_h = self.canvas_rect.height();
+        let zoom = (canvas_w / bb.width()).min(canvas_h / bb.height()).clamp(0.1, 10.0);
+
+        self.viewport.zoom = zoom;
+        self.viewport.offset[0] = self.canvas_rect.min.x + canvas_w / 2.0 - bb.center().x * zoom;
+        self.viewport.offset[1] = self.canvas_rect.min.y + canvas_h / 2.0 - bb.center().y * zoom;
+    }
+
+    /// Step zoom by a factor, centered on the canvas center.
+    fn step_zoom(&mut self, factor: f32) {
+        let center = self.canvas_rect.center();
+        let old_zoom = self.viewport.zoom;
+        self.viewport.zoom = (old_zoom * factor).clamp(0.1, 10.0);
+        let ratio = self.viewport.zoom / old_zoom;
+        self.viewport.offset[0] = center.x - ratio * (center.x - self.viewport.offset[0]);
+        self.viewport.offset[1] = center.y - ratio * (center.y - self.viewport.offset[1]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Resize Handles
+    // -----------------------------------------------------------------------
+
+    /// Returns the 8 resize handle positions (in screen space) for a given screen rect.
+    fn resize_handle_positions(screen_rect: Rect) -> [(ResizeHandle, Pos2); 8] {
+        [
+            (ResizeHandle::TopLeft, screen_rect.left_top()),
+            (ResizeHandle::Top, Pos2::new(screen_rect.center().x, screen_rect.min.y)),
+            (ResizeHandle::TopRight, screen_rect.right_top()),
+            (ResizeHandle::Left, Pos2::new(screen_rect.min.x, screen_rect.center().y)),
+            (ResizeHandle::Right, Pos2::new(screen_rect.max.x, screen_rect.center().y)),
+            (ResizeHandle::BottomLeft, screen_rect.left_bottom()),
+            (ResizeHandle::Bottom, Pos2::new(screen_rect.center().x, screen_rect.max.y)),
+            (ResizeHandle::BottomRight, screen_rect.right_bottom()),
+        ]
+    }
+
+    /// Draw 8 small square resize handles around the selected node's screen rect.
+    fn draw_resize_handles(&self, painter: &egui::Painter, screen_rect: Rect) {
+        let handle_half = 4.0;
+        let handles = Self::resize_handle_positions(screen_rect);
+        for (_handle, pos) in &handles {
+            let r = Rect::from_center_size(*pos, Vec2::splat(handle_half * 2.0));
+            painter.rect_filled(r, CornerRadius::ZERO, SELECTION_COLOR);
+            painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, Color32::WHITE), StrokeKind::Outside);
+        }
+    }
+
+    /// Hit test resize handles: checks if cursor (screen pos) is within ~6px of any handle.
+    /// Only checks the single selected node.
+    fn hit_test_resize_handle(&self, screen_pos: Pos2) -> Option<(NodeId, ResizeHandle)> {
+        if self.selection.node_ids.len() != 1 {
+            return None;
+        }
+        let node_id = *self.selection.node_ids.iter().next().unwrap();
+        let node = self.document.find_node(&node_id)?;
+        let top_left = self.viewport.canvas_to_screen(node.pos());
+        let size = node.size_vec() * self.viewport.zoom;
+        let screen_rect = Rect::from_min_size(top_left, size);
+        let handles = Self::resize_handle_positions(screen_rect);
+        let threshold = 6.0;
+        for (handle, pos) in &handles {
+            if (screen_pos - *pos).length() < threshold {
+                return Some((node_id, *handle));
+            }
+        }
+        None
+    }
+
+    /// Returns the appropriate resize cursor for a handle.
+    fn resize_cursor(handle: ResizeHandle) -> egui::CursorIcon {
+        match handle {
+            ResizeHandle::TopLeft | ResizeHandle::BottomRight => egui::CursorIcon::ResizeNwSe,
+            ResizeHandle::TopRight | ResizeHandle::BottomLeft => egui::CursorIcon::ResizeNeSw,
+            ResizeHandle::Left | ResizeHandle::Right => egui::CursorIcon::ResizeHorizontal,
+            ResizeHandle::Top | ResizeHandle::Bottom => egui::CursorIcon::ResizeVertical,
+        }
+    }
+
+    /// Apply resize logic: given the handle, original rect, and mouse delta, compute new [x, y, w, h].
+    fn compute_resize(
+        handle: ResizeHandle,
+        start_rect: [f32; 4],
+        delta: Vec2,
+        min_size: [f32; 2],
+    ) -> [f32; 4] {
+        let [sx, sy, sw, sh] = start_rect;
+        let [min_w, min_h] = min_size;
+        let (mut x, mut y, mut w, mut h) = (sx, sy, sw, sh);
+
+        match handle {
+            ResizeHandle::Right | ResizeHandle::TopRight | ResizeHandle::BottomRight => {
+                w = (sw + delta.x).max(min_w);
+            }
+            ResizeHandle::Left | ResizeHandle::TopLeft | ResizeHandle::BottomLeft => {
+                let new_w = (sw - delta.x).max(min_w);
+                x = sx + sw - new_w;
+                w = new_w;
+            }
+            _ => {}
+        }
+
+        match handle {
+            ResizeHandle::Bottom | ResizeHandle::BottomLeft | ResizeHandle::BottomRight => {
+                h = (sh + delta.y).max(min_h);
+            }
+            ResizeHandle::Top | ResizeHandle::TopLeft | ResizeHandle::TopRight => {
+                let new_h = (sh - delta.y).max(min_h);
+                y = sy + sh - new_h;
+                h = new_h;
+            }
+            _ => {}
+        }
+
+        // Edge-only handles: don't change the other axis
+        match handle {
+            ResizeHandle::Left | ResizeHandle::Right => {
+                y = sy;
+                h = sh;
+            }
+            ResizeHandle::Top | ResizeHandle::Bottom => {
+                x = sx;
+                w = sw;
+            }
+            _ => {}
+        }
+
+        [x, y, w, h]
+    }
+
+    // -----------------------------------------------------------------------
     // Snap
     // -----------------------------------------------------------------------
 
@@ -2397,4 +2657,232 @@ fn cubic_bezier_point(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, t: f32) -> Pos2 {
         uuu * p0.x + 3.0 * uu * t * p1.x + 3.0 * u * tt * p2.x + ttt * p3.x,
         uuu * p0.y + 3.0 * uu * t * p1.y + 3.0 * u * tt * p2.y + ttt * p3.y,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::*;
+
+    // -- compute_resize tests --
+
+    #[test]
+    fn resize_bottom_right_grows() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(30.0, 20.0);
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::BottomRight, start, delta, min);
+        assert_eq!(x, 100.0); // position unchanged
+        assert_eq!(y, 100.0);
+        assert_eq!(w, 170.0); // 140 + 30
+        assert_eq!(h, 80.0);  // 60 + 20
+    }
+
+    #[test]
+    fn resize_top_left_grows() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(-20.0, -10.0); // drag up-left
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::TopLeft, start, delta, min);
+        assert_eq!(x, 80.0);  // moved left by 20
+        assert_eq!(y, 90.0);  // moved up by 10
+        assert_eq!(w, 160.0); // 140 + 20
+        assert_eq!(h, 70.0);  // 60 + 10
+    }
+
+    #[test]
+    fn resize_right_only_changes_width() {
+        let start = [100.0, 200.0, 140.0, 60.0];
+        let delta = Vec2::new(50.0, 999.0); // y should be ignored
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::Right, start, delta, min);
+        assert_eq!(x, 100.0);
+        assert_eq!(y, 200.0);
+        assert_eq!(w, 190.0);
+        assert_eq!(h, 60.0); // unchanged
+    }
+
+    #[test]
+    fn resize_bottom_only_changes_height() {
+        let start = [100.0, 200.0, 140.0, 60.0];
+        let delta = Vec2::new(999.0, 40.0); // x should be ignored
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::Bottom, start, delta, min);
+        assert_eq!(x, 100.0);
+        assert_eq!(y, 200.0);
+        assert_eq!(w, 140.0); // unchanged
+        assert_eq!(h, 100.0);
+    }
+
+    #[test]
+    fn resize_clamps_to_min_size_shape() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(-200.0, -200.0); // try to shrink way below min
+        let min = MIN_SIZE_SHAPE; // [40, 30]
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::BottomRight, start, delta, min);
+        assert_eq!(x, 100.0);
+        assert_eq!(y, 100.0);
+        assert_eq!(w, 40.0);  // clamped to min
+        assert_eq!(h, 30.0);  // clamped to min
+    }
+
+    #[test]
+    fn resize_clamps_to_min_size_sticky() {
+        let start = [50.0, 50.0, 150.0, 150.0];
+        let delta = Vec2::new(-200.0, -200.0);
+        let min = MIN_SIZE_STICKY; // [60, 60]
+        let [_x, _y, w, h] = FlowchartApp::compute_resize(ResizeHandle::BottomRight, start, delta, min);
+        assert_eq!(w, 60.0);
+        assert_eq!(h, 60.0);
+    }
+
+    #[test]
+    fn resize_top_left_clamps_adjusts_position() {
+        // When dragging top-left to shrink, position should move to maintain bottom-right corner
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(200.0, 200.0); // drag far right/down => shrink
+        let min = MIN_SIZE_SHAPE; // [40, 30]
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::TopLeft, start, delta, min);
+        assert_eq!(w, 40.0);  // clamped
+        assert_eq!(h, 30.0);  // clamped
+        assert_eq!(x, 200.0); // 100 + 140 - 40
+        assert_eq!(y, 130.0); // 100 + 60 - 30
+    }
+
+    #[test]
+    fn resize_left_moves_x_keeps_right_edge() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(-30.0, 0.0);
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::Left, start, delta, min);
+        assert_eq!(x, 70.0);   // moved left
+        assert_eq!(w, 170.0);  // grew
+        assert_eq!(y, 100.0);  // unchanged
+        assert_eq!(h, 60.0);   // unchanged
+    }
+
+    #[test]
+    fn resize_top_moves_y_keeps_bottom_edge() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(0.0, -25.0);
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::Top, start, delta, min);
+        assert_eq!(x, 100.0);  // unchanged
+        assert_eq!(w, 140.0);  // unchanged
+        assert_eq!(y, 75.0);   // moved up
+        assert_eq!(h, 85.0);   // grew
+    }
+
+    // -- resize_handle_positions tests --
+
+    #[test]
+    fn handle_positions_are_correct() {
+        let rect = Rect::from_min_size(Pos2::new(100.0, 200.0), Vec2::new(200.0, 100.0));
+        let handles = FlowchartApp::resize_handle_positions(rect);
+
+        // TopLeft
+        assert_eq!(handles[0].0, ResizeHandle::TopLeft);
+        assert_eq!(handles[0].1, Pos2::new(100.0, 200.0));
+
+        // Top (center top)
+        assert_eq!(handles[1].0, ResizeHandle::Top);
+        assert_eq!(handles[1].1, Pos2::new(200.0, 200.0));
+
+        // TopRight
+        assert_eq!(handles[2].0, ResizeHandle::TopRight);
+        assert_eq!(handles[2].1, Pos2::new(300.0, 200.0));
+
+        // Left (center left)
+        assert_eq!(handles[3].0, ResizeHandle::Left);
+        assert_eq!(handles[3].1, Pos2::new(100.0, 250.0));
+
+        // Right (center right)
+        assert_eq!(handles[4].0, ResizeHandle::Right);
+        assert_eq!(handles[4].1, Pos2::new(300.0, 250.0));
+
+        // BottomLeft
+        assert_eq!(handles[5].0, ResizeHandle::BottomLeft);
+        assert_eq!(handles[5].1, Pos2::new(100.0, 300.0));
+
+        // Bottom (center bottom)
+        assert_eq!(handles[6].0, ResizeHandle::Bottom);
+        assert_eq!(handles[6].1, Pos2::new(200.0, 300.0));
+
+        // BottomRight
+        assert_eq!(handles[7].0, ResizeHandle::BottomRight);
+        assert_eq!(handles[7].1, Pos2::new(300.0, 300.0));
+    }
+
+    // -- resize cursor tests --
+
+    #[test]
+    fn resize_cursors_are_correct() {
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::TopLeft), egui::CursorIcon::ResizeNwSe);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::BottomRight), egui::CursorIcon::ResizeNwSe);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::TopRight), egui::CursorIcon::ResizeNeSw);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::BottomLeft), egui::CursorIcon::ResizeNeSw);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::Left), egui::CursorIcon::ResizeHorizontal);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::Right), egui::CursorIcon::ResizeHorizontal);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::Top), egui::CursorIcon::ResizeVertical);
+        assert_eq!(FlowchartApp::resize_cursor(ResizeHandle::Bottom), egui::CursorIcon::ResizeVertical);
+    }
+
+    // -- Node min_size tests --
+
+    #[test]
+    fn node_min_sizes_are_correct() {
+        let shape_node = Node::new(NodeShape::Rectangle, Pos2::new(0.0, 0.0));
+        assert_eq!(shape_node.min_size(), MIN_SIZE_SHAPE);
+
+        let sticky_node = Node::new_sticky(StickyColor::Yellow, Pos2::new(0.0, 0.0));
+        assert_eq!(sticky_node.min_size(), MIN_SIZE_STICKY);
+
+        let entity_node = Node::new_entity(Pos2::new(0.0, 0.0));
+        assert_eq!(entity_node.min_size(), MIN_SIZE_ENTITY);
+
+        let text_node = Node::new_text(Pos2::new(0.0, 0.0));
+        assert_eq!(text_node.min_size(), MIN_SIZE_TEXT);
+    }
+
+    // -- All 8 handles resize correctly (corner + edge) --
+
+    #[test]
+    fn resize_top_right_grows() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(20.0, -15.0); // right + up
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::TopRight, start, delta, min);
+        assert_eq!(x, 100.0);  // unchanged (right edge moves)
+        assert_eq!(y, 85.0);   // moved up
+        assert_eq!(w, 160.0);  // grew right
+        assert_eq!(h, 75.0);   // grew up
+    }
+
+    #[test]
+    fn resize_bottom_left_grows() {
+        let start = [100.0, 100.0, 140.0, 60.0];
+        let delta = Vec2::new(-20.0, 15.0); // left + down
+        let min = MIN_SIZE_SHAPE;
+        let [x, y, w, h] = FlowchartApp::compute_resize(ResizeHandle::BottomLeft, start, delta, min);
+        assert_eq!(x, 80.0);   // moved left
+        assert_eq!(y, 100.0);  // unchanged (bottom edge moves)
+        assert_eq!(w, 160.0);  // grew left
+        assert_eq!(h, 75.0);   // grew down
+    }
+
+    // -- Entity min size enforced --
+
+    #[test]
+    fn resize_entity_respects_min() {
+        let start = [0.0, 0.0, 200.0, 100.0];
+        let delta = Vec2::new(-300.0, -300.0);
+        let min = MIN_SIZE_ENTITY; // [160, 52]
+        let [_x, _y, w, h] = FlowchartApp::compute_resize(ResizeHandle::BottomRight, start, delta, min);
+        assert_eq!(w, 160.0);
+        assert_eq!(h, MIN_SIZE_ENTITY[1]);
+    }
 }
