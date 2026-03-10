@@ -1,0 +1,531 @@
+use egui::{
+    Align2, Color32, CornerRadius, FontId, Pos2, Sense, SidePanel, Stroke, StrokeKind,
+};
+use crate::export;
+use crate::io;
+use crate::model::*;
+use super::{FlowchartApp, DiagramMode, DragState, Tool};
+use super::theme::*;
+
+impl FlowchartApp {
+    pub(crate) fn draw_toolbar(&mut self, ctx: &egui::Context) {
+        SidePanel::left("toolbar")
+            .resizable(false)
+            .exact_width(TOOLBAR_WIDTH)
+            .frame(egui::Frame {
+                fill: MANTLE,
+                inner_margin: egui::Margin::same(16),
+                stroke: Stroke::new(1.0, SURFACE1),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Light Figma")
+                            .size(18.0)
+                            .strong()
+                            .color(TEXT_PRIMARY),
+                    );
+                });
+                ui.add_space(16.0);
+
+                // File actions
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "FILE");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let btn_size = egui::vec2(84.0, 32.0);
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(egui::RichText::new("Save").size(12.0)),
+                        )
+                        .clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Flowchart", &["flow"])
+                            .set_file_name("untitled.flow")
+                            .save_file()
+                        {
+                            match io::save_document(&self.document, &path) {
+                                Ok(()) => {
+                                    self.status_message =
+                                        Some(("Saved!".to_string(), std::time::Instant::now()));
+                                }
+                                Err(e) => eprintln!("Save error: {}", e),
+                            }
+                        }
+                    }
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(egui::RichText::new("Open").size(12.0)),
+                        )
+                        .clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Flowchart", &["flow"])
+                            .pick_file()
+                        {
+                            match io::load_document(&path) {
+                                Ok(doc) => {
+                                    self.document = doc;
+                                    self.selection.clear();
+                                    self.history.push(&self.document);
+                                }
+                                Err(e) => eprintln!("Load error: {}", e),
+                            }
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+
+                // Export
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "EXPORT");
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    let btn_size = egui::vec2(54.0, 30.0);
+                    for (label, ext, export_fn) in [
+                        ("PNG", "png", "png" as &str),
+                        ("SVG", "svg", "svg"),
+                        ("PDF", "pdf", "pdf"),
+                    ] {
+                        if ui
+                            .add_sized(
+                                btn_size,
+                                egui::Button::new(egui::RichText::new(label).size(11.0)),
+                            )
+                            .clicked()
+                        {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter(label, &[ext])
+                                .set_file_name(format!("flowchart.{}", ext))
+                                .save_file()
+                            {
+                                let result = match export_fn {
+                                    "png" => export::export_png(&self.document, &path),
+                                    "svg" => export::export_svg(&self.document, &path),
+                                    "pdf" => export::export_pdf(&self.document, &path),
+                                    _ => Ok(()),
+                                };
+                                match result {
+                                    Ok(()) => {
+                                        self.status_message = Some((
+                                            format!("Exported {}!", label),
+                                            std::time::Instant::now(),
+                                        ));
+                                    }
+                                    Err(e) => eprintln!("Export error: {}", e),
+                                }
+                            }
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+
+                // Tools
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "TOOLS");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let select_text = if self.tool == Tool::Select {
+                        egui::RichText::new("Select").size(12.0).strong().color(ACCENT)
+                    } else {
+                        egui::RichText::new("Select").size(12.0).color(TEXT_SECONDARY)
+                    };
+                    let connect_text = if self.tool == Tool::Connect {
+                        egui::RichText::new("Connect").size(12.0).strong().color(ACCENT)
+                    } else {
+                        egui::RichText::new("Connect").size(12.0).color(TEXT_SECONDARY)
+                    };
+                    let btn_size = egui::vec2(84.0, 32.0);
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(select_text)
+                                .fill(if self.tool == Tool::Select { SURFACE1 } else { SURFACE0 }),
+                        )
+                        .clicked()
+                    {
+                        self.tool = Tool::Select;
+                    }
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(connect_text)
+                                .fill(if self.tool == Tool::Connect { SURFACE1 } else { SURFACE0 }),
+                        )
+                        .clicked()
+                    {
+                        self.tool = Tool::Connect;
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("V Select  \u{00b7}  E Connect")
+                        .size(9.0)
+                        .color(TEXT_DIM),
+                );
+                ui.add_space(8.0);
+
+                // Mode tabs
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "MODE");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let modes = [
+                        (DiagramMode::Flowchart, "Flow"),
+                        (DiagramMode::ER, "ER"),
+                        (DiagramMode::FigJam, "FigJam"),
+                    ];
+                    for (mode, label) in modes {
+                        let is_active = self.diagram_mode == mode;
+                        let text = if is_active {
+                            egui::RichText::new(label).size(11.0).strong().color(ACCENT)
+                        } else {
+                            egui::RichText::new(label).size(11.0).color(TEXT_SECONDARY)
+                        };
+                        if ui
+                            .add(
+                                egui::Button::new(text)
+                                    .fill(if is_active { SURFACE1 } else { SURFACE0 }),
+                            )
+                            .clicked()
+                        {
+                            self.diagram_mode = mode;
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+
+                // Shapes (mode-dependent)
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "SHAPES");
+                ui.add_space(6.0);
+
+                match self.diagram_mode {
+                    DiagramMode::Flowchart => {
+                        self.draw_flowchart_shapes(ui, ctx);
+                    }
+                    DiagramMode::ER => {
+                        let available_width = ui.available_width();
+                        if ui
+                            .add_sized(
+                                egui::vec2(available_width, 40.0),
+                                egui::Button::new(
+                                    egui::RichText::new("+ Entity").size(13.0).color(TEXT_PRIMARY),
+                                )
+                                .fill(SURFACE0),
+                            )
+                            .clicked()
+                        {
+                            let center_screen = self.canvas_rect.center();
+                            let center_canvas = self.viewport.screen_to_canvas(center_screen);
+                            let node = Node::new_entity(center_canvas);
+                            self.selection.clear();
+                            self.selection.node_ids.insert(node.id);
+                            self.document.nodes.push(node);
+                            self.history.push(&self.document);
+                        }
+                    }
+                    DiagramMode::FigJam => {
+                        self.draw_figjam_shapes(ui, ctx);
+                    }
+                }
+
+                ui.add_space(8.0);
+
+                // View
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "VIEW");
+                ui.add_space(4.0);
+
+                // 2D/3D toggle
+                ui.horizontal(|ui| {
+                    let is_2d = self.view_mode == super::ViewMode::TwoD;
+                    let is_3d = self.view_mode == super::ViewMode::ThreeD;
+                    let btn_size = egui::vec2(84.0, 30.0);
+                    let text_2d = if is_2d {
+                        egui::RichText::new("2D").size(12.0).strong().color(ACCENT)
+                    } else {
+                        egui::RichText::new("2D").size(12.0).color(TEXT_SECONDARY)
+                    };
+                    let text_3d = if is_3d {
+                        egui::RichText::new("3D").size(12.0).strong().color(ACCENT)
+                    } else {
+                        egui::RichText::new("3D").size(12.0).color(TEXT_SECONDARY)
+                    };
+                    if ui.add_sized(btn_size, egui::Button::new(text_2d)
+                        .fill(if is_2d { SURFACE1 } else { SURFACE0 })
+                    ).clicked() && !is_2d {
+                        self.sync_viewport_to_camera();
+                        self.view_mode = super::ViewMode::TwoD;
+                        self.view_transition_target = 0.0;
+                        self.status_message = Some(("2D View".to_string(), std::time::Instant::now()));
+                    }
+                    if ui.add_sized(btn_size, egui::Button::new(text_3d)
+                        .fill(if is_3d { SURFACE1 } else { SURFACE0 })
+                    ).clicked() && !is_3d {
+                        self.sync_camera_to_viewport();
+                        self.view_mode = super::ViewMode::ThreeD;
+                        self.view_transition_target = 1.0;
+                        self.status_message = Some(("3D View".to_string(), std::time::Instant::now()));
+                    }
+                });
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.show_grid, "");
+                    ui.label(egui::RichText::new("Grid").size(12.0).color(TEXT_SECONDARY));
+                    ui.add_space(12.0);
+                    ui.checkbox(&mut self.snap_to_grid, "");
+                    ui.label(egui::RichText::new("Snap").size(12.0).color(TEXT_SECONDARY));
+                });
+                ui.add_space(8.0);
+
+                // Zoom
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{:.0}%", self.viewport.zoom * 100.0))
+                            .size(12.0)
+                            .color(TEXT_DIM)
+                            .monospace(),
+                    );
+                    if ui.small_button("Reset").clicked() {
+                        self.viewport.zoom = 1.0;
+                        self.viewport.offset = [0.0, 0.0];
+                    }
+                });
+
+                // Bottom spacer + node count
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} nodes  {}  edges",
+                            self.document.nodes.len(),
+                            self.document.edges.len()
+                        ))
+                        .size(11.0)
+                        .color(TEXT_DIM),
+                    );
+                });
+            });
+    }
+
+    fn draw_flowchart_shapes(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let shapes = [
+            (NodeShape::Rectangle, "Rectangle"),
+            (NodeShape::RoundedRect, "Rounded"),
+            (NodeShape::Diamond, "Diamond"),
+            (NodeShape::Circle, "Circle"),
+            (NodeShape::Parallelogram, "Parallel"),
+        ];
+
+        let available_width = ui.available_width();
+        let btn_width = (available_width - 10.0) / 2.0;
+        let btn_height = 56.0;
+
+        let mut i = 0;
+        while i < shapes.len() {
+            ui.horizontal(|ui| {
+                for j in 0..2 {
+                    if i + j < shapes.len() {
+                        let (shape, name) = shapes[i + j];
+                        let response = self.draw_shape_button(ui, shape, name, btn_width, btn_height);
+                        if response.clicked() {
+                            let center_screen = self.canvas_rect.center();
+                            let center_canvas = self.viewport.screen_to_canvas(center_screen);
+                            let node = Node::new(shape, center_canvas);
+                            self.selection.clear();
+                            self.selection.node_ids.insert(node.id);
+                            self.document.nodes.push(node);
+                            self.history.push(&self.document);
+                        }
+                        if response.drag_started() {
+                            if let Some(pos) = response.interact_pointer_pos() {
+                                self.drag = DragState::DraggingNewNode {
+                                    kind: NodeKind::Shape {
+                                        shape,
+                                        label: "New Node".into(),
+                                        description: String::new(),
+                                    },
+                                    current_screen: pos,
+                                };
+                            }
+                        }
+                        if response.dragged() {
+                            if let DragState::DraggingNewNode {
+                                ref mut current_screen,
+                                ..
+                            } = self.drag
+                            {
+                                if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                                    *current_screen = pos;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            i += 2;
+        }
+    }
+
+    fn draw_figjam_shapes(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+        let available_width = ui.available_width();
+        // Sticky note button
+        if ui
+            .add_sized(
+                egui::vec2(available_width, 40.0),
+                egui::Button::new(
+                    egui::RichText::new("+ Sticky Note").size(13.0).color(TEXT_PRIMARY),
+                )
+                .fill(SURFACE0),
+            )
+            .clicked()
+        {
+            let center_screen = self.canvas_rect.center();
+            let center_canvas = self.viewport.screen_to_canvas(center_screen);
+            let node = Node::new_sticky(self.selected_sticky_color, center_canvas);
+            self.selection.clear();
+            self.selection.node_ids.insert(node.id);
+            self.document.nodes.push(node);
+            self.history.push(&self.document);
+        }
+        ui.add_space(4.0);
+
+        // Sticky color picker
+        ui.horizontal(|ui| {
+            for color in &StickyColor::ALL {
+                let fill = to_color32(color.fill_rgba());
+                let is_selected = self.selected_sticky_color == *color;
+                let size = if is_selected { 22.0 } else { 18.0 };
+                let (response, painter) =
+                    ui.allocate_painter(egui::vec2(size, size), Sense::click());
+                let r = response.rect;
+                painter.circle_filled(r.center(), size / 2.0, fill);
+                if is_selected {
+                    painter.circle_stroke(r.center(), size / 2.0, Stroke::new(2.0, Color32::WHITE));
+                }
+                if response.clicked() {
+                    self.selected_sticky_color = *color;
+                }
+            }
+        });
+        ui.add_space(8.0);
+
+        // Text node button
+        if ui
+            .add_sized(
+                egui::vec2(available_width, 36.0),
+                egui::Button::new(
+                    egui::RichText::new("+ Text").size(13.0).color(TEXT_PRIMARY),
+                )
+                .fill(SURFACE0),
+            )
+            .clicked()
+        {
+            let center_screen = self.canvas_rect.center();
+            let center_canvas = self.viewport.screen_to_canvas(center_screen);
+            let node = Node::new_text(center_canvas);
+            self.selection.clear();
+            self.selection.node_ids.insert(node.id);
+            self.document.nodes.push(node);
+            self.history.push(&self.document);
+        }
+    }
+
+    fn draw_shape_button(
+        &self,
+        ui: &mut egui::Ui,
+        shape: NodeShape,
+        name: &str,
+        width: f32,
+        height: f32,
+    ) -> egui::Response {
+        let (response, painter) =
+            ui.allocate_painter(egui::vec2(width, height), Sense::click_and_drag());
+        let rect = response.rect;
+
+        let bg = if response.hovered() { SURFACE1 } else { SURFACE0 };
+        painter.rect_filled(rect, CornerRadius::same(6), bg);
+        if response.hovered() {
+            painter.rect_stroke(
+                rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0, ACCENT),
+                StrokeKind::Inside,
+            );
+        }
+
+        let preview_center = Pos2::new(rect.center().x, rect.min.y + height * 0.38);
+        let pw = width * 0.35;
+        let ph = height * 0.32;
+        let shape_stroke = Stroke::new(1.5, ACCENT);
+        let shape_fill = ACCENT_FAINT;
+
+        match shape {
+            NodeShape::Rectangle => {
+                let r = egui::Rect::from_center_size(preview_center, egui::vec2(pw, ph));
+                painter.rect_filled(r, CornerRadius::ZERO, shape_fill);
+                painter.rect_stroke(r, CornerRadius::ZERO, shape_stroke, StrokeKind::Outside);
+            }
+            NodeShape::RoundedRect => {
+                let r = egui::Rect::from_center_size(preview_center, egui::vec2(pw, ph));
+                painter.rect_filled(r, CornerRadius::same(4), shape_fill);
+                painter.rect_stroke(r, CornerRadius::same(4), shape_stroke, StrokeKind::Outside);
+            }
+            NodeShape::Diamond => {
+                let c = preview_center;
+                let hw = pw * 0.5;
+                let hh = ph * 0.5;
+                let pts = vec![
+                    Pos2::new(c.x, c.y - hh),
+                    Pos2::new(c.x + hw, c.y),
+                    Pos2::new(c.x, c.y + hh),
+                    Pos2::new(c.x - hw, c.y),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+            NodeShape::Circle => {
+                let r = pw.min(ph) * 0.5;
+                painter.circle_filled(preview_center, r, shape_fill);
+                painter.circle_stroke(preview_center, r, shape_stroke);
+            }
+            NodeShape::Parallelogram => {
+                let skew = pw * 0.2;
+                let half_w = pw * 0.5;
+                let half_h = ph * 0.5;
+                let pts = vec![
+                    Pos2::new(preview_center.x - half_w + skew, preview_center.y - half_h),
+                    Pos2::new(preview_center.x + half_w, preview_center.y - half_h),
+                    Pos2::new(preview_center.x + half_w - skew, preview_center.y + half_h),
+                    Pos2::new(preview_center.x - half_w, preview_center.y + half_h),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+        }
+
+        painter.text(
+            Pos2::new(rect.center().x, rect.max.y - 10.0),
+            Align2::CENTER_CENTER,
+            name,
+            FontId::proportional(10.0),
+            if response.hovered() {
+                TEXT_PRIMARY
+            } else {
+                TEXT_SECONDARY
+            },
+        );
+
+        response
+    }
+}

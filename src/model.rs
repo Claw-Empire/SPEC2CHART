@@ -197,6 +197,7 @@ pub struct Node {
     pub kind: NodeKind,
     pub position: [f32; 2],
     pub size: [f32; 2],
+    pub z_offset: f32,
     pub style: NodeStyle,
 }
 
@@ -217,6 +218,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
+            z_offset: 0.0,
             style: NodeStyle::default(),
         }
     }
@@ -230,6 +232,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
+            z_offset: 0.0,
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -249,6 +252,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
+            z_offset: 0.0,
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -267,6 +271,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
+            z_offset: 0.0,
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
