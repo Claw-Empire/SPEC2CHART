@@ -52,7 +52,7 @@ pub fn specgraph_to_document(sg: &SpecGraph) -> Result<FlowchartDocument, String
     }
 
     // Auto-layout: assign positions to nodes that don't have them
-    auto_layout(&mut doc);
+    super::layout::hierarchical_layout(&mut doc);
 
     Ok(doc)
 }
@@ -299,36 +299,6 @@ fn spec_to_edge(se: &SpecEdge, id_map: &HashMap<String, NodeId>) -> Result<Edge,
         if let Some(width) = s.width { edge.style.width = width; }
     }
     Ok(edge)
-}
-
-// ---------------------------------------------------------------------------
-// Auto-layout
-// ---------------------------------------------------------------------------
-
-fn auto_layout(doc: &mut FlowchartDocument) {
-    let needs_layout: Vec<usize> = doc.nodes.iter().enumerate()
-        .filter(|(_, n)| n.position == [0.0, 0.0])
-        .map(|(i, _)| i)
-        .collect();
-
-    if needs_layout.is_empty() {
-        return;
-    }
-
-    let cols = (needs_layout.len() as f32).sqrt().ceil() as usize;
-    let spacing_x = 200.0;
-    let spacing_y = 140.0;
-    let start_x = 100.0;
-    let start_y = 100.0;
-
-    for (i, idx) in needs_layout.iter().enumerate() {
-        let col = i % cols;
-        let row = i / cols;
-        doc.nodes[*idx].position = [
-            start_x + col as f32 * spacing_x,
-            start_y + row as f32 * spacing_y,
-        ];
-    }
 }
 
 // ---------------------------------------------------------------------------

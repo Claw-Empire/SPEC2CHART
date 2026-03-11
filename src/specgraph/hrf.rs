@@ -112,8 +112,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     doc.description = preamble_lines.join("\n");
 
-    // Auto-layout all nodes at (0,0)
-    auto_layout_grid(&mut doc);
+    // Auto-layout: topological / hierarchical placement
+    super::layout::hierarchical_layout(&mut doc);
 
     Ok(doc)
 }
@@ -446,33 +446,6 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "parallelogram" | "parallel" | "io" => NodeShape::Parallelogram,
         "connector" | "api" | "interface" | "protocol" | "gateway" => NodeShape::Connector,
         _ => NodeShape::RoundedRect,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Auto-layout
-// ---------------------------------------------------------------------------
-
-fn auto_layout_grid(doc: &mut FlowchartDocument) {
-    if doc.nodes.is_empty() {
-        return;
-    }
-
-    let cols = (doc.nodes.len() as f32).sqrt().ceil().max(1.0) as usize;
-    let spacing_x = 220.0;
-    let spacing_y = 150.0;
-    let start_x = 100.0;
-    let start_y = 100.0;
-
-    for (i, node) in doc.nodes.iter_mut().enumerate() {
-        if node.position == [0.0, 0.0] {
-            let col = i % cols;
-            let row = i / cols;
-            node.position = [
-                start_x + col as f32 * spacing_x,
-                start_y + row as f32 * spacing_y,
-            ];
-        }
     }
 }
 

@@ -1,6 +1,7 @@
 mod schema;
 mod convert;
 mod hrf;
+pub mod layout;
 pub mod llm;
 
 pub use schema::SpecGraph;
