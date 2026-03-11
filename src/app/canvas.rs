@@ -163,7 +163,9 @@ impl FlowchartApp {
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
+        self.draw_node_tooltip(&painter, hover_pos, canvas_rect);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
+        self.draw_canvas_hud(&painter, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
     }
 
@@ -614,6 +616,88 @@ impl FlowchartApp {
                 ctx.request_repaint();
             }
         }
+    }
+
+    // --- Node tooltip ---
+
+    fn draw_node_tooltip(&self, painter: &egui::Painter, hover_pos: Option<Pos2>, canvas_rect: Rect) {
+        let Some(mouse) = hover_pos else { return };
+        if !canvas_rect.contains(mouse) { return }
+
+        // Find hovered node and extract description
+        let description = self.document.nodes.iter().rev().find_map(|node| {
+            let top_left = self.viewport.canvas_to_screen(node.pos());
+            let sr = Rect::from_min_size(top_left, node.size_vec() * self.viewport.zoom);
+            if !sr.contains(mouse) { return None; }
+            match &node.kind {
+                crate::model::NodeKind::Shape { description, label, .. } if !description.is_empty() => {
+                    Some((label.clone(), description.clone()))
+                }
+                _ => None,
+            }
+        });
+
+        let Some((label, desc)) = description else { return };
+
+        let max_w = 240.0;
+        let pad = 10.0;
+        let font_label = egui::FontId::proportional(12.0);
+        let font_desc  = egui::FontId::proportional(11.0);
+
+        // Measure text height (approximate: 14px per line)
+        let desc_lines = desc.lines().count().max(1);
+        let total_h = 14.0 + (desc_lines as f32) * 14.0 + pad * 2.0 + 4.0;
+
+        let mut tx = mouse.x + 14.0;
+        let mut ty = mouse.y + 14.0;
+        // Keep on screen
+        if tx + max_w + pad > canvas_rect.max.x { tx = mouse.x - max_w - 14.0; }
+        if ty + total_h > canvas_rect.max.y { ty = mouse.y - total_h - 14.0; }
+
+        let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), egui::Vec2::new(max_w, total_h));
+        painter.rect_filled(bg_rect, egui::CornerRadius::same(6), TOOLTIP_BG);
+        painter.rect_stroke(bg_rect, egui::CornerRadius::same(6), egui::Stroke::new(1.0, TOOLTIP_BORDER), egui::StrokeKind::Outside);
+
+        painter.text(Pos2::new(tx + pad, ty + pad), egui::Align2::LEFT_TOP, &label, font_label, TEXT_SECONDARY);
+        painter.text(Pos2::new(tx + pad, ty + pad + 16.0), egui::Align2::LEFT_TOP, &desc, font_desc, TEXT_DIM);
+    }
+
+    // --- Canvas HUD ---
+
+    fn draw_canvas_hud(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
+        let n_nodes = self.document.nodes.len();
+        let n_edges = self.document.edges.len();
+        let n_sel = self.selection.node_ids.len();
+
+        let line1 = format!("{zoom_pct}%");
+        let line2 = if n_sel > 0 {
+            format!("{n_sel} selected  ·  {n_nodes}N {n_edges}E")
+        } else {
+            format!("{n_nodes} nodes  ·  {n_edges} edges")
+        };
+
+        let pad = 8.0;
+        let x = canvas_rect.min.x + pad;
+        let y = canvas_rect.max.y - 36.0;
+
+        let font_big = egui::FontId::proportional(15.0);
+        let font_sm  = egui::FontId::proportional(10.5);
+
+        painter.text(
+            Pos2::new(x, y),
+            egui::Align2::LEFT_TOP,
+            &line1,
+            font_big,
+            TEXT_SECONDARY,
+        );
+        painter.text(
+            Pos2::new(x, y + 17.0),
+            egui::Align2::LEFT_TOP,
+            &line2,
+            font_sm,
+            TEXT_DIM,
+        );
     }
 
     // --- Grid ---

@@ -54,6 +54,10 @@ pub const ROW_DIVIDER: Color32 = Color32::from_rgba_premultiplied(100, 100, 100,
 // Node preview (drag from toolbar)
 pub const PREVIEW_FILL: Color32 = Color32::from_rgba_premultiplied(100, 160, 255, 80);
 
+// Tooltip
+pub const TOOLTIP_BG: Color32 = Color32::from_rgba_premultiplied(18, 18, 30, 230);
+pub const TOOLTIP_BORDER: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 200);
+
 // Dimensions
 pub const PORT_RADIUS: f32 = 4.5;
 pub const PORT_HIT_RADIUS: f32 = 12.0;

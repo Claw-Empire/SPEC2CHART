@@ -148,5 +148,39 @@ impl FlowchartApp {
             self.viewport.zoom = 1.0;
             self.viewport.offset = [0.0, 0.0];
         }
+
+        // F = fit selection (or all if nothing selected)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.is_none()) {
+            if !self.selection.is_empty() {
+                self.zoom_to_selection();
+            } else {
+                self.fit_to_content();
+            }
+        }
+
+        // Cmd+D = duplicate selected nodes
+        if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.matches_exact(cmd))
+            && !self.selection.node_ids.is_empty()
+        {
+            let offset = Vec2::new(24.0, 24.0);
+            let originals: Vec<crate::model::Node> = self.selection.node_ids.iter()
+                .filter_map(|id| self.document.find_node(id).cloned())
+                .collect();
+            self.selection.clear();
+            for template in originals {
+                let mut node = template;
+                node.id = NodeId::new();
+                node.set_pos(node.pos() + offset);
+                self.selection.node_ids.insert(node.id);
+                self.document.nodes.push(node);
+            }
+            self.history.push(&self.document);
+            self.status_message = Some(("Duplicated".to_string(), std::time::Instant::now()));
+        }
+
+        // Escape = deselect
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.selection.clear();
+        }
     }
 }

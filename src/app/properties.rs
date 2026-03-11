@@ -30,11 +30,7 @@ impl FlowchartApp {
                 if total == 0 {
                     self.draw_empty_selection(ui);
                 } else if total > 1 {
-                    ui.label(
-                        egui::RichText::new(format!("{} items selected", total))
-                            .size(13.0)
-                            .color(TEXT_SECONDARY),
-                    );
+                    self.draw_multi_selection_tools(ui, sel_nodes, total);
                 } else if sel_nodes == 1 {
                     self.draw_node_properties(ui);
                 } else if sel_edges == 1 {
@@ -459,5 +455,165 @@ impl FlowchartApp {
             });
             ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
         }
+    }
+
+    fn draw_multi_selection_tools(&mut self, ui: &mut egui::Ui, sel_nodes: usize, total: usize) {
+        ui.label(
+            egui::RichText::new(format!("{} items selected", total))
+                .size(13.0)
+                .color(TEXT_SECONDARY),
+        );
+        ui.add_space(16.0);
+
+        if sel_nodes < 2 { return; }
+
+        Self::draw_section_header(ui, "ALIGN");
+        ui.add_space(6.0);
+
+        // Row 1: horizontal alignment
+        ui.horizontal(|ui| {
+            if ui.button("⬤← Left").on_hover_text("Align left edges").clicked() {
+                self.align_nodes_left();
+            }
+            if ui.button("⬤↔ Center").on_hover_text("Center horizontally").clicked() {
+                self.align_nodes_center_h();
+            }
+            if ui.button("→⬤ Right").on_hover_text("Align right edges").clicked() {
+                self.align_nodes_right();
+            }
+        });
+        ui.add_space(4.0);
+        // Row 2: vertical alignment
+        ui.horizontal(|ui| {
+            if ui.button("⬤↑ Top").on_hover_text("Align top edges").clicked() {
+                self.align_nodes_top();
+            }
+            if ui.button("⬤↕ Mid").on_hover_text("Center vertically").clicked() {
+                self.align_nodes_center_v();
+            }
+            if ui.button("↓⬤ Bot").on_hover_text("Align bottom edges").clicked() {
+                self.align_nodes_bottom();
+            }
+        });
+        ui.add_space(4.0);
+        // Distribute
+        ui.horizontal(|ui| {
+            if ui.button("↔ Distrib H").on_hover_text("Distribute evenly (horizontal)").clicked() {
+                self.distribute_nodes_h();
+            }
+            if ui.button("↕ Distrib V").on_hover_text("Distribute evenly (vertical)").clicked() {
+                self.distribute_nodes_v();
+            }
+        });
+    }
+
+    // Alignment helpers
+
+    fn selected_node_ids(&self) -> Vec<NodeId> {
+        self.selection.node_ids.iter().copied().collect()
+    }
+
+    fn align_nodes_left(&mut self) {
+        let ids = self.selected_node_ids();
+        let min_x = ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.position[0]).fold(f32::MAX, f32::min);
+        for id in &ids {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[0] = min_x; }
+        }
+        self.history.push(&self.document);
+    }
+
+    fn align_nodes_right(&mut self) {
+        let ids = self.selected_node_ids();
+        let max_x = ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.position[0] + n.size[0]).fold(f32::MIN, f32::max);
+        for id in &ids {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[0] = max_x - n.size[0]; }
+        }
+        self.history.push(&self.document);
+    }
+
+    fn align_nodes_center_h(&mut self) {
+        let ids = self.selected_node_ids();
+        let centers: Vec<f32> = ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.position[0] + n.size[0] / 2.0).collect();
+        let avg = centers.iter().sum::<f32>() / centers.len() as f32;
+        for id in &ids {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[0] = avg - n.size[0] / 2.0; }
+        }
+        self.history.push(&self.document);
+    }
+
+    fn align_nodes_top(&mut self) {
+        let ids = self.selected_node_ids();
+        let min_y = ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.position[1]).fold(f32::MAX, f32::min);
+        for id in &ids {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[1] = min_y; }
+        }
+        self.history.push(&self.document);
+    }
+
+    fn align_nodes_bottom(&mut self) {
+        let ids = self.selected_node_ids();
+        let max_y = ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.position[1] + n.size[1]).fold(f32::MIN, f32::max);
+        for id in &ids {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[1] = max_y - n.size[1]; }
+        }
+        self.history.push(&self.document);
+    }
+
+    fn align_nodes_center_v(&mut self) {
+        let ids = self.selected_node_ids();
+        let centers: Vec<f32> = ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.position[1] + n.size[1] / 2.0).collect();
+        let avg = centers.iter().sum::<f32>() / centers.len() as f32;
+        for id in &ids {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[1] = avg - n.size[1] / 2.0; }
+        }
+        self.history.push(&self.document);
+    }
+
+    fn distribute_nodes_h(&mut self) {
+        let ids = self.selected_node_ids();
+        if ids.len() < 3 { return; }
+        let mut nodes: Vec<(NodeId, f32, f32)> = ids.iter()
+            .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.position[0], n.size[0])))
+            .collect();
+        nodes.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let total_w: f32 = nodes.iter().map(|(_, _, w)| w).sum();
+        let span = nodes.last().map(|(_, x, w)| x + w).unwrap_or(0.0) - nodes.first().map(|(_, x, _)| *x).unwrap_or(0.0);
+        let gap = (span - total_w) / (nodes.len() as f32 - 1.0);
+        let mut x = nodes[0].1;
+        for (id, _, w) in &nodes {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[0] = x; }
+            x += w + gap;
+        }
+        self.history.push(&self.document);
+    }
+
+    fn distribute_nodes_v(&mut self) {
+        let ids = self.selected_node_ids();
+        if ids.len() < 3 { return; }
+        let mut nodes: Vec<(NodeId, f32, f32)> = ids.iter()
+            .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.position[1], n.size[1])))
+            .collect();
+        nodes.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let total_h: f32 = nodes.iter().map(|(_, _, h)| h).sum();
+        let span = nodes.last().map(|(_, y, h)| y + h).unwrap_or(0.0) - nodes.first().map(|(_, y, _)| *y).unwrap_or(0.0);
+        let gap = (span - total_h) / (nodes.len() as f32 - 1.0);
+        let mut y = nodes[0].1;
+        for (id, _, h) in &nodes {
+            if let Some(n) = self.document.find_node_mut(id) { n.position[1] = y; }
+            y += h + gap;
+        }
+        self.history.push(&self.document);
     }
 }
