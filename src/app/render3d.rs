@@ -1141,6 +1141,24 @@ impl FlowchartApp {
                         stroke,
                     ));
                 }
+                NodeShape::Connector => {
+                    // --- 3D CONNECTOR (pill/capsule) ---
+                    let radius = screen_rect.height() / 2.0;
+                    let connector_fill = Color32::from_rgba_unmultiplied(
+                        fill.r(), fill.g(), fill.b(), 100,
+                    );
+                    painter.rect_filled(
+                        screen_rect,
+                        CornerRadius::same(radius as u8),
+                        connector_fill,
+                    );
+                    painter.rect_stroke(
+                        screen_rect,
+                        CornerRadius::same(radius as u8),
+                        stroke,
+                        StrokeKind::Outside,
+                    );
+                }
             },
             NodeKind::StickyNote { .. } => {
                 // --- 3D STICKY NOTE ---

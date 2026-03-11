@@ -40,13 +40,36 @@ id --> id
 
 Add a `{shape}` tag at the end of the node line:
 
-| Tag | Shape |
-|-----|-------|
-| *(none)* | Rounded rectangle (default) |
-| `{diamond}` | Diamond — use for decisions |
-| `{rectangle}` | Rectangle — use for processes |
-| `{circle}` | Circle — use for start/end |
-| `{parallelogram}` | Parallelogram — use for I/O |
+| Tag | Shape | Use for |
+|-----|-------|---------|
+| *(none)* | Rounded rectangle (default) | General steps, components |
+| `{diamond}` | Diamond | Decisions, branch points |
+| `{rectangle}` | Rectangle | Processes, tasks |
+| `{circle}` | Circle | Start / end points |
+| `{parallelogram}` | Parallelogram | I/O, data |
+| `{connector}` | Pill / capsule | APIs, protocols, interfaces |
+
+### Connector Nodes
+
+Connector nodes (`{connector}`) model the **connection itself** — the API, protocol, or interface between two components. They render as small pill shapes and sit along the edge path.
+
+Use them when the connection has important properties worth documenting:
+
+```
+## Nodes
+- [rest_api] REST API {connector}
+  HTTP/JSON over HTTPS. Auth: Bearer JWT.
+  Rate limited to 1000 req/min.
+
+- [grpc] gRPC Channel {connector}
+  Protocol Buffers, HTTP/2, mTLS.
+
+## Flow
+user_service --> rest_api --> order_service
+order_service --> grpc --> payment_service
+```
+
+Aliases also work: `{api}`, `{interface}`, `{protocol}`, `{gateway}` all produce connector nodes.
 
 ### Sticky Note Colors
 

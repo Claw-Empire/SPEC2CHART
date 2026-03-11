@@ -29,6 +29,7 @@ pub enum NodeShape {
     Diamond,
     Circle,
     Parallelogram,
+    Connector,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +208,7 @@ impl Node {
         let size = match shape {
             NodeShape::Circle => [80.0, 80.0],
             NodeShape::Diamond => [120.0, 100.0],
+            NodeShape::Connector => [110.0, 34.0],
             _ => [140.0, 60.0],
         };
         Self {

@@ -79,6 +79,7 @@ impl FlowchartApp {
                     NodeShape::Diamond => "Diamond",
                     NodeShape::Circle => "Circle",
                     NodeShape::Parallelogram => "Parallelogram",
+                    NodeShape::Connector => "Connector",
                 },
                 NodeKind::StickyNote { .. } => "Sticky Note",
                 NodeKind::Entity { .. } => "Entity",

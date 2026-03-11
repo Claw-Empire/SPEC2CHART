@@ -487,6 +487,7 @@ impl FlowchartApp {
             (NodeShape::Diamond, "Diamond"),
             (NodeShape::Circle, "Circle"),
             (NodeShape::Parallelogram, "Parallel"),
+            (NodeShape::Connector, "Connector"),
         ];
 
         let available_width = ui.available_width();
@@ -671,6 +672,18 @@ impl FlowchartApp {
                     Pos2::new(preview_center.x - half_w, preview_center.y + half_h),
                 ];
                 painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+            NodeShape::Connector => {
+                // Pill preview
+                let pill_w = pw * 0.9;
+                let pill_h = ph * 0.45;
+                let pill_rect = egui::Rect::from_center_size(
+                    preview_center,
+                    egui::vec2(pill_w, pill_h),
+                );
+                let radius = pill_h / 2.0;
+                painter.rect_filled(pill_rect, CornerRadius::same(radius as u8), shape_fill);
+                painter.rect_stroke(pill_rect, CornerRadius::same(radius as u8), shape_stroke, StrokeKind::Outside);
             }
         }
 

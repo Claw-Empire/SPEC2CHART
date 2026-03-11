@@ -160,6 +160,7 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                         NodeShape::Diamond => " {diamond}",
                         NodeShape::Circle => " {circle}",
                         NodeShape::Parallelogram => " {parallelogram}",
+                        NodeShape::Connector => " {connector}",
                     };
                     out.push_str(&format!("- [{}] {}{}\n", id, label, shape_tag));
                     if !description.is_empty() {
@@ -404,6 +405,7 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "diamond" | "decision" => NodeShape::Diamond,
         "circle" => NodeShape::Circle,
         "parallelogram" | "parallel" | "io" => NodeShape::Parallelogram,
+        "connector" | "api" | "interface" | "protocol" | "gateway" => NodeShape::Connector,
         _ => NodeShape::RoundedRect,
     }
 }

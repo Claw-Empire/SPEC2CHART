@@ -143,16 +143,57 @@ impl FlowchartApp {
                 ];
                 painter.add(egui::Shape::convex_polygon(points, fill, stroke));
             }
+            NodeShape::Connector => {
+                // Pill shape: fully rounded capsule with subtle fill
+                let radius = screen_rect.height() / 2.0;
+                let connector_fill = Color32::from_rgba_unmultiplied(
+                    fill.r(), fill.g(), fill.b(), 80,
+                );
+                painter.rect_filled(
+                    screen_rect,
+                    CornerRadius::same(radius as u8),
+                    connector_fill,
+                );
+                // Dashed border drawn as two solid arcs + dashed line segments
+                painter.rect_stroke(
+                    screen_rect,
+                    CornerRadius::same(radius as u8),
+                    Stroke::new(
+                        border_width * self.viewport.zoom.sqrt(),
+                        border_color.linear_multiply(0.8),
+                    ),
+                    StrokeKind::Outside,
+                );
+                // Small diamond accent on left edge
+                let diamond_size = 5.0 * self.viewport.zoom.sqrt();
+                let left_center = Pos2::new(screen_rect.min.x - diamond_size * 0.5, screen_rect.center().y);
+                let diamond_pts = vec![
+                    Pos2::new(left_center.x, left_center.y - diamond_size),
+                    Pos2::new(left_center.x + diamond_size, left_center.y),
+                    Pos2::new(left_center.x, left_center.y + diamond_size),
+                    Pos2::new(left_center.x - diamond_size, left_center.y),
+                ];
+                painter.add(egui::Shape::convex_polygon(
+                    diamond_pts,
+                    border_color,
+                    Stroke::NONE,
+                ));
+            }
         }
 
         let text_color = to_color32(style.text_color);
         let font_size = style.font_size * self.viewport.zoom;
         if font_size > 4.0 {
+            // Connector nodes use italic monospace to read as "interface/protocol"
+            let font = match shape {
+                NodeShape::Connector => FontId::monospace(font_size * 0.88),
+                _ => FontId::proportional(font_size),
+            };
             painter.text(
                 screen_rect.center(),
                 Align2::CENTER_CENTER,
                 label,
-                FontId::proportional(font_size),
+                font,
                 text_color,
             );
         }

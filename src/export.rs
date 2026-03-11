@@ -471,6 +471,13 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                             points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
                         ));
                     }
+                    NodeShape::Connector => {
+                        let ry = nh / 2.0;
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" ry="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny, nw, nh, ry, ry, fill, fill_opacity * 0.4, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
                 }
                 svg.push('\n');
 
@@ -804,6 +811,21 @@ fn draw_pdf_node(
                     (Point::new(Mm(nx + skew), Mm(top_y)), false),
                     (Point::new(Mm(nx + nw), Mm(top_y)), false),
                     (Point::new(Mm(nx + nw - skew), Mm(bottom_y)), false),
+                    (Point::new(Mm(nx), Mm(bottom_y)), false),
+                ];
+                let polygon = Polygon {
+                    rings: vec![points],
+                    mode: PaintMode::FillStroke,
+                    winding_order: printpdf::path::WindingOrder::NonZero,
+                };
+                layer.add_polygon(polygon);
+            }
+            NodeShape::Connector => {
+                // Render as rounded rectangle in PDF
+                let points = vec![
+                    (Point::new(Mm(nx), Mm(top_y)), false),
+                    (Point::new(Mm(nx + nw), Mm(top_y)), false),
+                    (Point::new(Mm(nx + nw), Mm(bottom_y)), false),
                     (Point::new(Mm(nx), Mm(bottom_y)), false),
                 ];
                 let polygon = Polygon {
