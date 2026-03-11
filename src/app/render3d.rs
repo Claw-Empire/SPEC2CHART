@@ -606,18 +606,24 @@ impl FlowchartApp {
                         let nid = *node_id;
                         let h = *handle;
                         let sr = *start_rect;
-                        let z = z_layers
-                            .get(&nid)
-                            .map(|&l| l as f32 * Z_SPACING)
-                            .unwrap_or(0.0);
-                        let origin = Pos2::new(sr[0], sr[1]);
-                        let world_delta = self.unproject_drag_delta(
-                            screen_delta,
-                            origin,
-                            z,
-                            screen_center,
-                            screen_size,
-                        );
+                        // Convert screen pixels → world units using the node's
+                        // projected scale (screen_size = world_size * depth_scale).
+                        // This preserves the correct sign: drag right → delta.x > 0
+                        // → right handle grows, left handle contracts — matching
+                        // what compute_resize expects. unproject_drag_delta cannot
+                        // be used here because it maps screen motion to a world
+                        // translation, which has an inverted sign relationship for
+                        // the 3D camera (screen-right = world-left in this setup).
+                        let world_delta = if let Some(proj) =
+                            projections.iter().find(|p| p.node_id == nid)
+                        {
+                            let screen_w = proj.screen_rect.width().max(1.0);
+                            let world_w = sr[2].max(1.0);
+                            let scale = screen_w / world_w;
+                            Vec2::new(screen_delta.x / scale, screen_delta.y / scale)
+                        } else {
+                            screen_delta
+                        };
                         if let Some(node) = self.document.find_node(&nid) {
                             let min = node.min_size();
                             let [nx, ny, nw, nh] =
