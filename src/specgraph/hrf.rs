@@ -93,7 +93,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             Section::Flow => {
                 if !trimmed.is_empty() {
-                    if let Some((edge, _)) = parse_flow_line(trimmed, &id_map, line_num)? {
+                    let edges = parse_flow_line_chain(trimmed, &id_map, line_num)?;
+                    for edge in edges {
                         doc.edges.push(edge);
                     }
                 }
@@ -281,6 +282,62 @@ fn append_description(node: &mut Node, text: &str) {
     }
 }
 
+/// Parse a flow line that may be a chain: `a --> b --> c` or `a "label" --> b --> c`.
+/// Splits into individual edges.
+fn parse_flow_line_chain(
+    line: &str,
+    id_map: &HashMap<String, NodeId>,
+    line_num: usize,
+) -> Result<Vec<Edge>, String> {
+    // Split on "-->" but preserve quoted labels that precede arrows
+    // Strategy: tokenise by splitting on "-->" then pair up segments
+    let segments: Vec<&str> = line.split("-->").collect();
+    if segments.len() < 2 {
+        return Err(format!("Line {}: expected '-->' in flow definition", line_num + 1));
+    }
+
+    let mut edges = Vec::new();
+    for i in 0..segments.len() - 1 {
+        let left = segments[i].trim();
+        let right = segments[i + 1].trim();
+
+        // The "right" side may have a quoted label at the end before the next segment
+        // but since we've already split, right is just the node id (possibly with more
+        // content if it's the last segment — ignore anything after the id).
+        // Extract node id from left (strip any trailing label in quotes)
+        let (from_id, label) = if let Some(q_start) = left.find('"') {
+            let before = left[..q_start].trim();
+            let q_end = left.rfind('"').unwrap_or(left.len());
+            let lbl = if q_end > q_start + 1 {
+                left[q_start + 1..q_end].to_string()
+            } else {
+                String::new()
+            };
+            (before.to_string(), lbl)
+        } else {
+            (left.to_string(), String::new())
+        };
+
+        // right: just the node id (first word)
+        let to_id = right.split_whitespace().next().unwrap_or(right).to_string();
+
+        let source_node_id = id_map.get(&from_id).ok_or_else(|| {
+            format!("Line {}: unknown node '{}' (not defined in ## Nodes)", line_num + 1, from_id)
+        })?;
+        let target_node_id = id_map.get(&to_id).ok_or_else(|| {
+            format!("Line {}: unknown node '{}' (not defined in ## Nodes)", line_num + 1, to_id)
+        })?;
+
+        let source = Port { node_id: *source_node_id, side: PortSide::Bottom };
+        let target = Port { node_id: *target_node_id, side: PortSide::Top };
+        let mut edge = Edge::new(source, target);
+        edge.label = label;
+        edges.push(edge);
+    }
+
+    Ok(edges)
+}
+
 /// Parse: `[id] Label text {shape}`
 fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String> {
     let id_start = line.find('[').ok_or_else(|| {
@@ -314,62 +371,6 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
 }
 
 /// Parse: `id "label" --> id` or `id --> id`
-fn parse_flow_line(
-    line: &str,
-    id_map: &HashMap<String, NodeId>,
-    line_num: usize,
-) -> Result<Option<(Edge, Vec<String>)>, String> {
-    let arrow_pos = line.find("-->").ok_or_else(|| {
-        format!("Line {}: expected '-->' in flow definition", line_num + 1)
-    })?;
-
-    let left = line[..arrow_pos].trim();
-    let right = line[arrow_pos + 3..].trim();
-
-    let (from_id, label) = if let Some(quote_start) = left.find('"') {
-        let before_quote = left[..quote_start].trim();
-        let quote_end = left.rfind('"').unwrap_or(left.len());
-        let label = if quote_end > quote_start + 1 {
-            left[quote_start + 1..quote_end].to_string()
-        } else {
-            String::new()
-        };
-        (before_quote.to_string(), label)
-    } else {
-        (left.to_string(), String::new())
-    };
-
-    let to_id = right.to_string();
-
-    let source_node_id = id_map.get(&from_id).ok_or_else(|| {
-        format!(
-            "Line {}: unknown node '{}' (not defined in ## Nodes)",
-            line_num + 1,
-            from_id
-        )
-    })?;
-    let target_node_id = id_map.get(&to_id).ok_or_else(|| {
-        format!(
-            "Line {}: unknown node '{}' (not defined in ## Nodes)",
-            line_num + 1,
-            to_id
-        )
-    })?;
-
-    let source = Port {
-        node_id: *source_node_id,
-        side: PortSide::Bottom,
-    };
-    let target = Port {
-        node_id: *target_node_id,
-        side: PortSide::Top,
-    };
-
-    let mut edge = Edge::new(source, target);
-    edge.label = label;
-
-    Ok(Some((edge, vec![])))
-}
 
 /// Parse: `Note text {color}`
 fn parse_note_line(line: &str) -> Result<Node, String> {

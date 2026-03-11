@@ -1142,22 +1142,93 @@ impl FlowchartApp {
                     ));
                 }
                 NodeShape::Connector => {
-                    // --- 3D CONNECTOR (pill/capsule) ---
+                    // --- 3D CONNECTOR (extruded tube / capsule) ---
                     let radius = screen_rect.height() / 2.0;
-                    let connector_fill = Color32::from_rgba_unmultiplied(
-                        fill.r(), fill.g(), fill.b(), 100,
-                    );
+                    let cr = CornerRadius::same(radius as u8);
+                    let thin = Stroke::new(border_width * 0.5, border_color);
+
+                    // Back pill (depth face — the "far" end of the tube)
+                    let back_rect = screen_rect.translate(extrude);
                     painter.rect_filled(
-                        screen_rect,
-                        CornerRadius::same(radius as u8),
-                        connector_fill,
+                        back_rect,
+                        cr,
+                        shade_color(fill, 0.45),
                     );
-                    painter.rect_stroke(
-                        screen_rect,
-                        CornerRadius::same(radius as u8),
-                        stroke,
-                        StrokeKind::Outside,
+
+                    // Top strip (connects front-top to back-top edge)
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![
+                            screen_rect.left_top(),
+                            screen_rect.right_top(),
+                            back_rect.right_top(),
+                            back_rect.left_top(),
+                        ],
+                        shade_color(fill, 0.75),
+                        thin,
+                    ));
+
+                    // Side strip (right or left depending on camera angle)
+                    if extrude.x > 0.0 {
+                        painter.add(egui::Shape::convex_polygon(
+                            vec![
+                                screen_rect.right_top(),
+                                screen_rect.right_bottom(),
+                                back_rect.right_bottom(),
+                                back_rect.right_top(),
+                            ],
+                            shade_color(fill, 0.55),
+                            thin,
+                        ));
+                    } else {
+                        painter.add(egui::Shape::convex_polygon(
+                            vec![
+                                back_rect.left_top(),
+                                back_rect.left_bottom(),
+                                screen_rect.left_bottom(),
+                                screen_rect.left_top(),
+                            ],
+                            shade_color(fill, 0.55),
+                            thin,
+                        ));
+                    }
+
+                    // Bottom strip
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![
+                            screen_rect.left_bottom(),
+                            screen_rect.right_bottom(),
+                            back_rect.right_bottom(),
+                            back_rect.left_bottom(),
+                        ],
+                        shade_color(fill, 0.60),
+                        thin,
+                    ));
+
+                    // Front pill face (semi-transparent)
+                    let connector_fill = Color32::from_rgba_unmultiplied(
+                        fill.r(), fill.g(), fill.b(),
+                        (fill.a() as f32 * 0.85) as u8,
                     );
+                    painter.rect_filled(screen_rect, cr, connector_fill);
+                    painter.rect_stroke(screen_rect, cr, stroke, StrokeKind::Outside);
+
+                    // Small diamond accent on the left cap
+                    let diamond_size = 5.0 * scale;
+                    let left_center = Pos2::new(
+                        screen_rect.min.x - diamond_size * 0.5,
+                        screen_rect.center().y,
+                    );
+                    let diamond_pts = vec![
+                        Pos2::new(left_center.x, left_center.y - diamond_size),
+                        Pos2::new(left_center.x + diamond_size, left_center.y),
+                        Pos2::new(left_center.x, left_center.y + diamond_size),
+                        Pos2::new(left_center.x - diamond_size, left_center.y),
+                    ];
+                    painter.add(egui::Shape::convex_polygon(
+                        diamond_pts,
+                        border_color,
+                        Stroke::NONE,
+                    ));
                 }
             },
             NodeKind::StickyNote { .. } => {
