@@ -36,6 +36,18 @@ id --> id
 - Sticky note text {color}
 ```
 
+### 3D Position
+
+Add a `{z:N}` tag to place a node at a specific depth in the 3D view.
+`N` is a float in world units (positive = closer to viewer, negative = further away).
+Tags can be combined: `{diamond} {z:100}`
+
+```
+- [frontend] Web Frontend {z:150}
+- [api] REST API {connector} {z:75}
+- [db] Database {z:0}
+```
+
 ### Node Shapes
 
 Add a `{shape}` tag at the end of the node line:
@@ -149,7 +161,8 @@ nodes:
     shape: rounded_rect  # rectangle | rounded_rect | diamond | circle | parallelogram
     label: "Node label"
     description: "Optional description"
-    position: [100, 200]   # optional — auto-layout if omitted
+    position: [100, 200]       # optional — auto-layout if omitted
+    # position: [100, 200, 50] # 3-element form sets z depth in 3D view
     size: [160, 80]        # optional
     style:                 # optional — theme defaults apply
       fill: [49, 50, 68, 255]

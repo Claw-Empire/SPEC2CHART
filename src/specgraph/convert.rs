@@ -83,7 +83,7 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
             text: None,
             color: None,
             content: None,
-            position: Some(node.position),
+            position: Some(node_position_3d(node)),
             size: Some(node.size),
             style,
         },
@@ -105,7 +105,7 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
             text: None,
             color: None,
             content: None,
-            position: Some(node.position),
+            position: Some(node_position_3d(node)),
             size: Some(node.size),
             style,
         },
@@ -120,7 +120,7 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
             text: Some(text.clone()),
             color: Some(sticky_color_to_str(color).to_string()),
             content: None,
-            position: Some(node.position),
+            position: Some(node_position_3d(node)),
             size: Some(node.size),
             style,
         },
@@ -135,7 +135,7 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
             text: None,
             color: None,
             content: Some(content.clone()),
-            position: Some(node.position),
+            position: Some(node_position_3d(node)),
             size: Some(node.size),
             style,
         },
@@ -143,10 +143,14 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
 }
 
 fn spec_to_node(sn: &SpecNode, _index: usize) -> Result<Node, String> {
-    let position = sn.position.unwrap_or([0.0, 0.0]);
-    let pos = Pos2::new(position[0], position[1]);
+    let position = sn.position.as_deref().unwrap_or(&[]);
+    let pos = Pos2::new(
+        position.get(0).copied().unwrap_or(0.0),
+        position.get(1).copied().unwrap_or(0.0),
+    );
+    let z_offset = position.get(2).copied().unwrap_or(0.0);
 
-    match sn.kind.as_str() {
+    let mut node = match sn.kind.as_str() {
         "shape" => {
             let shape = sn.shape.as_deref().map(str_to_shape).transpose()?
                 .unwrap_or(NodeShape::RoundedRect);
@@ -165,7 +169,7 @@ fn spec_to_node(sn: &SpecNode, _index: usize) -> Result<Node, String> {
                 node.size = size;
             }
             apply_style(&mut node, &sn.style);
-            Ok(node)
+            node
         }
         "entity" => {
             let mut node = Node::new_entity(pos);
@@ -189,7 +193,7 @@ fn spec_to_node(sn: &SpecNode, _index: usize) -> Result<Node, String> {
                 node.size = size;
             }
             apply_style(&mut node, &sn.style);
-            Ok(node)
+            node
         }
         "sticky" => {
             let color = sn.color.as_deref().map(str_to_sticky_color).transpose()?
@@ -204,7 +208,7 @@ fn spec_to_node(sn: &SpecNode, _index: usize) -> Result<Node, String> {
                 node.size = size;
             }
             apply_style(&mut node, &sn.style);
-            Ok(node)
+            node
         }
         "text" => {
             let mut node = Node::new_text(pos);
@@ -217,10 +221,13 @@ fn spec_to_node(sn: &SpecNode, _index: usize) -> Result<Node, String> {
                 node.size = size;
             }
             apply_style(&mut node, &sn.style);
-            Ok(node)
+            node
         }
-        other => Err(format!("Unknown node kind: '{}'", other)),
-    }
+        other => return Err(format!("Unknown node kind: '{}'", other)),
+    };
+
+    node.z_offset = z_offset;
+    Ok(node)
 }
 
 fn apply_style(node: &mut Node, style: &Option<SpecNodeStyle>) {
@@ -321,6 +328,18 @@ fn auto_layout(doc: &mut FlowchartDocument) {
             start_x + col as f32 * spacing_x,
             start_y + row as f32 * spacing_y,
         ];
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Position helpers
+// ---------------------------------------------------------------------------
+
+fn node_position_3d(node: &Node) -> Vec<f32> {
+    if node.z_offset != 0.0 {
+        vec![node.position[0], node.position[1], node.z_offset]
+    } else {
+        vec![node.position[0], node.position[1]]
     }
 }
 

@@ -163,7 +163,10 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                         NodeShape::Parallelogram => " {parallelogram}",
                         NodeShape::Connector => " {connector}",
                     };
-                    out.push_str(&format!("- [{}] {}{}\n", id, label, shape_tag));
+                    let z_tag = if node.z_offset != 0.0 {
+                        format!(" {{z:{}}}", node.z_offset)
+                    } else { String::new() };
+                    out.push_str(&format!("- [{}] {}{}{}\n", id, label, shape_tag, z_tag));
                     if !description.is_empty() {
                         for desc_line in description.lines() {
                             out.push_str(&format!("  {}\n", desc_line));
@@ -171,7 +174,10 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                     }
                 }
                 NodeKind::Entity { name, attributes } => {
-                    out.push_str(&format!("- [{}] {} {{entity}}\n", id, name));
+                    let z_tag = if node.z_offset != 0.0 {
+                        format!(" {{z:{}}}", node.z_offset)
+                    } else { String::new() };
+                    out.push_str(&format!("- [{}] {} {{entity}}{}\n", id, name, z_tag));
                     for attr in attributes {
                         let mut tags = Vec::new();
                         if attr.is_primary_key { tags.push("PK"); }
@@ -189,7 +195,10 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                     }
                 }
                 NodeKind::Text { content } => {
-                    out.push_str(&format!("- [{}] {} {{text}}\n", id, content));
+                    let z_tag = if node.z_offset != 0.0 {
+                        format!(" {{z:{}}}", node.z_offset)
+                    } else { String::new() };
+                    out.push_str(&format!("- [{}] {} {{text}}{}\n", id, content, z_tag));
                 }
                 _ => {}
             }
@@ -338,7 +347,7 @@ fn parse_flow_line_chain(
     Ok(edges)
 }
 
-/// Parse: `[id] Label text {shape}`
+/// Parse: `[id] Label text {shape} {z:50}`
 fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String> {
     let id_start = line.find('[').ok_or_else(|| {
         format!("Line {}: expected [id] in node definition", line_num + 1)
@@ -349,25 +358,54 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let id = line[id_start + 1..id_end].trim().to_string();
     let rest = line[id_end + 1..].trim();
 
-    // Extract optional {shape} tag at end
-    let (label, shape) = if let Some(brace_start) = rest.rfind('{') {
-        if let Some(brace_end) = rest.rfind('}') {
-            let tag = rest[brace_start + 1..brace_end].trim().to_lowercase();
-            let label = rest[..brace_start].trim();
-            (label.to_string(), tag_to_shape(&tag))
+    let (label, tags) = extract_tags(rest);
+
+    let mut shape = NodeShape::RoundedRect;
+    let mut z_offset = 0.0f32;
+    for tag in &tags {
+        if tag.starts_with("z:") {
+            if let Ok(z) = tag[2..].trim().parse::<f32>() {
+                z_offset = z;
+            }
         } else {
-            (rest.to_string(), NodeShape::RoundedRect)
+            shape = tag_to_shape(tag);
         }
-    } else {
-        (rest.to_string(), NodeShape::RoundedRect)
-    };
+    }
 
     let mut node = Node::new(shape, Pos2::ZERO);
+    node.z_offset = z_offset;
     if let NodeKind::Shape { label: ref mut l, .. } = node.kind {
         *l = label;
     }
 
     Ok((id, node))
+}
+
+/// Extract `{tag}` blocks from a string, returning the cleaned label and list of tags.
+fn extract_tags(s: &str) -> (String, Vec<String>) {
+    let mut label = String::new();
+    let mut tags = Vec::new();
+    let mut in_tag = false;
+    let mut tag_buf = String::new();
+
+    for c in s.chars() {
+        match c {
+            '{' => { in_tag = true; tag_buf.clear(); }
+            '}' => {
+                if in_tag {
+                    let tag = tag_buf.trim().to_lowercase();
+                    if !tag.is_empty() { tags.push(tag); }
+                    in_tag = false;
+                }
+            }
+            _ => {
+                if in_tag { tag_buf.push(c); }
+                else { label.push(c); }
+            }
+        }
+    }
+
+    (label.trim().to_string(), tags)
 }
 
 /// Parse: `id "label" --> id` or `id --> id`

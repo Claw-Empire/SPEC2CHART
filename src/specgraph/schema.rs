@@ -34,7 +34,7 @@ pub struct SpecNode {
     #[serde(default)]
     pub content: Option<String>,
     #[serde(default)]
-    pub position: Option<[f32; 2]>,
+    pub position: Option<Vec<f32>>,  // [x, y] or [x, y, z]
     #[serde(default)]
     pub size: Option<[f32; 2]>,
     #[serde(default)]
