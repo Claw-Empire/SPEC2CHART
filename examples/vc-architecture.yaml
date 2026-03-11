@@ -1,0 +1,138 @@
+specgraph: "1.0"
+title: VC Fund Architecture
+mode: flowchart
+
+nodes:
+  - id: lps
+    kind: shape
+    shape: rounded_rect
+    label: "Limited Partners (LPs)"
+    position: [400, 50]
+    size: [200, 60]
+
+  - id: fund
+    kind: shape
+    shape: rectangle
+    label: "VC Fund"
+    position: [400, 180]
+    size: [200, 70]
+
+  - id: gp
+    kind: shape
+    shape: rounded_rect
+    label: "General Partner (GP)"
+    position: [100, 180]
+    size: [200, 60]
+
+  - id: mgmt_co
+    kind: shape
+    shape: rectangle
+    label: "Management Company"
+    position: [100, 320]
+    size: [200, 60]
+
+  - id: deal_flow
+    kind: shape
+    shape: diamond
+    label: "Deal Flow & Due Diligence"
+    position: [400, 330]
+    size: [200, 100]
+
+  - id: portfolio_a
+    kind: shape
+    shape: rounded_rect
+    label: "Portfolio Co A"
+    position: [150, 500]
+    size: [160, 60]
+
+  - id: portfolio_b
+    kind: shape
+    shape: rounded_rect
+    label: "Portfolio Co B"
+    position: [400, 500]
+    size: [160, 60]
+
+  - id: portfolio_c
+    kind: shape
+    shape: rounded_rect
+    label: "Portfolio Co C"
+    position: [650, 500]
+    size: [160, 60]
+
+  - id: exit
+    kind: shape
+    shape: diamond
+    label: "Exit Events"
+    position: [400, 640]
+    size: [180, 90]
+
+  - id: returns
+    kind: shape
+    shape: rectangle
+    label: "Returns Distribution"
+    position: [700, 180]
+    size: [200, 60]
+
+  - id: carry
+    kind: shape
+    shape: parallelogram
+    label: "Carried Interest (20%)"
+    position: [700, 320]
+    size: [200, 60]
+
+edges:
+  - from: { node: lps, side: bottom }
+    to: { node: fund, side: top }
+    label: "capital commitment"
+
+  - from: { node: gp, side: right }
+    to: { node: fund, side: left }
+    label: "manages"
+
+  - from: { node: gp, side: bottom }
+    to: { node: mgmt_co, side: top }
+    label: "operates"
+
+  - from: { node: fund, side: bottom }
+    to: { node: deal_flow, side: top }
+    label: "deploys capital"
+
+  - from: { node: deal_flow, side: bottom }
+    to: { node: portfolio_a, side: top }
+    label: "invest"
+
+  - from: { node: deal_flow, side: bottom }
+    to: { node: portfolio_b, side: top }
+    label: "invest"
+
+  - from: { node: deal_flow, side: bottom }
+    to: { node: portfolio_c, side: top }
+    label: "invest"
+
+  - from: { node: portfolio_a, side: bottom }
+    to: { node: exit, side: left }
+
+  - from: { node: portfolio_b, side: bottom }
+    to: { node: exit, side: top }
+
+  - from: { node: portfolio_c, side: bottom }
+    to: { node: exit, side: right }
+
+  - from: { node: exit, side: right }
+    to: { node: returns, side: bottom }
+    label: "proceeds"
+
+  - from: { node: returns, side: left }
+    to: { node: lps, side: right }
+    label: "LP share (80%)"
+
+  - from: { node: returns, side: bottom }
+    to: { node: carry, side: top }
+
+  - from: { node: carry, side: left }
+    to: { node: gp, side: right }
+    label: "GP carry"
+
+  - from: { node: mgmt_co, side: bottom }
+    to: { node: deal_flow, side: left }
+    label: "2% mgmt fee"

@@ -3,6 +3,7 @@ mod export;
 mod history;
 mod io;
 mod model;
+mod specgraph;
 
 use eframe::egui;
 

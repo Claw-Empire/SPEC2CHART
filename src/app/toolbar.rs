@@ -4,6 +4,7 @@ use egui::{
 use crate::export;
 use crate::io;
 use crate::model::*;
+use crate::specgraph;
 use super::{FlowchartApp, DiagramMode, DragState, Tool};
 use super::theme::*;
 
@@ -124,6 +125,165 @@ impl FlowchartApp {
                         }
                     }
                 });
+                ui.add_space(8.0);
+
+                // SpecGraph import/export (YAML, HRF, Prose)
+                Self::draw_divider(ui);
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "SPEC");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let btn_size = egui::vec2(84.0, 32.0);
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(egui::RichText::new("Import").size(12.0)),
+                        )
+                        .clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("All Specs", &["yaml", "yml", "spec", "txt", "md"])
+                            .add_filter("YAML", &["yaml", "yml"])
+                            .add_filter("Human Readable", &["spec", "md"])
+                            .add_filter("Prose (LLM)", &["txt"])
+                            .pick_file()
+                        {
+                            match std::fs::read_to_string(&path) {
+                                Ok(text) => {
+                                    let format = specgraph::detect_format(&text);
+                                    let llm_cfg = if self.llm_config.api_key.is_empty() {
+                                        None
+                                    } else {
+                                        Some(&self.llm_config)
+                                    };
+                                    match specgraph::import_auto(&text, llm_cfg) {
+                                        Ok(doc) => {
+                                            let fmt_name = match format {
+                                                specgraph::SpecFormat::Yaml => "YAML",
+                                                specgraph::SpecFormat::Hrf => "Spec",
+                                                specgraph::SpecFormat::Prose => "Prose (LLM)",
+                                            };
+                                            self.document = doc;
+                                            self.selection.clear();
+                                            self.history.push(&self.document);
+                                            self.pending_fit = true;
+                                            self.status_message = Some((
+                                                format!("Imported {}!", fmt_name),
+                                                std::time::Instant::now(),
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            self.status_message = Some((
+                                                format!("Import error: {}", e),
+                                                std::time::Instant::now(),
+                                            ));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    self.status_message = Some((
+                                        format!("Read error: {}", e),
+                                        std::time::Instant::now(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(egui::RichText::new("Export").size(12.0)),
+                        )
+                        .on_hover_text("Right-click for Human Readable format")
+                        .clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("YAML", &["yaml", "yml"])
+                            .add_filter("Human Readable", &["spec"])
+                            .set_file_name("diagram.yaml")
+                            .save_file()
+                        {
+                            let is_hrf = path.extension()
+                                .map_or(false, |ext| ext == "spec" || ext == "md");
+                            let result = if is_hrf {
+                                Ok(specgraph::export_hrf(&self.document, "Untitled Diagram"))
+                            } else {
+                                specgraph::export_yaml(&self.document, "Untitled Diagram")
+                            };
+                            match result {
+                                Ok(content) => match std::fs::write(&path, &content) {
+                                    Ok(()) => {
+                                        let fmt = if is_hrf { "Spec" } else { "YAML" };
+                                        self.status_message = Some((
+                                            format!("Exported {}!", fmt),
+                                            std::time::Instant::now(),
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        self.status_message = Some((
+                                            format!("Write error: {}", e),
+                                            std::time::Instant::now(),
+                                        ));
+                                    }
+                                },
+                                Err(e) => {
+                                    self.status_message = Some((
+                                        format!("Export error: {}", e),
+                                        std::time::Instant::now(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                });
+                ui.add_space(2.0);
+                // LLM Settings button
+                if ui
+                    .add_sized(
+                        egui::vec2(ui.available_width(), 26.0),
+                        egui::Button::new(
+                            egui::RichText::new(if self.llm_config.api_key.is_empty() {
+                                "LLM Settings (not configured)"
+                            } else {
+                                "LLM Settings"
+                            })
+                            .size(10.0)
+                            .color(TEXT_DIM),
+                        )
+                        .fill(Color32::TRANSPARENT),
+                    )
+                    .clicked()
+                {
+                    self.show_llm_settings = !self.show_llm_settings;
+                }
+
+                if self.show_llm_settings {
+                    ui.add_space(4.0);
+                    ui.group(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(egui::RichText::new("Endpoint:").size(10.0).color(TEXT_DIM));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.llm_config.endpoint)
+                                .desired_width(ui.available_width())
+                                .font(FontId::monospace(10.0)),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new("API Key:").size(10.0).color(TEXT_DIM));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.llm_config.api_key)
+                                .desired_width(ui.available_width())
+                                .password(true)
+                                .font(FontId::monospace(10.0)),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new("Model:").size(10.0).color(TEXT_DIM));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.llm_config.model)
+                                .desired_width(ui.available_width())
+                                .font(FontId::monospace(10.0)),
+                        );
+                    });
+                }
                 ui.add_space(8.0);
 
                 // Tools

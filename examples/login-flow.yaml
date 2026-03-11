@@ -1,0 +1,57 @@
+specgraph: "1.0"
+title: User Login Flow
+mode: flowchart
+
+nodes:
+  - id: start
+    kind: shape
+    shape: rounded_rect
+    label: "User opens app"
+
+  - id: login_form
+    kind: shape
+    shape: rectangle
+    label: "Show login form"
+
+  - id: check
+    kind: shape
+    shape: diamond
+    label: "Valid credentials?"
+
+  - id: dashboard
+    kind: shape
+    shape: rounded_rect
+    label: "Show dashboard"
+
+  - id: error
+    kind: shape
+    shape: rectangle
+    label: "Show error message"
+
+  - id: retry
+    kind: shape
+    shape: circle
+    label: "Retry"
+
+edges:
+  - from: { node: start, side: bottom }
+    to: { node: login_form, side: top }
+
+  - from: { node: login_form, side: bottom }
+    to: { node: check, side: top }
+    label: "submit"
+
+  - from: { node: check, side: right }
+    to: { node: dashboard, side: left }
+    label: "yes"
+
+  - from: { node: check, side: bottom }
+    to: { node: error, side: top }
+    label: "no"
+
+  - from: { node: error, side: bottom }
+    to: { node: retry, side: top }
+
+  - from: { node: retry, side: left }
+    to: { node: login_form, side: left }
+    label: "try again"

@@ -13,6 +13,7 @@ pub(crate) use theme::*;
 use egui::{CentralPanel, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use crate::history::UndoStack;
 use crate::model::*;
+use crate::specgraph;
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -105,6 +106,9 @@ pub struct FlowchartApp {
     pub(crate) camera3d: camera::Camera3D,
     pub(crate) view_transition: f32,
     pub(crate) view_transition_target: f32,
+    pub(crate) pending_fit: bool,
+    pub(crate) llm_config: specgraph::LlmConfig,
+    pub(crate) show_llm_settings: bool,
 }
 
 impl FlowchartApp {
@@ -192,6 +196,9 @@ impl FlowchartApp {
             camera3d: camera::Camera3D::default(),
             view_transition: 0.0,
             view_transition_target: 0.0,
+            pending_fit: false,
+            llm_config: specgraph::LlmConfig::default(),
+            show_llm_settings: false,
         }
     }
 
@@ -256,5 +263,11 @@ impl eframe::App for FlowchartApp {
                     ViewMode::ThreeD => self.draw_canvas_3d(ui),
                 }
             });
+
+        if self.pending_fit {
+            self.pending_fit = false;
+            self.fit_to_content();
+            ctx.request_repaint();
+        }
     }
 }

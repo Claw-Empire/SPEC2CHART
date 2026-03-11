@@ -471,6 +471,8 @@ pub const ALL_SIDES: [PortSide; 4] = [PortSide::Top, PortSide::Bottom, PortSide:
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FlowchartDocument {
+    pub title: String,
+    pub description: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
 }
