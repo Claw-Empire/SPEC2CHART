@@ -445,6 +445,20 @@ impl FlowchartApp {
             _ => None,
         };
 
+        // Selection-flash tracking: record when new nodes enter the selection
+        {
+            let now = ui.ctx().input(|i| i.time);
+            // Prune stale entries (older than 0.4s to free memory)
+            self.selection_times.retain(|_, t| now - *t < 0.4);
+            // Add newly selected nodes
+            let newly_selected: Vec<NodeId> = self.selection.node_ids.iter()
+                .filter(|id| !self.selection_times.contains_key(id))
+                .copied().collect();
+            for id in newly_selected {
+                self.selection_times.insert(id, now);
+            }
+        }
+
         // Progressive tooltip: track how long we've been hovering the same node
         {
             let now = ui.ctx().input(|i| i.time);

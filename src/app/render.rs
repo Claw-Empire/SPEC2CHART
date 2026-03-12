@@ -115,6 +115,26 @@ impl FlowchartApp {
         }
         let is_hovered = hover_pos.map_or(false, |hp| screen_rect.expand(6.0).contains(hp));
 
+        // Selection-confirmation flash: brief bright overlay when node is first selected
+        if is_selected {
+            let now = painter.ctx().input(|i| i.time);
+            if let Some(&sel_time) = self.selection_times.get(&node.id) {
+                let age = (now - sel_time) as f32;
+                if age < 0.25 {
+                    // Flash: bright white fade from alpha=150→0 over 250ms, slight expand
+                    let t = age / 0.25;
+                    let flash_alpha = ((1.0 - t) * 150.0) as u8;
+                    let expand = (1.0 - t) * 6.0;
+                    painter.rect_filled(
+                        screen_rect.expand(expand),
+                        CornerRadius::same(6),
+                        Color32::from_rgba_premultiplied(200, 220, 255, flash_alpha),
+                    );
+                    painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+                }
+            }
+        }
+
         // Selection glow (pulsing animation)
         if is_selected {
             let time = painter.ctx().input(|i| i.time);
