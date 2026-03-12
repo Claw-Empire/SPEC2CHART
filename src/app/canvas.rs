@@ -488,6 +488,7 @@ impl FlowchartApp {
         // --- Rulers ---
         if self.show_grid {
             self.draw_rulers(&painter, canvas_rect);
+            self.draw_ruler_crosshair(&painter, canvas_rect, pointer_pos);
         }
 
         // --- Previews ---
@@ -1755,6 +1756,75 @@ impl FlowchartApp {
             Rect::from_min_size(canvas_rect.min, Vec2::splat(ruler_h)),
             egui::CornerRadius::ZERO, SURFACE1,
         );
+    }
+
+    fn draw_ruler_crosshair(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {
+        let Some(mouse) = pointer_pos else { return };
+        if !canvas_rect.contains(mouse) { return; }
+
+        let ruler_h = 12.0_f32;
+        let cross_color = Color32::from_rgba_unmultiplied(255, 80, 80, 120);
+        let cross_stroke = egui::Stroke::new(1.0, cross_color);
+
+        // Vertical line at cursor X (full canvas height below the ruler)
+        if mouse.x > canvas_rect.min.x + ruler_h {
+            painter.line_segment(
+                [
+                    Pos2::new(mouse.x, canvas_rect.min.y + ruler_h),
+                    Pos2::new(mouse.x, canvas_rect.max.y),
+                ],
+                egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 80, 80, 35)),
+            );
+            // Cursor notch on horizontal ruler
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(mouse.x - 1.5, canvas_rect.min.y),
+                    Vec2::new(3.0, ruler_h),
+                ),
+                egui::CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(255, 80, 80, 200),
+            );
+            // World coordinate label on horizontal ruler
+            let wx = (mouse.x - self.viewport.offset[0]) / self.viewport.zoom;
+            painter.text(
+                Pos2::new(mouse.x + 3.0, canvas_rect.min.y + 1.5),
+                Align2::LEFT_TOP,
+                &format!("{:.0}", wx),
+                FontId::proportional(7.5),
+                Color32::from_rgba_unmultiplied(255, 160, 160, 230),
+            );
+        }
+
+        // Horizontal line at cursor Y (full canvas width right of the ruler)
+        if mouse.y > canvas_rect.min.y + ruler_h {
+            painter.line_segment(
+                [
+                    Pos2::new(canvas_rect.min.x + ruler_h, mouse.y),
+                    Pos2::new(canvas_rect.max.x, mouse.y),
+                ],
+                egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 80, 80, 35)),
+            );
+            // Cursor notch on vertical ruler
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(canvas_rect.min.x, mouse.y - 1.5),
+                    Vec2::new(ruler_h, 3.0),
+                ),
+                egui::CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(255, 80, 80, 200),
+            );
+            // World coordinate label on vertical ruler
+            let wy = (mouse.y - self.viewport.offset[1]) / self.viewport.zoom;
+            painter.text(
+                Pos2::new(canvas_rect.min.x + 1.0, mouse.y + 3.0),
+                Align2::LEFT_TOP,
+                &format!("{:.0}", wy),
+                FontId::proportional(7.5),
+                Color32::from_rgba_unmultiplied(255, 160, 160, 230),
+            );
+        }
+
+        let _ = cross_color; let _ = cross_stroke; // satisfy checker
     }
 
     // --- Grid ---
