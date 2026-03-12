@@ -152,6 +152,8 @@ pub struct FlowchartApp {
     pub(crate) show_quick_notes: bool,
     /// Contents of the floating quick-notes panel
     pub(crate) quick_notes_text: String,
+    /// How many times paste has been invoked since last copy (for progressive offset)
+    pub(crate) paste_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +276,7 @@ impl FlowchartApp {
             zoom_target: 1.0,
             show_quick_notes: false,
             quick_notes_text: String::new(),
+            paste_count: 0,
         }
     }
 

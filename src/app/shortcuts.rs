@@ -127,9 +127,10 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+C = copy selected nodes
+        // Cmd+C = copy selected nodes (resets paste offset counter)
         if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.matches_exact(cmd)) {
             self.clipboard.clear();
+            self.paste_count = 0;
             for id in &self.selection.node_ids {
                 if let Some(node) = self.document.find_node(id) {
                     self.clipboard.push(node.clone());
@@ -137,19 +138,23 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+V = paste (centered on viewport)
+        // Cmd+V = paste (progressive offset: each paste shifts 24px further)
         if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.matches_exact(cmd))
             && !self.clipboard.is_empty()
         {
             self.selection.clear();
+            self.paste_count += 1;
+            let step = 24.0_f32 * self.paste_count as f32;
+            let paste_offset = Vec2::new(step, step);
+
             // Compute clipboard centroid in world space
             let n = self.clipboard.len() as f32;
             let centroid: Vec2 = self.clipboard.iter().fold(Vec2::ZERO, |acc, nd| acc + nd.pos().to_vec2()) / n;
-            // Compute viewport center in world space
+            // Compute viewport center in world space + progressive offset
             let vp_center: Vec2 = (self.canvas_rect.center().to_vec2()
                 - Vec2::new(self.viewport.offset[0], self.viewport.offset[1]))
                 / self.viewport.zoom;
-            let shift: Vec2 = vp_center - centroid;
+            let shift: Vec2 = vp_center - centroid + paste_offset / self.viewport.zoom;
             for template in self.clipboard.clone() {
                 let mut node = template;
                 node.id = NodeId::new();
@@ -158,6 +163,7 @@ impl FlowchartApp {
                 self.document.nodes.push(node);
             }
             self.history.push(&self.document);
+            self.status_message = Some((format!("Pasted ×{}", self.paste_count), std::time::Instant::now()));
         }
 
         // V = select tool (skip when editing text)
