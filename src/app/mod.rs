@@ -96,6 +96,8 @@ pub struct FlowchartApp {
     pub(crate) selection: Selection,
     pub(crate) history: UndoStack,
     pub(crate) clipboard: Vec<Node>,
+    /// Edges connecting copied nodes — pasted alongside the copied nodes
+    pub(crate) edge_clipboard: Vec<Edge>,
     pub(crate) tool: Tool,
     pub(crate) drag: DragState,
     pub(crate) show_grid: bool,
@@ -249,6 +251,7 @@ impl FlowchartApp {
             selection: Selection::default(),
             history,
             clipboard: Vec::new(),
+            edge_clipboard: Vec::new(),
             tool: Tool::Select,
             drag: DragState::None,
             show_grid: true,

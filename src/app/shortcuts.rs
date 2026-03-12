@@ -127,18 +127,34 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+C = copy selected nodes (resets paste offset counter)
+        // Cmd+C = copy selected nodes + edges between them (resets paste offset counter)
         if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.matches_exact(cmd)) {
             self.clipboard.clear();
+            self.edge_clipboard.clear();
             self.paste_count = 0;
             for id in &self.selection.node_ids {
                 if let Some(node) = self.document.find_node(id) {
                     self.clipboard.push(node.clone());
                 }
             }
+            // Copy edges where both endpoints are in the selection
+            let sel_ids = &self.selection.node_ids;
+            for edge in &self.document.edges {
+                if sel_ids.contains(&edge.source.node_id) && sel_ids.contains(&edge.target.node_id) {
+                    self.edge_clipboard.push(edge.clone());
+                }
+            }
+            let n_edges = self.edge_clipboard.len();
+            let n_nodes = self.clipboard.len();
+            let msg = if n_edges > 0 {
+                format!("Copied {} nodes, {} edges", n_nodes, n_edges)
+            } else {
+                format!("Copied {} node{}", n_nodes, if n_nodes == 1 { "" } else { "s" })
+            };
+            self.status_message = Some((msg, std::time::Instant::now()));
         }
 
-        // Cmd+V = paste (progressive offset: each paste shifts 24px further)
+        // Cmd+V = paste nodes + their internal edges (progressive offset)
         if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.matches_exact(cmd))
             && !self.clipboard.is_empty()
         {
@@ -155,15 +171,43 @@ impl FlowchartApp {
                 - Vec2::new(self.viewport.offset[0], self.viewport.offset[1]))
                 / self.viewport.zoom;
             let shift: Vec2 = vp_center - centroid + paste_offset / self.viewport.zoom;
+
+            // Build old→new NodeId mapping
+            let mut id_map: std::collections::HashMap<NodeId, NodeId> = std::collections::HashMap::new();
             for template in self.clipboard.clone() {
+                let old_id = template.id;
                 let mut node = template;
                 node.id = NodeId::new();
                 node.set_pos(node.pos() + shift);
+                id_map.insert(old_id, node.id);
                 self.selection.node_ids.insert(node.id);
                 self.document.nodes.push(node);
             }
+
+            // Recreate edges with remapped IDs
+            let edge_templates = self.edge_clipboard.clone();
+            let mut pasted_edges = 0usize;
+            for mut edge in edge_templates {
+                if let (Some(&new_src), Some(&new_tgt)) = (
+                    id_map.get(&edge.source.node_id),
+                    id_map.get(&edge.target.node_id),
+                ) {
+                    edge.id = EdgeId::new();
+                    edge.source.node_id = new_src;
+                    edge.target.node_id = new_tgt;
+                    self.document.edges.push(edge);
+                    pasted_edges += 1;
+                }
+            }
+
             self.history.push(&self.document);
-            self.status_message = Some((format!("Pasted ×{}", self.paste_count), std::time::Instant::now()));
+            let n_pasted = self.selection.node_ids.len();
+            let msg = if pasted_edges > 0 {
+                format!("Pasted {} nodes + {} edges ×{}", n_pasted, pasted_edges, self.paste_count)
+            } else {
+                format!("Pasted ×{}", self.paste_count)
+            };
+            self.status_message = Some((msg, std::time::Instant::now()));
         }
 
         // V = select tool (skip when editing text)
