@@ -174,6 +174,9 @@ pub struct NodeStyle {
     /// When true, render a top-to-bottom gradient from fill_color (top) to a darker shade (bottom)
     #[serde(default)]
     pub gradient: bool,
+    /// Gradient angle in degrees: 0=top→bottom, 90=left→right, 45=↘ diagonal, 135=↗ diagonal
+    #[serde(default)]
+    pub gradient_angle: u8,
     /// Overall node opacity: 0.0 = invisible, 1.0 = fully opaque (default)
     #[serde(default = "default_opacity")]
     pub opacity: f32,
@@ -224,6 +227,7 @@ impl Default for NodeStyle {
             corner_radius: 8.0,
             border_dashed: false,
             gradient: false,
+            gradient_angle: 0,
             opacity: 1.0,
             shadow: false,
             bold: false,
@@ -348,7 +352,7 @@ impl Node {
                 border_width: 0.0,
                 text_color: color.text_rgba(),
                 font_size: 14.0,
-                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
+                corner_radius: 8.0, border_dashed: false, gradient: false, gradient_angle: 0, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
             },
         }
     }
@@ -369,7 +373,7 @@ impl Node {
                 border_width: 1.5,
                 text_color: [205, 214, 244, 255],
                 font_size: 12.0,
-                corner_radius: 4.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
+                corner_radius: 4.0, border_dashed: false, gradient: false, gradient_angle: 0, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
             },
         }
     }
@@ -389,7 +393,7 @@ impl Node {
                 border_width: 0.0,
                 text_color: [205, 214, 244, 255],
                 font_size: 16.0,
-                corner_radius: 0.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
+                corner_radius: 0.0, border_dashed: false, gradient: false, gradient_angle: 0, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
             },
         }
     }
@@ -417,7 +421,7 @@ impl Node {
                 border_width: 1.5,
                 text_color: [147, 153, 178, 255],
                 font_size: 12.0,
-                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
+                corner_radius: 8.0, border_dashed: false, gradient: false, gradient_angle: 0, opacity: 1.0, shadow: false, bold: false, italic: false, text_align: TextAlign::Center, text_valign: TextVAlign::Middle,
             },
         }
     }

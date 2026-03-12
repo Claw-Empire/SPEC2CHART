@@ -52,14 +52,25 @@ fn semantic_icon_for_label(label: &str) -> Option<&'static str> {
     None
 }
 
-/// Draw a vertical gradient-filled rect using a mesh (top=color_top, bottom=color_bot).
+/// Draw a gradient-filled rect using a mesh.
+/// angle_deg: 0=top→bottom, 90=left→right, 45=↘, 135=↗
 fn paint_gradient_rect(painter: &egui::Painter, rect: Rect, color_top: Color32, color_bot: Color32) {
+    paint_gradient_rect_angle(painter, rect, color_top, color_bot, 0);
+}
+
+fn paint_gradient_rect_angle(painter: &egui::Painter, rect: Rect, color_a: Color32, color_b: Color32, angle_deg: u8) {
     let mut mesh = egui::Mesh::default();
-    // 4 vertices: TL, TR, BR, BL
-    mesh.vertices.push(egui::epaint::Vertex { pos: rect.min,                               uv: Pos2::ZERO, color: color_top });
-    mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(rect.max.x, rect.min.y),      uv: Pos2::ZERO, color: color_top });
-    mesh.vertices.push(egui::epaint::Vertex { pos: rect.max,                               uv: Pos2::ZERO, color: color_bot });
-    mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(rect.min.x, rect.max.y),      uv: Pos2::ZERO, color: color_bot });
+    // Assign corner colors based on direction (TL, TR, BR, BL)
+    let (tl, tr, br, bl): (Color32, Color32, Color32, Color32) = match angle_deg {
+        90  => (color_a, color_b, color_b, color_a), // left→right
+        45  => (color_a, color_a, color_b, color_b), // ↘ diagonal
+        135 => (color_b, color_a, color_a, color_b), // ↗ diagonal
+        _   => (color_a, color_a, color_b, color_b), // 0 = top→bottom
+    };
+    mesh.vertices.push(egui::epaint::Vertex { pos: rect.min,                               uv: Pos2::ZERO, color: tl });
+    mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(rect.max.x, rect.min.y),      uv: Pos2::ZERO, color: tr });
+    mesh.vertices.push(egui::epaint::Vertex { pos: rect.max,                               uv: Pos2::ZERO, color: br });
+    mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(rect.min.x, rect.max.y),      uv: Pos2::ZERO, color: bl });
     mesh.indices = vec![0, 1, 2, 0, 2, 3];
     painter.add(egui::Shape::mesh(mesh));
 }
@@ -576,7 +587,7 @@ impl FlowchartApp {
         match shape {
             NodeShape::Rectangle => {
                 if style.gradient {
-                    paint_gradient_rect(painter, screen_rect, fill, darken(fill, 0.35));
+                    paint_gradient_rect_angle(painter, screen_rect, fill, darken(fill, 0.35), style.gradient_angle);
                 } else {
                     painter.rect_filled(screen_rect, CornerRadius::same(cr_user), fill);
                 }
@@ -590,7 +601,7 @@ impl FlowchartApp {
                 let r = (10.0 * self.viewport.zoom).max(style.corner_radius * self.viewport.zoom.sqrt()) as u8;
                 if style.gradient {
                     // Clip gradient to rounded rect by overdrawing rounded rect mask
-                    paint_gradient_rect(painter, screen_rect, fill, darken(fill, 0.35));
+                    paint_gradient_rect_angle(painter, screen_rect, fill, darken(fill, 0.35), style.gradient_angle);
                     // Re-punch the corners transparent by drawing the background color in the corner arcs
                     // (simplification: draw the stroke rect over — visually correct for typical sizes)
                 } else {

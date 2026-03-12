@@ -551,16 +551,32 @@ impl FlowchartApp {
 
                 // Zoom
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{:.0}%", self.viewport.zoom * 100.0))
-                            .size(12.0)
-                            .color(TEXT_DIM)
-                            .monospace(),
-                    );
-                    if ui.small_button("Reset").clicked() {
-                        self.viewport.zoom = 1.0;
-                        self.viewport.offset = [0.0, 0.0];
+                    let zoom_label = egui::RichText::new(format!("{:.0}%", self.viewport.zoom * 100.0))
+                        .size(12.0)
+                        .color(TEXT_DIM)
+                        .monospace();
+                    let zoom_resp = ui.add(egui::Label::new(zoom_label).sense(egui::Sense::click()))
+                        .on_hover_text("Click for zoom presets");
+                    if zoom_resp.clicked() {
+                        ui.ctx().memory_mut(|m| m.toggle_popup(egui::Id::new("zoom_presets_popup")));
                     }
+                    egui::popup_below_widget(ui, egui::Id::new("zoom_presets_popup"), &zoom_resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                        ui.set_min_width(110.0);
+                        for (label, zoom_val) in [("25%", 0.25), ("50%", 0.5), ("75%", 0.75), ("100%", 1.0), ("150%", 1.5), ("200%", 2.0)] {
+                            let is_current = (self.viewport.zoom - zoom_val).abs() < 0.01;
+                            let txt = egui::RichText::new(label).size(12.0);
+                            let txt = if is_current { txt.strong() } else { txt };
+                            if ui.selectable_label(is_current, txt).clicked() {
+                                self.viewport.zoom = zoom_val;
+                                ui.ctx().memory_mut(|m| m.close_popup());
+                            }
+                        }
+                        ui.separator();
+                        if ui.selectable_label(false, egui::RichText::new("Fit All (F)").size(12.0)).clicked() {
+                            self.fit_to_content();
+                            ui.ctx().memory_mut(|m| m.close_popup());
+                        }
+                    });
                 });
 
                 // Canvas state indicators

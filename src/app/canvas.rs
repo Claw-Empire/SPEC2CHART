@@ -2,7 +2,7 @@ use egui::{
     Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
 };
 use crate::model::*;
-use super::{FlowchartApp, DragState, Tool};
+use super::{FlowchartApp, DragState, Tool, ResizeHandle};
 use super::interaction::{control_points_for_side, cubic_bezier_point};
 use super::theme::*;
 
@@ -338,6 +338,14 @@ impl FlowchartApp {
                     if let Some(col) = color_pick {
                         if let Some(n) = self.document.find_node_mut(&node_id) {
                             n.style.fill_color = col;
+                            // Auto-contrast: pick legible text color
+                            let [r, g, b, _] = col;
+                            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                            n.style.text_color = if luma > 140.0 {
+                                [15, 15, 20, 255]
+                            } else {
+                                [220, 220, 230, 255]
+                            };
                         }
                         self.history.push(&self.document);
                         ui.close_menu();
@@ -1597,9 +1605,51 @@ impl FlowchartApp {
                 let nid = *node_id;
                 let h = *handle;
                 let sr = *start_rect;
+                let (shift_held, alt_held) = _ui.ctx().input(|i| (i.modifiers.shift, i.modifiers.alt));
                 if let Some(node) = self.document.find_node(&nid) {
                     let min = node.min_size();
-                    let [nx, ny, nw, nh] = Self::compute_resize(h, sr, delta, min);
+                    let [mut nx, mut ny, mut nw, mut nh] = Self::compute_resize(h, sr, delta, min);
+                    // Shift = proportional resize: lock aspect ratio
+                    if shift_held && sr[2] > 0.0 && sr[3] > 0.0 {
+                        let aspect = sr[2] / sr[3]; // original w/h
+                        // Determine which axis drove the resize
+                        let w_changed = (nw - sr[2]).abs() > 0.001;
+                        let h_changed = (nh - sr[3]).abs() > 0.001;
+                        match h {
+                            ResizeHandle::Left | ResizeHandle::Right => {
+                                nh = (nw / aspect).max(min[1]);
+                            }
+                            ResizeHandle::Top | ResizeHandle::Bottom => {
+                                nw = (nh * aspect).max(min[0]);
+                            }
+                            _ => {
+                                // Corner: use whichever dimension changed more
+                                if w_changed && h_changed {
+                                    let wf = (nw / sr[2]).max(0.0);
+                                    let hf = (nh / sr[3]).max(0.0);
+                                    if wf > hf {
+                                        nh = (nw / aspect).max(min[1]);
+                                    } else {
+                                        nw = (nh * aspect).max(min[0]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Alt = resize from center: expand equally on both sides
+                    if alt_held {
+                        let dw = nw - sr[2]; // width delta
+                        let dh = nh - sr[3]; // height delta
+                        // Center stays fixed: start_rect center
+                        let cx = sr[0] + sr[2] / 2.0;
+                        let cy = sr[1] + sr[3] / 2.0;
+                        let new_w = (sr[2] + dw.abs() * 2.0).max(min[0]);
+                        let new_h = (sr[3] + dh.abs() * 2.0).max(min[1]);
+                        nx = cx - new_w / 2.0;
+                        ny = cy - new_h / 2.0;
+                        nw = new_w;
+                        nh = new_h;
+                    }
                     if let Some(node) = self.document.find_node_mut(&nid) {
                         node.position = [nx, ny];
                         node.size = [nw, nh];
@@ -4018,15 +4068,14 @@ impl FlowchartApp {
             let max_pt = map_point(r.max.x, r.max.y);
             let mini_rect = Rect::from_two_pos(min_pt, max_pt);
             let is_selected = self.selection.contains_node(&node.id);
-            // Frame nodes: very transparent
+            // Use actual node fill color in minimap for visual accuracy
             let node_color = if node.is_frame {
                 Color32::from_rgba_unmultiplied(89, 91, 118, 50)
             } else if is_selected {
                 ACCENT
-            } else if let Some(tag) = node.tag {
-                to_color32(tag.color())
             } else {
-                MINIMAP_NODE
+                let [r, g, b, _] = node.style.fill_color;
+                Color32::from_rgba_unmultiplied(r, g, b, 200)
             };
             let cr_val = (mini_rect.width().min(mini_rect.height()) * 0.2) as u8;
             if mini_rect.area() > 2.0 {

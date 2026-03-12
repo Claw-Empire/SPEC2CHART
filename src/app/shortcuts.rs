@@ -503,6 +503,13 @@ impl FlowchartApp {
             self.selection.clear();
         }
 
+        // F2 = rename: focus the label editor in the properties panel
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F2)) {
+            if !self.selection.node_ids.is_empty() || !self.selection.edge_ids.is_empty() {
+                self.focus_label_edit = true;
+            }
+        }
+
         // Shift+R = toggle coordinate rulers
         let shift_only = egui::Modifiers { shift: true, ..Default::default() };
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.matches_exact(shift_only)) {

@@ -685,6 +685,16 @@ impl FlowchartApp {
                 if ui.color_edit_button_srgba(&mut t).changed() {
                     node.style.text_color = t.to_array();
                 }
+                // Auto-contrast button: pick black or white based on fill luminance
+                if ui.small_button("Auto").on_hover_text("Set text color to black or white based on fill brightness").clicked() {
+                    let [r, g, b, _] = node.style.fill_color;
+                    let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                    node.style.text_color = if luma > 140.0 {
+                        [15, 15, 20, 255]  // dark text on light bg
+                    } else {
+                        [220, 220, 230, 255]  // light text on dark bg
+                    };
+                }
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -693,6 +703,14 @@ impl FlowchartApp {
                 ui.checkbox(&mut node.style.border_dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
                 ui.add_space(8.0);
                 ui.checkbox(&mut node.style.gradient, egui::RichText::new("Gradient").size(11.0).color(TEXT_DIM));
+                if node.style.gradient {
+                    for (angle, icon, tip) in [(0u8,"↓","Top→Bottom"),(90u8,"→","Left→Right"),(45u8,"↘","Diagonal ↘"),(135u8,"↗","Diagonal ↗")] {
+                        let active = node.style.gradient_angle == angle;
+                        let btn = egui::Button::new(egui::RichText::new(icon).size(11.0).color(if active { ACCENT } else { TEXT_DIM }))
+                            .fill(if active { SURFACE1 } else { Color32::TRANSPARENT });
+                        if ui.add(btn).on_hover_text(tip).clicked() { node.style.gradient_angle = angle; }
+                    }
+                }
                 ui.add_space(8.0);
                 ui.checkbox(&mut node.style.shadow, egui::RichText::new("Shadow").size(11.0).color(TEXT_DIM))
                     .on_hover_text("Render a soft drop shadow beneath the node");
