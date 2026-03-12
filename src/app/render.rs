@@ -960,6 +960,18 @@ impl FlowchartApp {
             self.draw_arrow_head(painter, cp2, tgt, edge_color, width, edge.style.arrow_head);
         }
 
+        // Source dot — small circle at the source endpoint for directionality cue
+        if self.viewport.zoom > 0.45 && edge.source_cardinality == Cardinality::None {
+            let dot_r = (2.0 * self.viewport.zoom.sqrt()).clamp(1.5, 4.0);
+            let dot_color = if is_selected {
+                SELECTION_COLOR.gamma_multiply(0.8)
+            } else {
+                edge_color.gamma_multiply(0.6)
+            };
+            painter.circle_filled(src, dot_r, dot_color);
+            painter.circle_stroke(src, dot_r, Stroke::new(0.5, edge_color.gamma_multiply(0.3)));
+        }
+
         // Edge label
         if !edge.label.is_empty() {
             let mid = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
