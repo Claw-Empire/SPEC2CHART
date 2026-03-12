@@ -618,6 +618,26 @@ impl FlowchartApp {
             std::collections::HashSet::new()
         };
 
+        // Detect newly created edges → record birth time for draw-in animation
+        {
+            let now = ui.ctx().input(|i| i.time);
+            // Prune old entries
+            self.edge_birth_times.retain(|_, t| now - *t < 0.35);
+            // Add NEW edge IDs (only ones not seen on previous frame)
+            let current_edge_ids: std::collections::HashSet<EdgeId> =
+                self.document.edges.iter().map(|e| e.id).collect();
+            for edge in &self.document.edges {
+                if !self.prev_edge_ids.contains(&edge.id) && !self.prev_edge_ids.is_empty() {
+                    self.edge_birth_times.insert(edge.id, now);
+                }
+            }
+            self.prev_edge_ids = current_edge_ids;
+            // Request repaint if any animation in progress
+            if !self.edge_birth_times.is_empty() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+
         // Detect newly created nodes → spawn creation ripples
         {
             let now = ui.ctx().input(|i| i.time);

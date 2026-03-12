@@ -176,6 +176,10 @@ pub struct FlowchartApp {
     pub(crate) selection_times: std::collections::HashMap<NodeId, f64>,
     /// Currently highlighted result index in the search overlay
     pub(crate) search_cursor: usize,
+    /// New-edge draw-in animations: (edge_id, birth_time_secs)
+    pub(crate) edge_birth_times: std::collections::HashMap<EdgeId, f64>,
+    /// Edge IDs seen on the previous frame — used to detect newly added edges
+    pub(crate) prev_edge_ids: std::collections::HashSet<EdgeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +313,8 @@ impl FlowchartApp {
             hover_node_start: None,
             selection_times: std::collections::HashMap::new(),
             search_cursor: 0,
+            edge_birth_times: std::collections::HashMap::new(),
+            prev_edge_ids: std::collections::HashSet::new(),
         }
     }
 

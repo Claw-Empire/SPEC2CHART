@@ -872,6 +872,21 @@ impl FlowchartApp {
             cp2 = cp2 + perp * bend_screen;
         }
 
+        // Edge draw-in animation: if this edge was recently created, clip the bezier
+        let draw_end_t = if let Some(&birth) = self.edge_birth_times.get(&edge.id) {
+            let now = painter.ctx().input(|i| i.time);
+            let age = (now - birth) as f32;
+            let duration = 0.30_f32;
+            if age < duration {
+                // Ease-out: t^0.4 gives fast start, slow end — "inking in" feel
+                (age / duration).powf(0.45)
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
+
         // Hover detection: check if cursor is close to bezier curve
         let is_hovered = !is_selected && hover_canvas_pos.map(|hp| {
             let hp_screen = self.viewport.canvas_to_screen(hp);
@@ -1045,6 +1060,16 @@ impl FlowchartApp {
                         prev = pt;
                     }
                 }
+            }
+        } else if draw_end_t < 1.0 {
+            // Draw-in animation: polyline up to draw_end_t fraction of the bezier
+            let steps = 24_usize;
+            let end_step = ((draw_end_t * steps as f32) as usize).clamp(1, steps);
+            let pts: Vec<Pos2> = (0..=end_step)
+                .map(|i| cubic_bezier_point(src, cp1, cp2, tgt, i as f32 / steps as f32))
+                .collect();
+            for w in pts.windows(2) {
+                painter.line_segment([w[0], w[1]], Stroke::new(width, edge_color));
             }
         } else {
             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
