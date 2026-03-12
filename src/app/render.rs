@@ -97,11 +97,22 @@ impl FlowchartApp {
         // Semantic zoom: at very low zoom, render as compact dot-label (LOD0)
         if self.viewport.zoom < 0.28 && !node.is_frame {
             let fill = to_color32(node.style.fill_color);
-            let dot_r = (screen_rect.width().max(screen_rect.height()) * 0.35).clamp(3.0, 10.0);
+            // Hub nodes get larger dots: degree scales radius by up to 1.8×
+            let degree = self.document.edges.iter()
+                .filter(|e| e.source.node_id == node.id || e.target.node_id == node.id)
+                .count();
+            let hub_scale = 1.0 + (degree as f32 / 10.0).min(1.0) * 0.8;
+            let base_r = (screen_rect.width().max(screen_rect.height()) * 0.35).clamp(3.0, 10.0);
+            let dot_r = (base_r * hub_scale).clamp(3.0, 14.0);
             let center = screen_rect.center();
             // Ring for selection
             if is_selected {
                 painter.circle_filled(center, dot_r + 3.0, ACCENT_GLOW);
+            }
+            // Hub glow: warm ring for high-degree nodes
+            if degree >= 5 {
+                let glow_alpha = ((degree as f32 / 12.0).min(1.0) * 80.0) as u8;
+                painter.circle_filled(center, dot_r + 2.5, Color32::from_rgba_unmultiplied(235, 160, 60, glow_alpha));
             }
             painter.circle_filled(center, dot_r, fill);
             painter.circle_stroke(center, dot_r, Stroke::new(0.8, to_color32(node.style.border_color)));
