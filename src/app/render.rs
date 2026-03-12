@@ -681,10 +681,13 @@ impl FlowchartApp {
             }
         }
 
-        let text_color = to_color32(style.text_color).gamma_multiply(opacity);
-        // Cap font size at 72px to prevent overly large text at high zoom
-        let font_size = (style.font_size * self.viewport.zoom).min(72.0);
-        if font_size > 4.0 && !label.is_empty() {
+        // Adaptive font: scale with zoom, floor at 7px for readability, fade near LOD boundary
+        let font_size_raw = style.font_size * self.viewport.zoom;
+        let font_size = font_size_raw.clamp(7.0, 72.0);
+        // At low zoom (< 0.5), fade text toward 0 so it disappears smoothly before LOD switch
+        let text_fade = (self.viewport.zoom / 0.4).clamp(0.0, 1.0);
+        let text_color = to_color32(style.text_color).gamma_multiply(opacity * text_fade);
+        if font_size > 4.0 && text_fade > 0.05 && !label.is_empty() {
             let font = match shape {
                 NodeShape::Connector => FontId::monospace(font_size * 0.88),
                 _ => FontId::proportional(font_size),
