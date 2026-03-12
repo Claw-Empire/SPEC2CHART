@@ -93,7 +93,14 @@ impl FlowchartApp {
                 } => {
                     Self::draw_section_header(ui, "CONTENT");
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("⎘").on_hover_text("Copy label to clipboard").clicked() {
+                                ui.ctx().copy_text(label.clone());
+                            }
+                        });
+                    });
                     ui.add_space(2.0);
                     let label_response = ui.add(
                         egui::TextEdit::singleline(label)
@@ -290,11 +297,17 @@ impl FlowchartApp {
                 if ui.color_edit_button_srgba(&mut c).changed() {
                     node.style.fill_color = c.to_array();
                 }
-                ui.add_space(16.0);
+                ui.add_space(8.0);
                 let mut b = to_color32(node.style.border_color);
                 ui.label(egui::RichText::new("Border").size(11.0).color(TEXT_DIM));
                 if ui.color_edit_button_srgba(&mut b).changed() {
                     node.style.border_color = b.to_array();
+                }
+                ui.add_space(8.0);
+                let mut t = to_color32(node.style.text_color);
+                ui.label(egui::RichText::new("Text").size(11.0).color(TEXT_DIM));
+                if ui.color_edit_button_srgba(&mut t).changed() {
+                    node.style.text_color = t.to_array();
                 }
             });
             ui.add_space(8.0);

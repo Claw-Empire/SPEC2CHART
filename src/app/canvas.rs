@@ -90,13 +90,25 @@ impl FlowchartApp {
             }
         }
 
-        // Double-click to focus label editing
+        // Double-click to focus label editing, or create new node on empty space
         if response.double_clicked() {
             if let Some(mouse) = pointer_pos {
                 let canvas_pos = self.viewport.screen_to_canvas(mouse);
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                     self.selection.select_node(node_id);
                     self.focus_label_edit = true;
+                } else if self.tool == Tool::Select {
+                    // Create a new default shape node centered on the click
+                    let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
+                    let w = node.size[0];
+                    let h = node.size[1];
+                    node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
+                    let id = node.id;
+                    self.document.nodes.push(node);
+                    self.selection.select_node(id);
+                    self.focus_label_edit = true;
+                    self.history.push(&self.document);
+                    self.status_message = Some(("Node created".to_string(), std::time::Instant::now()));
                 }
             }
         }
@@ -169,6 +181,7 @@ impl FlowchartApp {
         self.draw_canvas_hud(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_search_overlay(ui, canvas_rect);
+        self.draw_zoom_presets(ui, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
 
         // Minimap click-to-pan
@@ -703,36 +716,38 @@ impl FlowchartApp {
         let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
         let n_nodes = self.document.nodes.len();
         let n_edges = self.document.edges.len();
-        let n_sel = self.selection.node_ids.len();
+        let n_sel_n = self.selection.node_ids.len();
+        let n_sel_e = self.selection.edge_ids.len();
 
         let line1 = format!("{zoom_pct}%");
-        let line2 = if n_sel > 0 {
-            format!("{n_sel} selected  ·  {n_nodes}N {n_edges}E")
+        let line2 = if n_sel_n > 0 || n_sel_e > 0 {
+            let mut parts = Vec::new();
+            if n_sel_n > 0 { parts.push(format!("{}N", n_sel_n)); }
+            if n_sel_e > 0 { parts.push(format!("{}E", n_sel_e)); }
+            format!("{} sel  ·  {}N {}E", parts.join("+"), n_nodes, n_edges)
         } else {
-            format!("{n_nodes} nodes  ·  {n_edges} edges")
+            format!("{}N  {}E", n_nodes, n_edges)
+        };
+        let line3 = {
+            let mut flags = Vec::new();
+            if self.show_grid { flags.push("grid"); }
+            if self.snap_to_grid { flags.push("snap"); }
+            flags.join("·")
         };
 
         let pad = 8.0;
         let x = canvas_rect.min.x + pad;
-        let y = canvas_rect.max.y - 36.0;
+        let y = canvas_rect.max.y - 48.0;
 
         let font_big = egui::FontId::proportional(15.0);
         let font_sm  = egui::FontId::proportional(10.5);
+        let font_xs  = egui::FontId::proportional(9.5);
 
-        painter.text(
-            Pos2::new(x, y),
-            egui::Align2::LEFT_TOP,
-            &line1,
-            font_big,
-            TEXT_SECONDARY,
-        );
-        painter.text(
-            Pos2::new(x, y + 17.0),
-            egui::Align2::LEFT_TOP,
-            &line2,
-            font_sm,
-            TEXT_DIM,
-        );
+        painter.text(Pos2::new(x, y), egui::Align2::LEFT_TOP, &line1, font_big, TEXT_SECONDARY);
+        painter.text(Pos2::new(x, y + 17.0), egui::Align2::LEFT_TOP, &line2, font_sm, TEXT_DIM);
+        if !line3.is_empty() {
+            painter.text(Pos2::new(x, y + 29.0), egui::Align2::LEFT_TOP, &line3, font_xs, TEXT_DIM);
+        }
     }
 
     // --- Grid ---
@@ -770,6 +785,33 @@ impl FlowchartApp {
     }
 
     // --- Minimap ---
+
+    fn draw_zoom_presets(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        // Small interactive zoom chips at bottom-left, just above HUD text
+        let presets: &[(f32, &str)] = &[(0.5, "50%"), (1.0, "100%"), (2.0, "200%")];
+        let y = canvas_rect.max.y - 72.0;
+        let mut x = canvas_rect.min.x + 8.0;
+        for (zoom, label) in presets {
+            let chip_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(36.0, 14.0));
+            let is_active = (self.viewport.zoom - zoom).abs() < 0.05;
+            let color = if is_active { ACCENT } else { TEXT_DIM };
+            let resp = ui.interact(chip_rect, egui::Id::new(("zoom_preset", label)), egui::Sense::click());
+            if resp.clicked() {
+                let center = self.canvas_rect.center();
+                let old_zoom = self.viewport.zoom;
+                self.viewport.zoom = *zoom;
+                let ratio = self.viewport.zoom / old_zoom;
+                self.viewport.offset[0] = center.x - ratio * (center.x - self.viewport.offset[0]);
+                self.viewport.offset[1] = center.y - ratio * (center.y - self.viewport.offset[1]);
+            }
+            ui.painter().text(
+                chip_rect.center(), Align2::CENTER_CENTER, *label,
+                FontId::proportional(9.5),
+                if resp.hovered() { TEXT_SECONDARY } else { color },
+            );
+            x += 40.0;
+        }
+    }
 
     fn draw_search_overlay(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
         if !self.show_search { return; }
