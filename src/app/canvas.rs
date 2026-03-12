@@ -130,6 +130,31 @@ impl FlowchartApp {
                             self.selection.toggle_node(node_id);
                         }
                     } else {
+                        // Click on chevron (▶) of a collapsed node → expand it
+                        let is_collapsed = self.document.find_node(&node_id)
+                            .map_or(false, |n| n.collapsed);
+                        if is_collapsed {
+                            let tl = self.document.find_node(&node_id)
+                                .map(|n| self.viewport.canvas_to_screen(n.pos()));
+                            let h = self.document.find_node(&node_id)
+                                .map(|n| n.size[1] * self.viewport.zoom)
+                                .unwrap_or(28.0);
+                            if let Some(tl) = tl {
+                                let chevron_rect = egui::Rect::from_min_size(
+                                    tl + Vec2::new(4.0, 0.0),
+                                    Vec2::new(20.0, h),
+                                );
+                                if let Some(mp) = pointer_pos {
+                                    if chevron_rect.contains(mp) {
+                                        if let Some(node) = self.document.find_node_mut(&node_id) {
+                                            node.toggle_collapsed();
+                                        }
+                                        self.history.push(&self.document);
+                                        return; // don't select after toggling
+                                    }
+                                }
+                            }
+                        }
                         self.selection.select_node(node_id);
                     }
                 } else if let Some(edge_id) = self.hit_test_edge(canvas_pos) {

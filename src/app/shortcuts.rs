@@ -469,6 +469,26 @@ impl FlowchartApp {
             self.show_shortcuts_panel = !self.show_shortcuts_panel;
         }
 
+        // Cmd+Shift+H = collapse/expand selected nodes
+        let cmd_shift_h = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.matches_exact(cmd_shift_h)) {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            if !ids.is_empty() {
+                let all_collapsed = ids.iter().all(|id| {
+                    self.document.find_node(id).map_or(false, |n| n.collapsed)
+                });
+                for id in &ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        if all_collapsed { node.toggle_collapsed(); } // expand
+                        else if !node.collapsed { node.toggle_collapsed(); } // collapse only uncollapsed ones
+                    }
+                }
+                self.history.push(&self.document);
+                let msg = if all_collapsed { "Expanded" } else { "Collapsed" };
+                self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+Shift+L = toggle canvas lock (prevent node moves)
         let cmd_shift_l = Modifiers { shift: true, ..cmd };
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd_shift_l)) {
