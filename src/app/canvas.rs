@@ -540,6 +540,34 @@ impl FlowchartApp {
             self.draw_presentation_spotlight(&painter, canvas_rect, pointer_pos);
         }
 
+        // Resize ghost: show original node rect when resizing
+        if let DragState::ResizingNode { start_rect, .. } = &self.drag {
+            let sr = *start_rect; // [x, y, w, h] in canvas space
+            let tl = self.viewport.canvas_to_screen(Pos2::new(sr[0], sr[1]));
+            let ghost_rect = Rect::from_min_size(tl, Vec2::new(sr[2], sr[3]) * self.viewport.zoom);
+            painter.rect_stroke(
+                ghost_rect,
+                CornerRadius::same(4),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 90)),
+                StrokeKind::Outside,
+            );
+            // Draw dashed ghost with 2 offset rects
+            painter.rect_stroke(
+                ghost_rect.expand(1.5),
+                CornerRadius::same(5),
+                Stroke::new(0.5, Color32::from_rgba_unmultiplied(137, 180, 250, 40)),
+                StrokeKind::Outside,
+            );
+            // Size label
+            painter.text(
+                ghost_rect.center_bottom() + Vec2::new(0.0, 6.0),
+                Align2::CENTER_TOP,
+                &format!("{:.0} × {:.0}", sr[2], sr[3]),
+                FontId::proportional(9.0),
+                Color32::from_rgba_unmultiplied(137, 180, 250, 160),
+            );
+        }
+
         // --- Previews ---
         self.draw_alignment_guides(&painter, canvas_rect);
         self.draw_distance_indicators(&painter);
