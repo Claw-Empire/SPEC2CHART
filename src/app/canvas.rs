@@ -198,8 +198,50 @@ impl FlowchartApp {
                     }
                 } else {
                     // Canvas context menu
-                    if ui.button("📋 Paste").clicked() {
-                        if !self.clipboard.is_empty() {
+                    ui.label(egui::RichText::new("Canvas").size(10.0).color(TEXT_DIM));
+                    ui.separator();
+
+                    // Add node submenu
+                    ui.menu_button("➕ Add Node…", |ui| {
+                        for (shape, label) in [
+                            (NodeShape::Rectangle,   "□ Rectangle"),
+                            (NodeShape::RoundedRect, "▢ Rounded"),
+                            (NodeShape::Diamond,     "◇ Diamond"),
+                            (NodeShape::Circle,      "○ Circle"),
+                        ] {
+                            if ui.button(label).clicked() {
+                                let w = 140.0_f32; let h = 60.0_f32;
+                                let pos = egui::Pos2::new(canvas_pos.x - w/2.0, canvas_pos.y - h/2.0);
+                                let mut node = Node::new(shape, pos);
+                                node.size = [w, h];
+                                let id = node.id;
+                                self.document.nodes.push(node);
+                                self.selection.select_node(id);
+                                self.focus_label_edit = true;
+                                self.history.push(&self.document);
+                                ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("📝 Sticky Note").clicked() {
+                            let n = Node::new_sticky(crate::model::StickyColor::Yellow,
+                                egui::Pos2::new(canvas_pos.x - 75.0, canvas_pos.y - 75.0));
+                            self.selection.select_node(n.id);
+                            self.document.nodes.push(n);
+                            self.history.push(&self.document);
+                            ui.close_menu();
+                        }
+                        if ui.button("⬜ Frame").clicked() {
+                            let n = Node::new_frame(egui::Pos2::new(canvas_pos.x - 150.0, canvas_pos.y - 110.0));
+                            self.selection.select_node(n.id);
+                            self.document.nodes.push(n);
+                            self.history.push(&self.document);
+                            ui.close_menu();
+                        }
+                    });
+
+                    if !self.clipboard.is_empty() {
+                        if ui.button(format!("📋 Paste ({} node(s))", self.clipboard.len())).clicked() {
                             self.selection.clear();
                             let n = self.clipboard.len() as f32;
                             let centroid = self.clipboard.iter().fold(Vec2::ZERO, |a, nd| a + nd.pos().to_vec2()) / n;
@@ -212,23 +254,36 @@ impl FlowchartApp {
                                 self.document.nodes.push(nd);
                             }
                             self.history.push(&self.document);
+                            ui.close_menu();
                         }
+                    }
+
+                    if ui.button("🔍 Select All").clicked() {
+                        for n in &self.document.nodes { self.selection.node_ids.insert(n.id); }
                         ui.close_menu();
                     }
-                    if ui.button("F Fit All").clicked() {
+
+                    ui.separator();
+
+                    if ui.button("⊞ Fit to Content").clicked() {
                         self.fit_to_content();
                         ui.close_menu();
                     }
+                    if ui.button("1:1 Reset Zoom").clicked() {
+                        self.viewport.zoom = 1.0;
+                        ui.close_menu();
+                    }
+
                     ui.separator();
-                    if ui.button("➕ New Node Here").clicked() {
-                        let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
-                        let w = node.size[0]; let h = node.size[1];
-                        node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
-                        let id = node.id;
-                        self.document.nodes.push(node);
-                        self.selection.select_node(id);
-                        self.focus_label_edit = true;
-                        self.history.push(&self.document);
+
+                    let grid_label = if self.show_grid { "⊡ Hide Grid" } else { "⊞ Show Grid" };
+                    if ui.button(grid_label).clicked() {
+                        self.show_grid = !self.show_grid;
+                        ui.close_menu();
+                    }
+                    let snap_label = if self.snap_to_grid { "⊠ Snap Off" } else { "⊟ Snap to Grid" };
+                    if ui.button(snap_label).clicked() {
+                        self.snap_to_grid = !self.snap_to_grid;
                         ui.close_menu();
                     }
                 }
