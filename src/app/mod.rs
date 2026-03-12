@@ -174,6 +174,8 @@ pub struct FlowchartApp {
     /// Records when each node was first selected (egui time in seconds).
     /// Used for selection-confirmation flash micro-animation.
     pub(crate) selection_times: std::collections::HashMap<NodeId, f64>,
+    /// Currently highlighted result index in the search overlay
+    pub(crate) search_cursor: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,6 +308,7 @@ impl FlowchartApp {
             inline_node_edit: None,
             hover_node_start: None,
             selection_times: std::collections::HashMap::new(),
+            search_cursor: 0,
         }
     }
 

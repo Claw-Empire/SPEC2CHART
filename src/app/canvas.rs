@@ -2986,28 +2986,71 @@ impl FlowchartApp {
     fn draw_search_overlay(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
         if !self.show_search { return; }
 
-        let w = 320.0_f32;
-        let overlay_rect = Rect::from_center_size(
-            Pos2::new(canvas_rect.center().x, canvas_rect.min.y + 60.0),
-            Vec2::new(w, 36.0),
-        );
+        // Collect matching results
+        let q = self.search_query.to_lowercase();
+        let max_results = 8_usize;
+        let results: Vec<(NodeId, String)> = if q.is_empty() {
+            Vec::new()
+        } else {
+            self.document.nodes.iter()
+                .filter(|n| n.display_label().to_lowercase().contains(&q))
+                .take(max_results)
+                .map(|n| (n.id, n.display_label().to_string()))
+                .collect()
+        };
 
-        // Draw background first (painter doesn't alias with child ui since it's a clone)
-        {
-            let painter = ui.painter().clone();
-            painter.rect_filled(overlay_rect.expand(4.0), CornerRadius::same(8), TOOLTIP_BG);
-            painter.rect_stroke(overlay_rect.expand(4.0), CornerRadius::same(8),
-                Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
+        // Clamp cursor
+        if !results.is_empty() && self.search_cursor >= results.len() {
+            self.search_cursor = results.len() - 1;
         }
 
-        // Search text edit
+        let w = 320.0_f32;
+        let input_h = 38.0_f32;
+        let row_h = 30.0_f32;
+        let results_h = results.len() as f32 * row_h;
+        let total_h = input_h + results_h;
+
+        let top = canvas_rect.min.y + 50.0;
+        let overlay_rect = Rect::from_min_size(
+            Pos2::new(canvas_rect.center().x - w / 2.0, top),
+            Vec2::new(w, total_h.max(input_h)),
+        );
+
+        // Background panel
+        {
+            let painter = ui.painter().clone();
+            painter.rect_filled(overlay_rect, CornerRadius::same(10), TOOLTIP_BG);
+            painter.rect_stroke(overlay_rect, CornerRadius::same(10),
+                Stroke::new(1.0, ACCENT.gamma_multiply(0.4)), StrokeKind::Outside);
+            // Search icon
+            painter.text(
+                Pos2::new(overlay_rect.min.x + 12.0, overlay_rect.min.y + input_h / 2.0),
+                Align2::LEFT_CENTER, "🔍",
+                FontId::proportional(13.0), TEXT_DIM,
+            );
+            // Divider between input and results
+            if !results.is_empty() {
+                painter.line_segment(
+                    [Pos2::new(overlay_rect.min.x + 12.0, top + input_h),
+                     Pos2::new(overlay_rect.max.x - 12.0, top + input_h)],
+                    Stroke::new(0.5, SURFACE1),
+                );
+            }
+        }
+
+        // Search input field (offset right of icon)
+        let input_rect = Rect::from_min_size(
+            Pos2::new(overlay_rect.min.x + 30.0, overlay_rect.min.y + 2.0),
+            Vec2::new(w - 50.0, input_h - 4.0),
+        );
         let mut ui2 = ui.new_child(
-            egui::UiBuilder::new().max_rect(overlay_rect).layout(egui::Layout::left_to_right(egui::Align::Center))
+            egui::UiBuilder::new().max_rect(input_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center))
         );
         let resp = ui2.add(
             egui::TextEdit::singleline(&mut self.search_query)
                 .hint_text("Search nodes…")
-                .desired_width(w)
+                .desired_width(w - 60.0)
                 .font(egui::FontId::proportional(14.0))
                 .frame(false),
         );
@@ -3015,45 +3058,88 @@ impl FlowchartApp {
 
         let ctx = ui2.ctx().clone();
 
+        // Keyboard navigation within results
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) && !results.is_empty() {
+            self.search_cursor = (self.search_cursor + 1).min(results.len() - 1);
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) && self.search_cursor > 0 {
+            self.search_cursor -= 1;
+        }
+
         // Close on Escape
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_search = false;
+            self.search_query.clear();
+            self.search_cursor = 0;
             return;
         }
 
-        // Select matching nodes on Enter
+        // Jump to result on Enter
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-            let q = self.search_query.to_lowercase();
-            self.selection.clear();
-            for node in &self.document.nodes {
-                if let crate::model::NodeKind::Shape { label, .. } = &node.kind {
-                    if label.to_lowercase().contains(&q) {
-                        self.selection.node_ids.insert(node.id);
-                    }
-                }
-            }
-            if !self.selection.is_empty() {
+            if let Some(&(nid, _)) = results.get(self.search_cursor).or_else(|| results.first()) {
+                self.selection.select_node(nid);
+                self.zoom_to_selection();
+            } else if !results.is_empty() {
+                // Select all matches
+                self.selection.clear();
+                for (nid, _) in &results { self.selection.node_ids.insert(*nid); }
                 self.zoom_to_selection();
             }
             self.show_search = false;
+            self.search_query.clear();
+            self.search_cursor = 0;
             return;
         }
 
-        // Live "N found" hint
-        if !self.search_query.is_empty() {
-            let q = self.search_query.to_lowercase();
-            let count = self.document.nodes.iter().filter(|n| {
-                if let crate::model::NodeKind::Shape { label, .. } = &n.kind {
-                    label.to_lowercase().contains(&q)
-                } else { false }
-            }).count();
-            ui2.painter().text(
-                Pos2::new(overlay_rect.max.x - 4.0, overlay_rect.center().y),
-                Align2::RIGHT_CENTER,
-                format!("{count}"),
-                FontId::proportional(11.0),
-                TEXT_DIM,
+        // Result count badge
+        {
+            let badge = if results.is_empty() && !q.is_empty() { "0".to_string() }
+                        else if !results.is_empty() { format!("{}", results.len()) }
+                        else { String::new() };
+            if !badge.is_empty() {
+                ui2.painter().text(
+                    Pos2::new(overlay_rect.max.x - 8.0, overlay_rect.min.y + input_h / 2.0),
+                    Align2::RIGHT_CENTER, &badge,
+                    FontId::proportional(11.0), TEXT_DIM,
+                );
+            }
+        }
+
+        // Render result rows
+        for (i, (nid, label)) in results.iter().enumerate() {
+            let row_y = top + input_h + i as f32 * row_h;
+            let row_rect = Rect::from_min_size(
+                Pos2::new(overlay_rect.min.x, row_y),
+                Vec2::new(w, row_h),
             );
+            let is_highlighted = i == self.search_cursor;
+            let resp = ui.allocate_rect(row_rect, egui::Sense::click());
+            let is_hov = resp.hovered();
+
+            let bg = if is_highlighted { ACCENT.gamma_multiply(0.18) }
+                     else if is_hov    { Color32::from_rgba_unmultiplied(137, 180, 250, 12) }
+                     else              { Color32::TRANSPARENT };
+            ui.painter().rect_filled(row_rect, CornerRadius::ZERO, bg);
+
+            // Truncate label
+            let short: String = label.chars().take(36).collect();
+            let trail = if label.chars().count() > 36 { "…" } else { "" };
+            let disp = format!("{}{}", short, trail);
+            ui.painter().text(
+                Pos2::new(row_rect.min.x + 14.0, row_rect.center().y),
+                Align2::LEFT_CENTER, &disp,
+                FontId::proportional(12.5),
+                if is_highlighted { TEXT_PRIMARY } else { TEXT_SECONDARY },
+            );
+
+            if resp.clicked() {
+                self.selection.select_node(*nid);
+                self.zoom_to_selection();
+                self.show_search = false;
+                self.search_query.clear();
+                self.search_cursor = 0;
+            }
+            if is_hov { self.search_cursor = i; }
         }
     }
 
