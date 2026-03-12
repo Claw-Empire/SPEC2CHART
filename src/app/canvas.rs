@@ -343,8 +343,18 @@ impl FlowchartApp {
             std::collections::HashSet::new()
         };
 
-        // Nodes (visible only)
-        for node in &self.document.nodes {
+        // Nodes: frame nodes first (they render behind), then regular nodes
+        // This ensures frames appear as translucent containers beneath everything else.
+        let node_ids: Vec<NodeId> = {
+            let mut frames: Vec<NodeId> = self.document.nodes.iter()
+                .filter(|n| n.is_frame).map(|n| n.id).collect();
+            let mut rest: Vec<NodeId> = self.document.nodes.iter()
+                .filter(|n| !n.is_frame).map(|n| n.id).collect();
+            frames.append(&mut rest);
+            frames
+        };
+        for node_id in &node_ids {
+            let Some(node) = self.document.find_node(node_id) else { continue };
             let screen_pos = self.viewport.canvas_to_screen(node.pos());
             let screen_size = node.size_vec() * self.viewport.zoom;
             let screen_rect = Rect::from_min_size(screen_pos, screen_size).expand(20.0);

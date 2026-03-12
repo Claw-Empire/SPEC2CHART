@@ -178,6 +178,7 @@ pub struct NodeStyle {
 }
 
 fn default_opacity() -> f32 { 1.0 }
+pub fn default_frame_color() -> [u8; 4] { [89, 91, 118, 40] } // muted lavender, 16% alpha
 
 impl Default for NodeStyle {
     fn default() -> Self {
@@ -254,6 +255,12 @@ pub struct Node {
     /// Optional URL — Cmd+click on canvas opens this in the browser
     #[serde(default)]
     pub url: String,
+    /// When true, node is a group frame: renders as a large translucent container behind other nodes
+    #[serde(default)]
+    pub is_frame: bool,
+    /// Frame background color (RGBA); only used when is_frame is true
+    #[serde(default = "default_frame_color")]
+    pub frame_color: [u8; 4],
 }
 
 impl Node {
@@ -274,7 +281,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle::default(),
         }
     }
@@ -288,7 +295,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -309,7 +316,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -329,7 +336,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -337,6 +344,32 @@ impl Node {
                 text_color: [205, 214, 244, 255],
                 font_size: 16.0,
                 corner_radius: 0.0, border_dashed: false, gradient: false, opacity: 1.0,
+            },
+        }
+    }
+
+    /// Creates a group frame node — a large translucent container that sits behind other nodes.
+    pub fn new_frame(position: Pos2) -> Self {
+        Self {
+            id: NodeId::new(),
+            kind: NodeKind::Shape {
+                shape: NodeShape::Rectangle,
+                label: String::from("Group"),
+                description: String::new(),
+            },
+            position: [position.x, position.y],
+            size: [300.0, 220.0],
+            z_offset: -100.0, // render behind regular nodes
+            is_frame: true,
+            frame_color: default_frame_color(),
+            pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
+            style: NodeStyle {
+                fill_color: [89, 91, 118, 0],  // transparent — frame_color is used
+                border_color: [147, 153, 178, 160],
+                border_width: 1.5,
+                text_color: [147, 153, 178, 255],
+                font_size: 12.0,
+                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0,
             },
         }
     }

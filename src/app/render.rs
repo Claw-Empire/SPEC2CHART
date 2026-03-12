@@ -55,6 +55,33 @@ impl FlowchartApp {
             );
         }
 
+        // Group frame: translucent container with label in top-left corner
+        if node.is_frame {
+            let fc = node.frame_color;
+            let fill = Color32::from_rgba_unmultiplied(fc[0], fc[1], fc[2], fc[3]);
+            let border_col = if is_selected { SELECTION_COLOR } else {
+                let bc = node.style.border_color;
+                Color32::from_rgba_unmultiplied(bc[0], bc[1], bc[2], bc[3])
+            };
+            let cr = CornerRadius::same(node.style.corner_radius as u8);
+            painter.rect_filled(screen_rect, cr, fill);
+            painter.rect_stroke(screen_rect, cr, Stroke::new(1.5, border_col), StrokeKind::Outside);
+            // Frame label at top-left corner, outside the rect
+            if let NodeKind::Shape { label, .. } = &node.kind {
+                let text_col = Color32::from_rgba_unmultiplied(
+                    node.style.text_color[0], node.style.text_color[1],
+                    node.style.text_color[2], node.style.text_color[3],
+                );
+                let font_size = (node.style.font_size * self.viewport.zoom.sqrt()).clamp(9.0, 14.0);
+                painter.text(
+                    screen_rect.left_top() + Vec2::new(4.0, -font_size - 4.0),
+                    Align2::LEFT_BOTTOM, label,
+                    FontId::proportional(font_size), text_col,
+                );
+            }
+            return;
+        }
+
         // Collapsed pill: render a compact rounded rect with just the label
         if node.collapsed {
             if let NodeKind::Shape { label, .. } = &node.kind {

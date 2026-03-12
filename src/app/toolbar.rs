@@ -676,6 +676,28 @@ impl FlowchartApp {
             self.document.nodes.push(node);
             self.history.push(&self.document);
         }
+
+        // Frame node button
+        ui.add_space(4.0);
+        if ui
+            .add_sized(
+                egui::vec2(available_width, 36.0),
+                egui::Button::new(
+                    egui::RichText::new("⬜ Frame").size(13.0).color(TEXT_PRIMARY),
+                )
+                .fill(SURFACE0),
+            )
+            .on_hover_text("Group frame — translucent container behind other nodes (F key)")
+            .clicked()
+        {
+            let center_screen = self.canvas_rect.center();
+            let center_canvas = self.viewport.screen_to_canvas(center_screen);
+            let node = Node::new_frame(center_canvas - egui::Vec2::new(150.0, 110.0));
+            self.selection.clear();
+            self.selection.node_ids.insert(node.id);
+            self.document.nodes.push(node);
+            self.history.push(&self.document);
+        }
     }
 
     fn draw_shape_button(

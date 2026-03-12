@@ -559,6 +559,45 @@ impl FlowchartApp {
             });
         }
 
+        // Frame node controls
+        if let Some(node) = self.document.find_node_mut(&node_id) {
+            if node.is_frame {
+                ui.add_space(8.0);
+                Self::draw_section_header(ui, "FRAME");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Fill").size(11.0).color(super::theme::TEXT_DIM));
+                    let mut fc = egui::Color32::from_rgba_unmultiplied(
+                        node.frame_color[0], node.frame_color[1],
+                        node.frame_color[2], node.frame_color[3],
+                    );
+                    if ui.color_edit_button_srgba(&mut fc).changed() {
+                        node.frame_color = [fc.r(), fc.g(), fc.b(), fc.a()];
+                    }
+                });
+                // Preset frame color swatches
+                let presets: &[([u8;4], &str)] = &[
+                    ([89, 91, 118, 40], "Lavender"),
+                    ([166, 227, 161, 30], "Green"),
+                    ([137, 180, 250, 30], "Blue"),
+                    ([243, 139, 168, 30], "Pink"),
+                    ([249, 226, 175, 30], "Yellow"),
+                ];
+                ui.horizontal_wrapped(|ui| {
+                    for (col, name) in presets {
+                        let c = egui::Color32::from_rgba_unmultiplied(col[0], col[1], col[2], col[3]);
+                        let (r, painter) = ui.allocate_painter(egui::vec2(18.0, 18.0), egui::Sense::click());
+                        painter.rect_filled(r.rect, egui::CornerRadius::same(3), c);
+                        painter.rect_stroke(r.rect, egui::CornerRadius::same(3),
+                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255,255,255,50)),
+                            egui::StrokeKind::Inside);
+                        if r.clicked() { node.frame_color = *col; }
+                        r.on_hover_text(*name);
+                    }
+                });
+            }
+        }
+
         // Pin toggle + collapse toggle
         let mut do_collapse = false;
         if let Some(node) = self.document.find_node_mut(&node_id) {
@@ -568,7 +607,7 @@ impl FlowchartApp {
                 if ui.small_button(pin_label).clicked() {
                     node.pinned = !node.pinned;
                 }
-                if matches!(node.kind, NodeKind::Shape { .. }) {
+                if matches!(node.kind, NodeKind::Shape { .. }) && !node.is_frame {
                     let col_label = if node.collapsed { "▶ Expand" } else { "▼ Collapse" };
                     if ui.small_button(col_label).clicked() {
                         do_collapse = true;
