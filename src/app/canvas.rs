@@ -836,6 +836,30 @@ impl FlowchartApp {
             }
         }
 
+        // Deletion ghost animations: shrink-fade over 0.25s
+        {
+            let now = painter.ctx().input(|i| i.time);
+            let duration = 0.25_f64;
+            self.deletion_ghosts.retain(|g| now - g.3 < duration);
+            if !self.deletion_ghosts.is_empty() {
+                for &(center, size, fill, death_time) in &self.deletion_ghosts {
+                    let t = ((now - death_time) / duration) as f32; // 0→1
+                    let scale = 1.0 - t * 0.5;
+                    let alpha = ((1.0 - t).powf(1.5) * 180.0) as u8;
+                    let screen_center = self.viewport.canvas_to_screen(Pos2::new(center[0], center[1]));
+                    let sw = size[0] * self.viewport.zoom * scale;
+                    let sh = size[1] * self.viewport.zoom * scale;
+                    let ghost_rect = Rect::from_center_size(screen_center, Vec2::new(sw, sh));
+                    let fill_col = Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], alpha);
+                    painter.rect_filled(ghost_rect, CornerRadius::same(6), fill_col);
+                    let stroke_col = Color32::from_rgba_unmultiplied(200, 80, 80, (alpha as f32 * 0.8) as u8);
+                    painter.rect_stroke(ghost_rect, CornerRadius::same(6),
+                        Stroke::new(1.5, stroke_col), StrokeKind::Outside);
+                }
+                painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+
         // Connectivity heatmap overlay
         if self.show_heatmap && !self.document.nodes.is_empty() {
             self.draw_heatmap_overlay(&painter, canvas_rect);

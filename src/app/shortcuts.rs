@@ -46,6 +46,14 @@ impl FlowchartApp {
                 .filter(|id| !self.document.find_node(id).map_or(false, |n| n.locked))
                 .copied().collect();
             let edge_ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+            // Capture ghost data before removal for shrink-fade animation
+            let now = ctx.input(|i| i.time);
+            for id in &node_ids {
+                if let Some(n) = self.document.find_node(id) {
+                    let c = n.rect().center();
+                    self.deletion_ghosts.push(([c.x, c.y], n.size, n.style.fill_color, now));
+                }
+            }
             for id in &node_ids {
                 self.document.remove_node(id);
             }

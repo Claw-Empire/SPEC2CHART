@@ -186,6 +186,8 @@ pub struct FlowchartApp {
     pub(crate) node_birth_times: std::collections::HashMap<NodeId, f64>,
     /// Active tag filter: when set, non-matching nodes are dimmed
     pub(crate) tag_filter: Option<crate::model::NodeTag>,
+    /// Deletion ghost animations: (canvas_center, canvas_size, fill_color, death_time)
+    pub(crate) deletion_ghosts: Vec<([f32; 2], [f32; 2], [u8; 4], f64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,6 +326,7 @@ impl FlowchartApp {
             bookmarks: [None, None, None, None, None],
             node_birth_times: std::collections::HashMap::new(),
             tag_filter: None,
+            deletion_ghosts: Vec::new(),
         }
     }
 
