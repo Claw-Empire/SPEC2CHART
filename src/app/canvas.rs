@@ -613,6 +613,49 @@ impl FlowchartApp {
         // --- Previews ---
         self.draw_alignment_guides(&painter, canvas_rect);
         self.draw_distance_indicators(&painter);
+        // Multi-selection bounding box outline
+        if self.selection.node_ids.len() >= 2 {
+            let bb = self.selection.node_ids.iter()
+                .filter_map(|id| self.document.find_node(id))
+                .fold(Option::<Rect>::None, |acc, n| {
+                    let sr = Rect::from_min_size(self.viewport.canvas_to_screen(n.pos()), n.size_vec() * self.viewport.zoom);
+                    Some(acc.map_or(sr, |r| r.union(sr)))
+                });
+            if let Some(bb) = bb {
+                let expanded = bb.expand(6.0);
+                // Dashed bounding box stroke
+                painter.rect_stroke(
+                    expanded, CornerRadius::same(4),
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 80)),
+                    StrokeKind::Outside,
+                );
+                // Corner handle dots
+                for corner in [expanded.left_top(), expanded.right_top(), expanded.left_bottom(), expanded.right_bottom()] {
+                    painter.circle_filled(corner, 4.0, Color32::from_rgba_unmultiplied(137, 180, 250, 180));
+                    painter.circle_stroke(corner, 4.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(30, 30, 46, 200)));
+                }
+                // Edge midpoint handles
+                for mid in [
+                    Pos2::new(expanded.center().x, expanded.min.y),
+                    Pos2::new(expanded.center().x, expanded.max.y),
+                    Pos2::new(expanded.min.x, expanded.center().y),
+                    Pos2::new(expanded.max.x, expanded.center().y),
+                ] {
+                    painter.circle_filled(mid, 3.0, Color32::from_rgba_unmultiplied(137, 180, 250, 140));
+                }
+                // Bounding box size label
+                let w = (bb.width() / self.viewport.zoom).round() as i32;
+                let h = (bb.height() / self.viewport.zoom).round() as i32;
+                painter.text(
+                    expanded.center_top() - Vec2::new(0.0, 14.0),
+                    Align2::CENTER_BOTTOM,
+                    &format!("{w} × {h}"),
+                    FontId::proportional(9.0),
+                    Color32::from_rgba_unmultiplied(137, 180, 250, 160),
+                );
+            }
+        }
+
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
