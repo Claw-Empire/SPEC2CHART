@@ -1554,27 +1554,52 @@ impl FlowchartApp {
 
     fn draw_empty_canvas_hint(&self, painter: &egui::Painter, canvas_rect: Rect) {
         if !self.document.nodes.is_empty() { return; }
-        let cx = canvas_rect.center().x;
-        let cy = canvas_rect.center().y;
-        let title_font = FontId::proportional(18.0);
-        let hint_font  = FontId::proportional(11.5);
-        painter.text(Pos2::new(cx, cy - 48.0), Align2::CENTER_CENTER,
-            "Empty canvas", title_font, TEXT_DIM);
+        let center = canvas_rect.center();
+        let t = painter.ctx().input(|i| i.time) as f32;
+
+        // Animated outer ring (breathing)
+        let ring_r = 52.0 + ((t * 1.2).sin() * 5.0);
+        let ring_alpha = (((t * 1.2).sin() * 0.5 + 0.5) * 50.0 + 15.0) as u8;
+        painter.circle_stroke(center, ring_r, Stroke::new(1.0,
+            Color32::from_rgba_unmultiplied(137, 180, 250, ring_alpha)));
+
+        // Second ring (offset phase)
+        let ring2_r = 38.0 + (((t * 1.2 + 1.0).sin()) * 3.0);
+        let ring2_alpha = ((( t * 1.2 + 1.0).sin() * 0.5 + 0.5) * 40.0 + 10.0) as u8;
+        painter.circle_stroke(center, ring2_r, Stroke::new(0.7,
+            Color32::from_rgba_unmultiplied(137, 180, 250, ring2_alpha)));
+
+        // Central "+" circle button
+        let btn_r = 26.0_f32;
+        painter.circle_filled(center, btn_r, Color32::from_rgba_unmultiplied(137, 180, 250, 25));
+        painter.circle_stroke(center, btn_r, Stroke::new(1.5,
+            Color32::from_rgba_unmultiplied(137, 180, 250, 140)));
+        painter.text(center, Align2::CENTER_CENTER, "+",
+            FontId::proportional(28.0),
+            Color32::from_rgba_unmultiplied(137, 180, 250, 200));
+
+        // Title below
+        painter.text(center + Vec2::new(0.0, btn_r + 16.0), Align2::CENTER_CENTER,
+            "Double-click anywhere to add a node",
+            FontId::proportional(11.5),
+            TEXT_DIM);
+
+        // Keyboard shortcut hints
         let hints = [
-            ("N", "new node (toolbar)"),
-            ("E", "connect tool"),
-            ("V", "select tool"),
-            ("F", "fit to content"),
-            ("G", "toggle grid"),
+            ("N", "new shape node"),
+            ("D", "double-click to create"),
+            ("E", "edge connect tool"),
             ("⌘Z", "undo"),
         ];
         for (i, (key, desc)) in hints.iter().enumerate() {
-            let y = cy - 16.0 + i as f32 * 16.0;
-            painter.text(Pos2::new(cx - 60.0, y), Align2::LEFT_CENTER,
-                *key, hint_font.clone(), ACCENT);
-            painter.text(Pos2::new(cx - 40.0, y), Align2::LEFT_CENTER,
-                *desc, hint_font.clone(), TEXT_DIM);
+            let y = center.y + btn_r + 40.0 + i as f32 * 15.0;
+            painter.text(Pos2::new(center.x - 60.0, y), Align2::LEFT_CENTER,
+                *key, FontId::proportional(10.5), ACCENT.gamma_multiply(0.7));
+            painter.text(Pos2::new(center.x - 38.0, y), Align2::LEFT_CENTER,
+                *desc, FontId::proportional(10.5), TEXT_DIM.gamma_multiply(0.6));
         }
+
+        painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     }
 
     fn draw_canvas_hud(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {
