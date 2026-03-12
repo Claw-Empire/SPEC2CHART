@@ -460,6 +460,12 @@ impl FlowchartApp {
             self.selection.clear();
         }
 
+        // Shift+R = toggle coordinate rulers
+        let shift_only = egui::Modifiers { shift: true, ..Default::default() };
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.matches_exact(shift_only)) {
+            self.show_rulers = !self.show_rulers;
+        }
+
         // Cmd+F = search
         if ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd)) {
             self.show_search = !self.show_search;

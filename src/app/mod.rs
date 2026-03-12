@@ -194,6 +194,8 @@ pub struct FlowchartApp {
     pub(crate) toolbar_collapsed: bool,
     /// Properties panel (right panel) collapse state
     pub(crate) properties_collapsed: bool,
+    /// Show canvas coordinate rulers (toggle with Shift+R)
+    pub(crate) show_rulers: bool,
     /// Command palette open/closed
     pub(crate) show_command_palette: bool,
     /// Command palette search text
@@ -341,6 +343,7 @@ impl FlowchartApp {
             deletion_ghosts: Vec::new(),
             toolbar_collapsed: false,
             properties_collapsed: false,
+            show_rulers: false,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_cursor: 0,
@@ -767,6 +770,7 @@ impl eframe::App for FlowchartApp {
                             ("⌘K", "Command palette"),
                             ("[", "Collapse / expand left toolbar"),
                             ("]", "Collapse / expand right panel"),
+                            ("⇧R", "Toggle coordinate rulers"),
                         ]),
                     ];
                     egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {

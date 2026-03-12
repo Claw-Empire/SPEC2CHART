@@ -1323,6 +1323,9 @@ impl FlowchartApp {
         self.draw_search_overlay(ui, canvas_rect);
         self.draw_zoom_presets(ui, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
+        if self.show_rulers {
+            self.draw_side_rulers(&painter, canvas_rect, pointer_pos);
+        }
         if self.show_quick_notes {
             self.draw_quick_notes_panel(ui, canvas_rect);
         }
@@ -3383,6 +3386,146 @@ impl FlowchartApp {
         let _ = cross_color; let _ = cross_stroke; // satisfy checker
     }
 
+    // --- Rulers ---
+
+    fn draw_side_rulers(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {
+        let ruler_w = 18.0_f32; // ruler thickness in screen pixels
+        let bg = Color32::from_rgba_premultiplied(24, 24, 37, 220);
+        let tick_color = Color32::from_rgba_premultiplied(100, 104, 130, 200);
+        let label_color = Color32::from_rgba_premultiplied(130, 135, 160, 240);
+        let hairline_color = ACCENT.gamma_multiply(0.7);
+
+        // Horizontal ruler (top strip)
+        let h_ruler = Rect::from_min_max(
+            Pos2::new(canvas_rect.min.x + ruler_w, canvas_rect.min.y),
+            Pos2::new(canvas_rect.max.x, canvas_rect.min.y + ruler_w),
+        );
+        // Vertical ruler (left strip)
+        let v_ruler = Rect::from_min_max(
+            Pos2::new(canvas_rect.min.x, canvas_rect.min.y + ruler_w),
+            Pos2::new(canvas_rect.min.x + ruler_w, canvas_rect.max.y),
+        );
+        // Corner square
+        let corner = Rect::from_min_max(canvas_rect.min, canvas_rect.min + Vec2::splat(ruler_w));
+
+        painter.rect_filled(h_ruler, CornerRadius::ZERO, bg);
+        painter.rect_filled(v_ruler, CornerRadius::ZERO, bg);
+        painter.rect_filled(corner, CornerRadius::ZERO, bg);
+
+        // Determine a nice step: target ~60 screen-px per major tick
+        let zoom = self.viewport.zoom;
+        let raw_step = 60.0 / zoom; // canvas units per desired tick
+        let magnitude = (10.0_f32).powf(raw_step.log10().floor());
+        let step = if raw_step / magnitude < 2.5 { magnitude }
+                   else if raw_step / magnitude < 6.0 { magnitude * 2.5 }
+                   else { magnitude * 5.0 };
+        let step = step.max(1.0);
+
+        let font = egui::FontId::proportional(8.5);
+
+        // ── Horizontal ruler ticks ────────────────────────────────────────
+        {
+            let canvas_left  = self.viewport.screen_to_canvas(Pos2::new(h_ruler.min.x, 0.0)).x;
+            let canvas_right = self.viewport.screen_to_canvas(Pos2::new(h_ruler.max.x, 0.0)).x;
+            let first = (canvas_left / step).floor() as i64;
+            let last  = (canvas_right / step).ceil() as i64;
+            for i in first..=last {
+                let c = i as f32 * step;
+                let sx = self.viewport.canvas_to_screen(Pos2::new(c, 0.0)).x;
+                if sx < h_ruler.min.x || sx > h_ruler.max.x { continue; }
+                // major tick
+                painter.line_segment(
+                    [Pos2::new(sx, h_ruler.max.y - 6.0), Pos2::new(sx, h_ruler.max.y)],
+                    Stroke::new(0.8, tick_color),
+                );
+                // label (omit if step very fine)
+                if step * zoom > 20.0 {
+                    let label = format_coord(c);
+                    painter.text(
+                        Pos2::new(sx + 2.0, h_ruler.min.y + 2.0),
+                        Align2::LEFT_TOP,
+                        &label,
+                        font.clone(),
+                        label_color,
+                    );
+                }
+                // minor ticks (÷ 5)
+                for sub in 1..5i64 {
+                    let sc = c + sub as f32 * step / 5.0;
+                    let ssx = self.viewport.canvas_to_screen(Pos2::new(sc, 0.0)).x;
+                    if ssx < h_ruler.min.x || ssx > h_ruler.max.x { continue; }
+                    painter.line_segment(
+                        [Pos2::new(ssx, h_ruler.max.y - 3.0), Pos2::new(ssx, h_ruler.max.y)],
+                        Stroke::new(0.5, tick_color.gamma_multiply(0.5)),
+                    );
+                }
+            }
+        }
+
+        // ── Vertical ruler ticks ─────────────────────────────────────────
+        {
+            let canvas_top    = self.viewport.screen_to_canvas(Pos2::new(0.0, v_ruler.min.y)).y;
+            let canvas_bottom = self.viewport.screen_to_canvas(Pos2::new(0.0, v_ruler.max.y)).y;
+            let first = (canvas_top / step).floor() as i64;
+            let last  = (canvas_bottom / step).ceil() as i64;
+            for i in first..=last {
+                let c = i as f32 * step;
+                let sy = self.viewport.canvas_to_screen(Pos2::new(0.0, c)).y;
+                if sy < v_ruler.min.y || sy > v_ruler.max.y { continue; }
+                painter.line_segment(
+                    [Pos2::new(v_ruler.max.x - 6.0, sy), Pos2::new(v_ruler.max.x, sy)],
+                    Stroke::new(0.8, tick_color),
+                );
+                if step * zoom > 20.0 {
+                    let label = format_coord(c);
+                    // Rotated label via clipped transform: just draw upright for simplicity
+                    painter.text(
+                        Pos2::new(v_ruler.min.x + 1.0, sy - 1.0),
+                        Align2::LEFT_BOTTOM,
+                        &label,
+                        font.clone(),
+                        label_color,
+                    );
+                }
+                for sub in 1..5i64 {
+                    let sc = c + sub as f32 * step / 5.0;
+                    let ssy = self.viewport.canvas_to_screen(Pos2::new(0.0, sc)).y;
+                    if ssy < v_ruler.min.y || ssy > v_ruler.max.y { continue; }
+                    painter.line_segment(
+                        [Pos2::new(v_ruler.max.x - 3.0, ssy), Pos2::new(v_ruler.max.x, ssy)],
+                        Stroke::new(0.5, tick_color.gamma_multiply(0.5)),
+                    );
+                }
+            }
+        }
+
+        // ── Hairline cursor indicator ─────────────────────────────────────
+        if let Some(mouse) = pointer_pos {
+            if mouse.x >= h_ruler.min.x {
+                painter.line_segment(
+                    [Pos2::new(mouse.x, h_ruler.min.y), Pos2::new(mouse.x, h_ruler.max.y)],
+                    Stroke::new(1.0, hairline_color),
+                );
+            }
+            if mouse.y >= v_ruler.min.y {
+                painter.line_segment(
+                    [Pos2::new(v_ruler.min.x, mouse.y), Pos2::new(v_ruler.max.x, mouse.y)],
+                    Stroke::new(1.0, hairline_color),
+                );
+            }
+        }
+
+        // Ruler border lines
+        painter.line_segment(
+            [Pos2::new(h_ruler.min.x, h_ruler.max.y), Pos2::new(h_ruler.max.x, h_ruler.max.y)],
+            Stroke::new(0.5, SURFACE1),
+        );
+        painter.line_segment(
+            [Pos2::new(v_ruler.max.x, v_ruler.min.y), Pos2::new(v_ruler.max.x, v_ruler.max.y)],
+            Stroke::new(0.5, SURFACE1),
+        );
+    }
+
     // --- Grid ---
 
     fn draw_grid(&self, painter: &egui::Painter, canvas_rect: Rect) {
@@ -4474,5 +4617,14 @@ impl FlowchartApp {
             if clicks[4] { edge.style.animated = !edge.style.animated; changed = true; }
         }
         if changed { self.history.push(&self.document); }
+    }
+}
+
+/// Format a canvas coordinate for ruler labels: suppress ".0" for integers.
+fn format_coord(v: f32) -> String {
+    if v.fract().abs() < 0.05 {
+        format!("{}", v as i64)
+    } else {
+        format!("{:.1}", v)
     }
 }
