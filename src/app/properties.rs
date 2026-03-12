@@ -256,6 +256,23 @@ impl FlowchartApp {
                             .desired_rows(3)
                             .font(FontId::proportional(12.0)),
                     );
+                    // Comment field (also accessible via Cmd+M)
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("💬 Comment").size(11.0).color(TEXT_DIM));
+                        if ui.small_button("Edit…").on_hover_text("Cmd+M").clicked() {
+                            self.comment_editing = Some(node_id);
+                        }
+                    });
+                    if !node.comment.is_empty() {
+                        ui.add_space(2.0);
+                        ui.add(
+                            egui::TextEdit::multiline(&mut node.comment)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(2)
+                                .font(FontId::proportional(11.0)),
+                        );
+                    }
                 }
                 NodeKind::StickyNote { text, color } => {
                     Self::draw_section_header(ui, "CONTENT");

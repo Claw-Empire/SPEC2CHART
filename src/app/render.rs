@@ -148,6 +148,19 @@ impl FlowchartApp {
                 Color32::from_rgba_unmultiplied(255, 200, 80, 220));
         }
 
+        // Comment bubble (shown in top-right when node has a comment)
+        if !node.comment.is_empty() && self.viewport.zoom > 0.4 {
+            let x_offset = if node.locked { 18.0 } else { 3.0 };
+            let badge_pos = Pos2::new(screen_rect.max.x - x_offset, screen_rect.min.y - 2.0);
+            let bubble_col = Color32::from_rgba_unmultiplied(249, 226, 175, 230);
+            let text_col = Color32::from_rgba_unmultiplied(80, 60, 20, 255);
+            let r = (8.0 * self.viewport.zoom.sqrt()).clamp(7.0, 12.0);
+            painter.circle_filled(badge_pos, r, bubble_col);
+            painter.circle_stroke(badge_pos, r, Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 170, 90, 200)));
+            painter.text(badge_pos, Align2::CENTER_CENTER, "💬",
+                FontId::proportional(r * 1.0), text_col);
+        }
+
         // Edge connection count badge (shown when hovered)
         if is_hovered && self.viewport.zoom > 0.5 {
             let conn_count = self.document.edges.iter()

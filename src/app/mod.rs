@@ -109,6 +109,8 @@ pub struct FlowchartApp {
     pub(crate) focus_label_edit: bool,
     /// When Some, show a floating inline edge label editor at this screen position
     pub(crate) inline_edge_edit: Option<(EdgeId, Pos2)>,
+    /// When Some, show a floating comment editor for this node
+    pub(crate) comment_editing: Option<NodeId>,
     pub(crate) view_mode: ViewMode,
     pub(crate) camera3d: camera::Camera3D,
     pub(crate) view_transition: f32,
@@ -230,6 +232,7 @@ impl FlowchartApp {
             status_message: None,
             focus_label_edit: false,
             inline_edge_edit: None,
+            comment_editing: None,
             view_mode: ViewMode::TwoD,
             camera3d: camera::Camera3D::default(),
             view_transition: 0.0,
@@ -482,6 +485,7 @@ impl eframe::App for FlowchartApp {
                     uncollapsed_size: None,
                     url: String::new(),
                     locked: false,
+                    comment: String::new(),
                     is_frame: false,
                     frame_color: crate::model::default_frame_color(),
                 };
@@ -532,6 +536,65 @@ impl eframe::App for FlowchartApp {
                     }
                 });
             if close_editor { self.inline_edge_edit = None; }
+        }
+
+        // Comment editor (Cmd+M to open for selected node)
+        if let Some(node_id) = self.comment_editing {
+            let mut close_comment = false;
+            // Position near top-right of node
+            let node_screen_pos = self.document.find_node(&node_id)
+                .map(|n| {
+                    let p = self.viewport.canvas_to_screen(n.pos());
+                    let s = n.size_vec() * self.viewport.zoom;
+                    egui::Pos2::new(p.x + s.x + 8.0, p.y)
+                })
+                .unwrap_or(egui::Pos2::new(200.0, 200.0));
+            egui::Window::new("##comment_editor")
+                .title_bar(false)
+                .resizable(false)
+                .collapsible(false)
+                .fixed_pos(node_screen_pos)
+                .frame(egui::Frame {
+                    fill: egui::Color32::from_rgba_unmultiplied(249, 226, 175, 240), // yellow note color
+                    inner_margin: egui::Margin::same(8),
+                    stroke: egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(200, 175, 100, 255)),
+                    corner_radius: egui::CornerRadius::same(8),
+                    ..Default::default()
+                })
+                .show(ctx, |ui| {
+                    ui.label(egui::RichText::new("💬 Comment").size(10.0)
+                        .color(egui::Color32::from_rgba_unmultiplied(80, 60, 20, 255)));
+                    if let Some(node) = self.document.find_node_mut(&node_id) {
+                        let resp = ui.add(
+                            egui::TextEdit::multiline(&mut node.comment)
+                                .desired_width(200.0)
+                                .desired_rows(3)
+                                .font(egui::FontId::proportional(12.0))
+                                .text_color(egui::Color32::from_rgba_unmultiplied(60, 40, 10, 255)),
+                        );
+                        resp.request_focus();
+                        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+                            close_comment = true;
+                            self.history.push(&self.document);
+                        }
+                    } else {
+                        close_comment = true;
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.small_button("✓ Done").clicked() {
+                            close_comment = true;
+                            self.history.push(&self.document);
+                        }
+                        if ui.small_button("🗑 Clear").clicked() {
+                            if let Some(node) = self.document.find_node_mut(&node_id) {
+                                node.comment.clear();
+                            }
+                            close_comment = true;
+                            self.history.push(&self.document);
+                        }
+                    });
+                });
+            if close_comment { self.comment_editing = None; }
         }
 
         // Keyboard shortcuts panel

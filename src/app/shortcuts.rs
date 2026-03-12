@@ -79,6 +79,13 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+M = open comment editor for selected node
+        if ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.matches_exact(cmd)) {
+            if let Some(id) = self.selection.node_ids.iter().next().copied() {
+                self.comment_editing = Some(id);
+            }
+        }
+
         // Cmd+L = toggle lock on selected nodes
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
