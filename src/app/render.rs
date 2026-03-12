@@ -1195,6 +1195,22 @@ impl FlowchartApp {
             painter.circle_stroke(src, dot_r, Stroke::new(0.5, edge_color.gamma_multiply(0.3)));
         }
 
+        // Port pulse rings: animated expanding rings at src/tgt when edge is hovered
+        if is_hovered && self.viewport.zoom > 0.35 {
+            let t = painter.ctx().input(|i| i.time) as f32;
+            // Two rings out of phase for a continuous pulse feel
+            for phase in [0.0_f32, 0.5] {
+                let cycle = ((t * 1.2 + phase) % 1.0) as f32; // 0→1 loop
+                let ring_r = 6.0 + cycle * 14.0;
+                let alpha = ((1.0 - cycle) * 130.0) as u8;
+                let ring_color = Color32::from_rgba_unmultiplied(
+                    edge_color.r(), edge_color.g(), edge_color.b(), alpha);
+                painter.circle_stroke(src, ring_r, Stroke::new(1.2, ring_color));
+                painter.circle_stroke(tgt, ring_r, Stroke::new(1.2, ring_color));
+            }
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        }
+
         // Edge label
         if !edge.label.is_empty() {
             let mid = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
