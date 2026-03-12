@@ -827,6 +827,7 @@ impl FlowchartApp {
                 };
             } else if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                 let cmd_held = ui.ctx().input(|i| i.modifiers.command);
+                let alt_held = ui.ctx().input(|i| i.modifiers.alt);
                 if cmd_held {
                     self.selection.toggle_node(node_id);
                 } else if !self.selection.contains_node(&node_id) {
@@ -834,6 +835,23 @@ impl FlowchartApp {
                 }
                 // Don't initiate node drag when canvas is locked
                 if !self.canvas_locked {
+                    // Alt+drag: clone selected nodes, drag the clones
+                    if alt_held && !self.selection.node_ids.is_empty() {
+                        let sel_ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                        let mut new_ids = Vec::new();
+                        for id in &sel_ids {
+                            if let Some(original) = self.document.find_node(id).cloned() {
+                                let mut clone = original.clone();
+                                clone.id = NodeId::new();
+                                new_ids.push(clone.id);
+                                self.document.nodes.push(clone);
+                            }
+                        }
+                        // Select only the clones; originals stay unselected
+                        self.selection.clear();
+                        for id in &new_ids { self.selection.select_node(*id); }
+                        self.status_message = Some(("Alt+drag: duplicated".to_string(), std::time::Instant::now()));
+                    }
                     let start_positions: Vec<(NodeId, Pos2)> = self
                         .selection
                         .node_ids
