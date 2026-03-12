@@ -2152,25 +2152,42 @@ impl FlowchartApp {
             FontId::proportional(28.0),
             Color32::from_rgba_unmultiplied(137, 180, 250, 200));
 
-        // Title below
-        painter.text(center + Vec2::new(0.0, btn_r + 16.0), Align2::CENTER_CENTER,
-            "Double-click anywhere to add a node",
-            FontId::proportional(11.5),
-            TEXT_DIM);
-
-        // Keyboard shortcut hints
-        let hints = [
-            ("N", "new shape node"),
-            ("D", "double-click to create"),
-            ("E", "edge connect tool"),
-            ("⌘Z", "undo"),
+        // Rotating contextual message (cycles every 5 seconds)
+        let messages = [
+            "Double-click anywhere to add your first node",
+            "Press N to pick a shape · or drag from toolbar",
+            "Build a flow, architecture, or idea map",
+            "Every great diagram starts with a single node",
+            "Press ? for all keyboard shortcuts",
         ];
+        let slot = ((t / 5.0) as usize) % messages.len();
+        // Cross-fade between messages
+        let fade_t = (t % 5.0) / 5.0;
+        let alpha = if fade_t < 0.1 {
+            ((fade_t / 0.1) * 160.0) as u8
+        } else if fade_t > 0.85 {
+            (((1.0 - fade_t) / 0.15) * 160.0) as u8
+        } else {
+            160u8
+        };
+        painter.text(
+            center + Vec2::new(0.0, btn_r + 18.0),
+            Align2::CENTER_CENTER,
+            messages[slot],
+            FontId::proportional(12.0),
+            TEXT_DIM.gamma_multiply(alpha as f32 / 160.0),
+        );
+
+        // Quick-start shortcut row
+        let hints = [("N", "shape"), ("E", "connect"), ("?", "help"), ("⌘Z", "undo")];
+        let row_y = center.y + btn_r + 40.0;
+        let start_x = center.x - 70.0;
         for (i, (key, desc)) in hints.iter().enumerate() {
-            let y = center.y + btn_r + 40.0 + i as f32 * 15.0;
-            painter.text(Pos2::new(center.x - 60.0, y), Align2::LEFT_CENTER,
-                *key, FontId::proportional(10.5), ACCENT.gamma_multiply(0.7));
-            painter.text(Pos2::new(center.x - 38.0, y), Align2::LEFT_CENTER,
-                *desc, FontId::proportional(10.5), TEXT_DIM.gamma_multiply(0.6));
+            let x = start_x + i as f32 * 37.0;
+            painter.text(Pos2::new(x, row_y), Align2::LEFT_CENTER,
+                *key, FontId::proportional(10.0), ACCENT.gamma_multiply(0.6));
+            painter.text(Pos2::new(x + 10.0, row_y + 11.0), Align2::LEFT_CENTER,
+                *desc, FontId::proportional(8.5), TEXT_DIM.gamma_multiply(0.45));
         }
 
         painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
