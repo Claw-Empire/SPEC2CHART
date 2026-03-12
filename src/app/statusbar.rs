@@ -14,6 +14,9 @@ impl FlowchartApp {
         let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
         let sel_count = self.selection.node_ids.len();
         let edge_sel = !self.selection.edge_ids.is_empty();
+        let total_nodes = self.document.nodes.len();
+        let total_edges = self.document.edges.len();
+        let tag_active = self.tag_filter.is_some();
 
         // Compute canvas cursor position from raw pointer
         let cursor_canvas = ctx.input(|i| i.pointer.hover_pos()).map(|sp| {
@@ -65,7 +68,7 @@ impl FlowchartApp {
                         label(ui, &sel_text, TEXT_PRIMARY);
                     }
 
-                    // Right side — zoom + cursor
+                    // Right side — graph stats, zoom, cursor
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         // Cursor coords
                         if let Some((cx, cy)) = cursor_canvas {
@@ -79,6 +82,15 @@ impl FlowchartApp {
                         // Zoom
                         let zoom_text = format!("{zoom_pct}%");
                         label(ui, &zoom_text, if zoom_pct == 100 { TEXT_SECONDARY } else { ACCENT });
+                        ui.add_space(8.0);
+                        separator(ui);
+                        ui.add_space(8.0);
+                        // Graph totals (right-to-left, so reversed order)
+                        label(ui, &format!("{total_edges}e  {total_nodes}n"), TEXT_DIM);
+                        if tag_active {
+                            ui.add_space(4.0);
+                            label(ui, "🏷", ACCENT);
+                        }
                     });
                 });
             });
