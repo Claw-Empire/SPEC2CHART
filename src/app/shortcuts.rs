@@ -489,6 +489,37 @@ impl FlowchartApp {
             }
         }
 
+        // Bookmark shortcuts: Cmd+Shift+1..5 = save, Shift+1..5 = jump
+        let cmd_shift = Modifiers { shift: true, ..cmd };
+        let shift_only = Modifiers { shift: true, ..Modifiers::NONE };
+        let bookmark_keys = [
+            (Key::Num1, 0), (Key::Num2, 1), (Key::Num3, 2),
+            (Key::Num4, 3), (Key::Num5, 4),
+        ];
+        for &(key, slot) in &bookmark_keys {
+            if ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_exact(cmd_shift)) {
+                self.bookmarks[slot] = Some(self.viewport.clone());
+                self.status_message = Some((
+                    format!("Bookmark {} saved", slot + 1),
+                    std::time::Instant::now(),
+                ));
+            } else if !any_text_focused && ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_exact(shift_only)) {
+                if let Some(bv) = &self.bookmarks[slot].clone() {
+                    self.zoom_target = bv.zoom;
+                    self.pan_target = Some(bv.offset);
+                    self.status_message = Some((
+                        format!("Jumped to bookmark {}", slot + 1),
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    self.status_message = Some((
+                        format!("No bookmark {} set — use ⌘⇧{} to save", slot + 1, slot + 1),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+        }
+
         // Cmd+Shift+L = toggle canvas lock (prevent node moves)
         let cmd_shift_l = Modifiers { shift: true, ..cmd };
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd_shift_l)) {

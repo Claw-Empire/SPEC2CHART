@@ -3389,6 +3389,37 @@ impl FlowchartApp {
                 StrokeKind::Outside,
             );
         }
+
+        // Draw bookmark pins on minimap
+        for (slot, bm) in self.bookmarks.iter().enumerate() {
+            if let Some(bv) = bm {
+                // The bookmark viewport center in canvas space
+                let bv_center_canvas = egui::Pos2::new(
+                    (canvas_rect.center().x - bv.offset[0]) / bv.zoom,
+                    (canvas_rect.center().y - bv.offset[1]) / bv.zoom,
+                );
+                let pin = map_point(bv_center_canvas.x, bv_center_canvas.y);
+                if minimap_rect.contains(pin) {
+                    // Diamond pin shape
+                    let r = 5.0_f32;
+                    let pin_color = Color32::from_rgb(249, 226, 175); // yellow
+                    let pts = vec![
+                        Pos2::new(pin.x, pin.y - r),
+                        Pos2::new(pin.x + r, pin.y),
+                        Pos2::new(pin.x, pin.y + r),
+                        Pos2::new(pin.x - r, pin.y),
+                    ];
+                    painter.add(egui::Shape::convex_polygon(pts, pin_color, Stroke::NONE));
+                    painter.text(
+                        pin,
+                        Align2::CENTER_CENTER,
+                        &(slot + 1).to_string(),
+                        FontId::proportional(6.0),
+                        Color32::from_rgb(30, 30, 46),
+                    );
+                }
+            }
+        }
     }
 
     /// Draw animated data-flow dots traveling along each edge from source to target.

@@ -180,6 +180,8 @@ pub struct FlowchartApp {
     pub(crate) edge_birth_times: std::collections::HashMap<EdgeId, f64>,
     /// Edge IDs seen on the previous frame — used to detect newly added edges
     pub(crate) prev_edge_ids: std::collections::HashSet<EdgeId>,
+    /// Canvas location bookmarks: Cmd+Shift+1..5 saves, Shift+1..5 jumps
+    pub(crate) bookmarks: [Option<crate::model::Viewport>; 5],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -315,6 +317,7 @@ impl FlowchartApp {
             search_cursor: 0,
             edge_birth_times: std::collections::HashMap::new(),
             prev_edge_ids: std::collections::HashSet::new(),
+            bookmarks: [None, None, None, None, None],
         }
     }
 
