@@ -390,6 +390,7 @@ impl FlowchartApp {
 
         // --- Previews ---
         self.draw_alignment_guides(&painter, canvas_rect);
+        self.draw_distance_indicators(&painter);
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
@@ -820,6 +821,94 @@ impl FlowchartApp {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Figma-style distance indicators: red measurement lines when dragging near another node.
+    fn draw_distance_indicators(&self, painter: &egui::Painter) {
+        let DragState::DraggingNode { .. } = &self.drag else { return };
+        let sel = &self.selection.node_ids;
+        if sel.is_empty() { return; }
+
+        // Compute bounding rect of all dragged nodes in canvas space
+        let drag_rects: Vec<Rect> = sel.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.rect())
+            .collect();
+        let Some(drag_union) = drag_rects.iter().copied().reduce(|a, b| a.union(b)) else { return };
+
+        // Show measurements to nodes that overlap in one axis and are within 200 canvas-units on the other
+        let threshold = 200.0;
+        let dist_color = Color32::from_rgba_unmultiplied(255, 75, 75, 220);
+        let line_stroke = Stroke::new(1.0, dist_color);
+        let label_bg = Color32::from_rgba_unmultiplied(255, 75, 75, 200);
+        let label_fg = Color32::WHITE;
+
+        for node in &self.document.nodes {
+            if sel.contains(&node.id) { continue; }
+            let r = node.rect();
+
+            // Horizontal gap: node is left or right of drag_union, with vertical overlap
+            let v_overlap = drag_union.min.y < r.max.y && drag_union.max.y > r.min.y;
+            // Vertical gap: node is above or below drag_union, with horizontal overlap
+            let h_overlap = drag_union.min.x < r.max.x && drag_union.max.x > r.min.x;
+
+            // -- Horizontal distance (gap on X axis) --
+            if v_overlap {
+                let (left_x, right_x) = if r.max.x <= drag_union.min.x {
+                    (r.max.x, drag_union.min.x) // node is to the left
+                } else if r.min.x >= drag_union.max.x {
+                    (drag_union.max.x, r.min.x) // node is to the right
+                } else {
+                    continue;  // overlapping horizontally, skip
+                };
+                let gap = right_x - left_x;
+                if gap <= 0.0 || gap > threshold { continue; }
+
+                // Midpoint Y = center of vertical overlap
+                let mid_y = drag_union.min.y.max(r.min.y) +
+                    (drag_union.max.y.min(r.max.y) - drag_union.min.y.max(r.min.y)) * 0.5;
+                let sp1 = self.viewport.canvas_to_screen(Pos2::new(left_x, mid_y));
+                let sp2 = self.viewport.canvas_to_screen(Pos2::new(right_x, mid_y));
+                painter.line_segment([sp1, sp2], line_stroke);
+                // Tick marks
+                let tick = Vec2::new(0.0, 4.0);
+                painter.line_segment([sp1 - tick, sp1 + tick], line_stroke);
+                painter.line_segment([sp2 - tick, sp2 + tick], line_stroke);
+                // Distance label
+                let label = format!("{:.0}", gap);
+                let mid = (sp1 + sp2.to_vec2()) * 0.5;
+                let glyph_rect = Rect::from_center_size(mid, Vec2::new(label.len() as f32 * 6.5 + 6.0, 15.0));
+                painter.rect_filled(glyph_rect, CornerRadius::same(3), label_bg);
+                painter.text(mid, Align2::CENTER_CENTER, &label, FontId::proportional(10.0), label_fg);
+            }
+
+            // -- Vertical distance (gap on Y axis) --
+            if h_overlap {
+                let (top_y, bot_y) = if r.max.y <= drag_union.min.y {
+                    (r.max.y, drag_union.min.y)
+                } else if r.min.y >= drag_union.max.y {
+                    (drag_union.max.y, r.min.y)
+                } else {
+                    continue;
+                };
+                let gap = bot_y - top_y;
+                if gap <= 0.0 || gap > threshold { continue; }
+
+                let mid_x = drag_union.min.x.max(r.min.x) +
+                    (drag_union.max.x.min(r.max.x) - drag_union.min.x.max(r.min.x)) * 0.5;
+                let sp1 = self.viewport.canvas_to_screen(Pos2::new(mid_x, top_y));
+                let sp2 = self.viewport.canvas_to_screen(Pos2::new(mid_x, bot_y));
+                painter.line_segment([sp1, sp2], line_stroke);
+                let tick = Vec2::new(4.0, 0.0);
+                painter.line_segment([sp1 - tick, sp1 + tick], line_stroke);
+                painter.line_segment([sp2 - tick, sp2 + tick], line_stroke);
+                let label = format!("{:.0}", gap);
+                let mid = (sp1 + sp2.to_vec2()) * 0.5;
+                let glyph_rect = Rect::from_center_size(mid, Vec2::new(label.len() as f32 * 6.5 + 6.0, 15.0));
+                painter.rect_filled(glyph_rect, CornerRadius::same(3), label_bg);
+                painter.text(mid, Align2::CENTER_CENTER, &label, FontId::proportional(10.0), label_fg);
             }
         }
     }
