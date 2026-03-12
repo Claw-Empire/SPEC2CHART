@@ -689,6 +689,21 @@ impl FlowchartApp {
                 if ui.button(egui::RichText::new("I").italics().color(i_col)).on_hover_text("Italic").clicked() {
                     node.style.italic = !node.style.italic;
                 }
+                ui.add_space(4.0);
+                // Text alignment
+                for (align, icon, tip) in [
+                    (crate::model::TextAlign::Left,   "≡", "Align left"),
+                    (crate::model::TextAlign::Center, "☰", "Align center"),
+                    (crate::model::TextAlign::Right,  "≡", "Align right"),
+                ] {
+                    let active = node.style.text_align == align;
+                    let btn = egui::Button::new(
+                        egui::RichText::new(icon).size(12.0).color(if active { ACCENT } else { TEXT_DIM })
+                    ).fill(if active { SURFACE1 } else { Color32::TRANSPARENT });
+                    if ui.add(btn).on_hover_text(tip).clicked() {
+                        node.style.text_align = align;
+                    }
+                }
             });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.corner_radius, 0.0..=40.0).text("Radius"));

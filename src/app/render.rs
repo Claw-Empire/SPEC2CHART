@@ -709,8 +709,13 @@ impl FlowchartApp {
             } else {
                 painter.layout(display_label.into_owned(), font, text_color, max_text_w)
             };
+            let text_x = match style.text_align {
+                crate::model::TextAlign::Center => screen_rect.center().x - galley.size().x / 2.0,
+                crate::model::TextAlign::Left   => screen_rect.min.x + pad,
+                crate::model::TextAlign::Right  => screen_rect.max.x - pad - galley.size().x,
+            };
             let text_pos = Pos2::new(
-                screen_rect.center().x - galley.size().x / 2.0,
+                text_x,
                 screen_rect.center().y - galley.size().y / 2.0,
             );
             // Clip text to node interior so it never overflows the shape
