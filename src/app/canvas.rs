@@ -502,6 +502,20 @@ impl FlowchartApp {
             }
         }
 
+        // Focus mode: precompute 1-hop neighbor set for hop-aware dimming
+        let focus_neighbors: std::collections::HashSet<NodeId> = if self.focus_mode && !self.selection.is_empty() {
+            self.document.edges.iter()
+                .flat_map(|e| {
+                    let mut v = Vec::new();
+                    if self.selection.contains_node(&e.source.node_id) { v.push(e.target.node_id); }
+                    if self.selection.contains_node(&e.target.node_id) { v.push(e.source.node_id); }
+                    v
+                })
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
         // Edges (visible only)
         for edge in &self.document.edges {
             let src_visible = node_idx
@@ -552,6 +566,27 @@ impl FlowchartApp {
                             painter.add(bezier);
                         }
                     }
+                } else if self.focus_mode && !self.selection.is_empty() {
+                    // Focus mode: only draw edges connected to selected or 1-hop neighbors
+                    let src_rel = self.selection.contains_node(&edge.source.node_id)
+                        || focus_neighbors.contains(&edge.source.node_id);
+                    let tgt_rel = self.selection.contains_node(&edge.target.node_id)
+                        || focus_neighbors.contains(&edge.target.node_id);
+                    if src_rel || tgt_rel {
+                        self.draw_edge(edge, &painter, &node_idx, hover_canvas);
+                    } else if let (Some(&si), Some(&ti)) = (node_idx.get(&edge.source.node_id), node_idx.get(&edge.target.node_id)) {
+                        if let (Some(sn), Some(tn)) = (self.document.nodes.get(si), self.document.nodes.get(ti)) {
+                            let s = self.viewport.canvas_to_screen(sn.port_position(edge.source.side));
+                            let t = self.viewport.canvas_to_screen(tn.port_position(edge.target.side));
+                            let off = 60.0 * self.viewport.zoom;
+                            let (cp1, cp2) = super::interaction::control_points_for_side(s, t, edge.source.side, off);
+                            let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
+                                [s, cp1, cp2, t], false, Color32::TRANSPARENT,
+                                Stroke::new(edge.style.width, Color32::from_rgba_unmultiplied(80, 80, 100, 20)),
+                            );
+                            painter.add(bezier);
+                        }
+                    }
                 } else {
                     self.draw_edge(edge, &painter, &node_idx, hover_canvas);
                 }
@@ -589,21 +624,22 @@ impl FlowchartApp {
             painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         }
 
-        // Focus mode overlay: draw dim rect over all non-selected nodes
+        // Focus mode overlay: hop-aware neighborhood dimming
+        // Selected: no overlay | 1-hop neighbors: light dim | others: heavy dim
         if self.focus_mode && !self.selection.is_empty() {
             for node in &self.document.nodes {
-                if !self.selection.contains_node(&node.id) {
-                    let screen_pos = self.viewport.canvas_to_screen(node.pos());
-                    let screen_size = node.size_vec() * self.viewport.zoom;
-                    let screen_rect = Rect::from_min_size(screen_pos, screen_size);
-                    if screen_rect.intersects(canvas_rect) {
-                        painter.rect_filled(
-                            screen_rect,
-                            CornerRadius::same(4),
-                            Color32::from_rgba_premultiplied(30, 30, 46, 160),
-                        );
-                    }
-                }
+                if self.selection.contains_node(&node.id) { continue; }
+                let screen_pos = self.viewport.canvas_to_screen(node.pos());
+                let screen_size = node.size_vec() * self.viewport.zoom;
+                let screen_rect = Rect::from_min_size(screen_pos, screen_size);
+                if !screen_rect.intersects(canvas_rect) { continue; }
+                // Neighbors get a lighter veil; distant nodes get heavy dim
+                let alpha = if focus_neighbors.contains(&node.id) { 90u8 } else { 190u8 };
+                painter.rect_filled(
+                    screen_rect,
+                    CornerRadius::same(4),
+                    Color32::from_rgba_premultiplied(16, 16, 28, alpha),
+                );
             }
         }
 
