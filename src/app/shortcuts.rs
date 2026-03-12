@@ -195,6 +195,11 @@ impl FlowchartApp {
             if self.show_search { self.search_query.clear(); }
         }
 
+        // ? = toggle shortcuts panel
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F1) || (i.key_pressed(Key::Slash) && i.modifiers.shift)) {
+            self.show_shortcuts_panel = !self.show_shortcuts_panel;
+        }
+
         // G = toggle grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;

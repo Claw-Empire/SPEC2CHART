@@ -90,6 +90,83 @@ impl FlowchartApp {
             }
         }
 
+        // Right-click context menu
+        response.context_menu(|ui| {
+            if let Some(mouse) = pointer_pos {
+                let canvas_pos = self.viewport.screen_to_canvas(mouse);
+                if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
+                    // Node context menu
+                    self.selection.select_node(node_id);
+                    if ui.button("✏ Edit label").clicked() {
+                        self.focus_label_edit = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("⎘ Duplicate").clicked() {
+                        if let Some(node) = self.document.find_node(&node_id).cloned() {
+                            let mut copy = node;
+                            copy.id = NodeId::new();
+                            copy.set_pos(copy.pos() + Vec2::new(24.0, 24.0));
+                            let cid = copy.id;
+                            self.document.nodes.push(copy);
+                            self.selection.select_node(cid);
+                            self.history.push(&self.document);
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("⬆ Bring to Front").clicked() {
+                        if let Some(i) = self.document.nodes.iter().position(|n| n.id == node_id) {
+                            let n = self.document.nodes.remove(i);
+                            self.document.nodes.push(n);
+                            self.history.push(&self.document);
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("🗑 Delete").clicked() {
+                        self.document.remove_node(&node_id);
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                } else {
+                    // Canvas context menu
+                    if ui.button("📋 Paste").clicked() {
+                        if !self.clipboard.is_empty() {
+                            self.selection.clear();
+                            let n = self.clipboard.len() as f32;
+                            let centroid = self.clipboard.iter().fold(Vec2::ZERO, |a, nd| a + nd.pos().to_vec2()) / n;
+                            let shift = canvas_pos.to_vec2() - centroid;
+                            for tmpl in self.clipboard.clone() {
+                                let mut nd = tmpl;
+                                nd.id = NodeId::new();
+                                nd.set_pos(nd.pos() + shift);
+                                self.selection.node_ids.insert(nd.id);
+                                self.document.nodes.push(nd);
+                            }
+                            self.history.push(&self.document);
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("F Fit All").clicked() {
+                        self.fit_to_content();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("➕ New Node Here").clicked() {
+                        let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
+                        let w = node.size[0]; let h = node.size[1];
+                        node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
+                        let id = node.id;
+                        self.document.nodes.push(node);
+                        self.selection.select_node(id);
+                        self.focus_label_edit = true;
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                }
+            }
+        });
+
         // Double-click to focus label editing, or create new node on empty space
         if response.double_clicked() {
             if let Some(mouse) = pointer_pos {

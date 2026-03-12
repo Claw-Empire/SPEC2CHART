@@ -100,13 +100,15 @@ impl FlowchartApp {
         };
         let stroke = Stroke::new(border_width * self.viewport.zoom.sqrt(), border_color);
 
+        let cr_user = (style.corner_radius * self.viewport.zoom.sqrt()) as u8;
+
         match shape {
             NodeShape::Rectangle => {
-                painter.rect_filled(screen_rect, CornerRadius::ZERO, fill);
-                painter.rect_stroke(screen_rect, CornerRadius::ZERO, stroke, StrokeKind::Outside);
+                painter.rect_filled(screen_rect, CornerRadius::same(cr_user), fill);
+                painter.rect_stroke(screen_rect, CornerRadius::same(cr_user), stroke, StrokeKind::Outside);
             }
             NodeShape::RoundedRect => {
-                let r = (10.0 * self.viewport.zoom) as u8;
+                let r = (10.0 * self.viewport.zoom).max(style.corner_radius * self.viewport.zoom.sqrt()) as u8;
                 painter.rect_filled(screen_rect, CornerRadius::same(r), fill);
                 painter.rect_stroke(
                     screen_rect,
@@ -530,6 +532,18 @@ impl FlowchartApp {
             }
             if drawing {
                 painter.line_segment([seg_start, *pts.last().unwrap()], Stroke::new(width, edge_color));
+            }
+        } else if edge.style.orthogonal {
+            // Orthogonal routing: exit source perpendicularly, turn at midpoint, enter target perpendicularly
+            use egui::Pos2;
+            let mid_x = (src.x + tgt.x) / 2.0;
+            let mid_y = (src.y + tgt.y) / 2.0;
+            let pts: Vec<Pos2> = match edge.source.side {
+                PortSide::Right | PortSide::Left => vec![src, Pos2::new(mid_x, src.y), Pos2::new(mid_x, tgt.y), tgt],
+                PortSide::Top | PortSide::Bottom => vec![src, Pos2::new(src.x, mid_y), Pos2::new(tgt.x, mid_y), tgt],
+            };
+            for w in pts.windows(2) {
+                painter.line_segment([w[0], w[1]], Stroke::new(width, edge_color));
             }
         } else {
             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(

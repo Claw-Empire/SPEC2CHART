@@ -111,6 +111,16 @@ impl FlowchartApp {
                         label_response.request_focus();
                         self.focus_label_edit = false;
                     }
+                    // Quick emoji prefix buttons
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for emoji in ["📦","🔧","⚙️","🗄️","🌐","🔒","💡","📊","🚀","❌","✅","⚠️"] {
+                            if ui.small_button(emoji).on_hover_text(format!("Prefix {emoji}")).clicked() {
+                                let trimmed = label.trim_start_matches(|c: char| !c.is_alphanumeric() && c != ' ');
+                                *label = format!("{emoji} {trimmed}");
+                            }
+                        }
+                    });
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Description").size(11.0).color(TEXT_DIM));
                     ui.add_space(2.0);
@@ -317,6 +327,8 @@ impl FlowchartApp {
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
             ui.add_space(4.0);
+            ui.add(egui::Slider::new(&mut node.style.corner_radius, 0.0..=40.0).text("Radius"));
+            ui.add_space(4.0);
             let mut opacity = node.style.fill_color[3] as f32 / 255.0 * 100.0;
             if ui.add(egui::Slider::new(&mut opacity, 0.0..=100.0).text("Opacity").suffix("%")).changed() {
                 node.style.fill_color[3] = (opacity / 100.0 * 255.0).round() as u8;
@@ -505,8 +517,10 @@ impl FlowchartApp {
                 if ui.color_edit_button_srgba(&mut c).changed() {
                     edge.style.color = c.to_array();
                 }
-                ui.add_space(16.0);
+                ui.add_space(8.0);
                 ui.checkbox(&mut edge.style.dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
+                ui.add_space(8.0);
+                ui.checkbox(&mut edge.style.orthogonal, egui::RichText::new("Orthogonal").size(11.0).color(TEXT_DIM));
             });
             ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
         }

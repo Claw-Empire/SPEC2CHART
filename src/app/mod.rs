@@ -111,6 +111,7 @@ pub struct FlowchartApp {
     pub(crate) show_llm_settings: bool,
     pub(crate) show_search: bool,
     pub(crate) search_query: String,
+    pub(crate) show_shortcuts_panel: bool,
 }
 
 impl FlowchartApp {
@@ -203,6 +204,7 @@ impl FlowchartApp {
             show_llm_settings: false,
             show_search: false,
             search_query: String::new(),
+            show_shortcuts_panel: false,
         }
     }
 
@@ -272,6 +274,52 @@ impl eframe::App for FlowchartApp {
             self.pending_fit = false;
             self.fit_to_content();
             ctx.request_repaint();
+        }
+
+        // Keyboard shortcuts panel
+        if self.show_shortcuts_panel {
+            let mut open = self.show_shortcuts_panel;
+            egui::Window::new("Keyboard Shortcuts")
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    let shortcuts: &[(&str, &str)] = &[
+                        ("V", "Select tool"),
+                        ("E", "Connect tool"),
+                        ("G", "Toggle grid"),
+                        ("S", "Toggle snap"),
+                        ("F", "Fit / zoom to selection"),
+                        ("⌘F", "Search nodes"),
+                        ("⌘Z", "Undo"),
+                        ("⌘⇧Z", "Redo"),
+                        ("⌘C / ⌘V", "Copy / Paste"),
+                        ("⌘D", "Duplicate"),
+                        ("⌘A", "Select all"),
+                        ("⌘1", "Fit to content"),
+                        ("⌘2", "Zoom to selection"),
+                        ("⌘= / ⌘-", "Zoom in / out"),
+                        ("⌘0", "Reset zoom"),
+                        ("Arrow keys", "Nudge 1px (⇧ = 10px)"),
+                        ("Del / Backspace", "Delete selected"),
+                        ("Escape", "Deselect"),
+                        ("Double-click", "Edit label / Create node"),
+                        ("Right-click", "Context menu"),
+                        ("F1 / ?", "This panel"),
+                    ];
+                    egui::Grid::new("shortcuts_grid")
+                        .striped(true)
+                        .spacing([16.0, 4.0])
+                        .show(ui, |ui| {
+                            for (key, desc) in shortcuts {
+                                ui.label(egui::RichText::new(*key).monospace().color(ACCENT).size(12.0));
+                                ui.label(egui::RichText::new(*desc).size(12.0).color(TEXT_SECONDARY));
+                                ui.end_row();
+                            }
+                        });
+                });
+            self.show_shortcuts_panel = open;
         }
     }
 }

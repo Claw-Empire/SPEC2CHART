@@ -167,16 +167,18 @@ pub struct NodeStyle {
     pub border_width: f32,
     pub text_color: [u8; 4],
     pub font_size: f32,
+    pub corner_radius: f32,
 }
 
 impl Default for NodeStyle {
     fn default() -> Self {
         Self {
-            fill_color: [49, 50, 68, 255],     // surface0
-            border_color: [69, 71, 90, 255],    // surface1
+            fill_color: [49, 50, 68, 255],
+            border_color: [69, 71, 90, 255],
             border_width: 1.5,
-            text_color: [205, 214, 244, 255],   // text
+            text_color: [205, 214, 244, 255],
             font_size: 13.0,
+            corner_radius: 8.0,
         }
     }
 }
@@ -241,6 +243,7 @@ impl Node {
                 border_width: 0.0,
                 text_color: color.text_rgba(),
                 font_size: 14.0,
+                corner_radius: 8.0,
             },
         }
     }
@@ -261,6 +264,7 @@ impl Node {
                 border_width: 1.5,
                 text_color: [205, 214, 244, 255],
                 font_size: 12.0,
+                corner_radius: 4.0,
             },
         }
     }
@@ -280,6 +284,7 @@ impl Node {
                 border_width: 0.0,
                 text_color: [205, 214, 244, 255],
                 font_size: 16.0,
+                corner_radius: 0.0,
             },
         }
     }
@@ -351,6 +356,7 @@ pub struct EdgeStyle {
     pub color: [u8; 4],
     pub width: f32,
     pub dashed: bool,
+    pub orthogonal: bool,
 }
 
 impl Default for EdgeStyle {
@@ -359,6 +365,7 @@ impl Default for EdgeStyle {
             color: [100, 100, 100, 255],
             width: 2.5,
             dashed: false,
+            orthogonal: false,
         }
     }
 }
