@@ -1088,12 +1088,57 @@ impl FlowchartApp {
                 let b = self.viewport.canvas_to_screen(end_canvas);
                 let sel_rect = Rect::from_two_pos(a, b);
                 painter.rect_filled(sel_rect, CornerRadius::ZERO, BOX_SELECT_FILL);
-                painter.rect_stroke(
-                    sel_rect,
-                    CornerRadius::ZERO,
-                    Stroke::new(1.0, BOX_SELECT_STROKE),
-                    StrokeKind::Outside,
-                );
+
+                // Marching ants: animated dashed border
+                {
+                    let t = painter.ctx().input(|i| i.time);
+                    let dash_len = 6.0_f32;
+                    let gap_len = 4.0_f32;
+                    let period = dash_len + gap_len;
+                    let speed = 30.0_f32; // pixels per second
+                    let phase = (t as f32 * speed) % period;
+
+                    // Walk around the perimeter: top, right, bottom (reversed), left (reversed)
+                    let corners = [
+                        sel_rect.left_top(),
+                        sel_rect.right_top(),
+                        sel_rect.right_bottom(),
+                        sel_rect.left_bottom(),
+                        sel_rect.left_top(), // close
+                    ];
+
+                    let stroke = Stroke::new(1.2, BOX_SELECT_STROKE);
+                    let mut dist_offset = period - phase; // start phase
+                    for seg in 0..4 {
+                        let a = corners[seg];
+                        let b = corners[seg + 1];
+                        let seg_len = (b - a).length();
+                        let dir = (b - a) / seg_len;
+                        let mut d = dist_offset % period;
+                        // align start: skip to first dash
+                        if d < gap_len { d += gap_len; } else { d -= gap_len; }
+                        let mut pos = 0.0_f32;
+                        // Draw or skip based on phase
+                        let mut drawing = d < dash_len;
+                        let mut cursor = -(d % period);
+                        while cursor < seg_len {
+                            let seg_start = cursor.max(0.0);
+                            let seg_end = (cursor + if drawing { dash_len } else { gap_len }).min(seg_len);
+                            if drawing && seg_end > seg_start {
+                                painter.line_segment(
+                                    [a + dir * seg_start, a + dir * seg_end],
+                                    stroke,
+                                );
+                            }
+                            cursor += if drawing { dash_len } else { gap_len };
+                            drawing = !drawing;
+                        }
+                        let _ = pos; // suppress warning
+                        dist_offset = (dist_offset + seg_len) % period;
+                    }
+
+                    painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+                }
 
                 // Count nodes within box-select rect and show badge
                 let start_canvas_local = *start_canvas;
