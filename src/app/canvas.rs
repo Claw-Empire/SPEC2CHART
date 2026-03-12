@@ -1721,6 +1721,86 @@ impl FlowchartApp {
     // --- Rulers ---
 
     fn draw_floating_action_bar(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        // Edge floating action bar (when exactly 1 edge selected, no nodes)
+        if self.selection.node_ids.is_empty() && self.selection.edge_ids.len() == 1 {
+            let edge_id = *self.selection.edge_ids.iter().next().unwrap();
+            if let Some(edge) = self.document.find_edge(&edge_id) {
+                // Find midpoint on screen for bar positioning
+                let node_idx: std::collections::HashMap<NodeId, usize> = self.document.nodes.iter().enumerate()
+                    .map(|(i, n)| (n.id, i)).collect();
+                let src_pos = node_idx.get(&edge.source.node_id)
+                    .and_then(|&i| self.document.nodes.get(i))
+                    .map(|n| self.viewport.canvas_to_screen(n.rect().center()))
+                    .unwrap_or(canvas_rect.center());
+                let tgt_pos = node_idx.get(&edge.target.node_id)
+                    .and_then(|&i| self.document.nodes.get(i))
+                    .map(|n| self.viewport.canvas_to_screen(n.rect().center()))
+                    .unwrap_or(canvas_rect.center());
+                let mid = Pos2::new((src_pos.x + tgt_pos.x) / 2.0, (src_pos.y + tgt_pos.y) / 2.0);
+
+                let edge_actions: &[(&str, &str)] = &[
+                    ("⇄", "Reverse direction"),
+                    ("✏", "Edit label"),
+                    ("⎘", "Duplicate edge"),
+                    ("🗑", "Delete"),
+                ];
+                let btn_w = 28.0_f32;
+                let bar_h = 26.0_f32;
+                let bar_w = edge_actions.len() as f32 * btn_w + (edge_actions.len() - 1) as f32 * 2.0 + 8.0;
+                let bar_x = (mid.x - bar_w / 2.0).clamp(canvas_rect.min.x + 4.0, canvas_rect.max.x - bar_w - 4.0);
+                let bar_y = (mid.y - bar_h - 10.0).max(canvas_rect.min.y + 4.0);
+                let bar_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(bar_w, bar_h));
+
+                let painter2 = ui.painter();
+                painter2.rect_filled(bar_rect, CornerRadius::same(6), TOOLTIP_BG);
+                painter2.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, ACCENT.gamma_multiply(0.4)), StrokeKind::Outside);
+
+                let mut ex = bar_rect.min.x + 4.0;
+                let mut edge_clicked: Option<usize> = None;
+                for (i, (icon, tip)) in edge_actions.iter().enumerate() {
+                    let btn_r = Rect::from_min_size(Pos2::new(ex, bar_rect.min.y + 2.0), Vec2::new(btn_w, bar_h - 4.0));
+                    let resp = ui.put(btn_r, egui::Button::new(
+                        egui::RichText::new(*icon).size(12.0)
+                    ).frame(false)).on_hover_text(*tip);
+                    if resp.clicked() { edge_clicked = Some(i); }
+                    ex += btn_w + 2.0;
+                }
+                drop(edge); // drop borrow before mutable operations
+
+                if let Some(action) = edge_clicked {
+                    match action {
+                        0 => { // Reverse
+                            if let Some(e) = self.document.find_edge_mut(&edge_id) {
+                                let old_src = e.source.clone();
+                                let old_tgt = e.target.clone();
+                                e.source = old_tgt;
+                                e.target = old_src;
+                            }
+                            self.history.push(&self.document);
+                            self.status_message = Some(("Edge reversed".to_string(), std::time::Instant::now()));
+                        }
+                        1 => { self.focus_label_edit = true; }
+                        2 => { // Duplicate edge
+                            if let Some(e) = self.document.find_edge(&edge_id).cloned() {
+                                let mut copy = e;
+                                copy.id = EdgeId::new();
+                                copy.style.curve_bend += 30.0;
+                                self.document.edges.push(copy);
+                                self.history.push(&self.document);
+                            }
+                        }
+                        3 => { // Delete
+                            self.document.remove_edge(&edge_id);
+                            self.selection.clear();
+                            self.history.push(&self.document);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            return; // don't show node bar when only edge is selected
+        }
+
         if self.selection.node_ids.is_empty() { return; }
         // Compute bounding box of selected nodes in screen space
         let bb = self.selection.node_ids.iter()
