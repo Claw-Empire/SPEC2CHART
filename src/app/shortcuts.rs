@@ -536,6 +536,13 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // Shift+A = toggle data-flow animation
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.shift_only()) {
+            self.show_flow_animation = !self.show_flow_animation;
+            let msg = if self.show_flow_animation { "Flow Animation On" } else { "Flow Animation Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
         // G = toggle grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;

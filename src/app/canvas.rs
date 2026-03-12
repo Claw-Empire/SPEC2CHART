@@ -469,6 +469,13 @@ impl FlowchartApp {
             }
         }
 
+        // Data-flow animation: dots traveling along edges
+        if self.show_flow_animation && !self.document.edges.is_empty() {
+            let time = painter.ctx().input(|i| i.time) as f32;
+            self.draw_flow_animation(&painter, &node_idx, time, canvas_rect);
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        }
+
         // Focus mode overlay: draw dim rect over all non-selected nodes
         if self.focus_mode && !self.selection.is_empty() {
             for node in &self.document.nodes {
@@ -2876,6 +2883,95 @@ impl FlowchartApp {
                 Stroke::new(1.0, MINIMAP_VP_STROKE),
                 StrokeKind::Outside,
             );
+        }
+    }
+
+    /// Draw animated data-flow dots traveling along each edge from source to target.
+    fn draw_flow_animation(
+        &self,
+        painter: &egui::Painter,
+        node_idx: &std::collections::HashMap<NodeId, usize>,
+        time: f32,
+        canvas_rect: Rect,
+    ) {
+        // Speed: 0.4 traversals/sec (dot takes 2.5s to travel the full edge)
+        let speed = 0.4_f32;
+        // How many dots per edge
+        const DOTS_PER_EDGE: usize = 3;
+
+        for (edge_i, edge) in self.document.edges.iter().enumerate() {
+            let src_node = node_idx.get(&edge.source.node_id)
+                .and_then(|&i| self.document.nodes.get(i));
+            let tgt_node = node_idx.get(&edge.target.node_id)
+                .and_then(|&i| self.document.nodes.get(i));
+            let (src_node, tgt_node) = match (src_node, tgt_node) {
+                (Some(s), Some(t)) => (s, t),
+                _ => continue,
+            };
+
+            let src = self.viewport.canvas_to_screen(src_node.port_position(edge.source.side));
+            let tgt = self.viewport.canvas_to_screen(tgt_node.port_position(edge.target.side));
+
+            // Quick cull: skip edges fully outside viewport
+            let edge_bounds = Rect::from_two_pos(src, tgt).expand(80.0);
+            if !edge_bounds.intersects(canvas_rect) {
+                continue;
+            }
+
+            let offset = 60.0 * self.viewport.zoom;
+            let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+            if edge.style.curve_bend.abs() > 0.1 {
+                let dir = if (tgt - src).length() > 1.0 {
+                    (tgt - src).normalized()
+                } else {
+                    Vec2::X
+                };
+                let perp = Vec2::new(-dir.y, dir.x);
+                let bend_screen = edge.style.curve_bend * self.viewport.zoom;
+                cp1 = cp1 + perp * bend_screen;
+                cp2 = cp2 + perp * bend_screen;
+            }
+
+            // Base color from edge, brightened
+            let base = to_color32(edge.style.color).gamma_multiply(1.8);
+            let dot_r = (3.5 * self.viewport.zoom).clamp(2.0, 6.0);
+
+            // Phase offset per edge so dots aren't all in sync
+            let phase_offset = (edge_i as f32 * 0.37) % 1.0;
+
+            for dot in 0..DOTS_PER_EDGE {
+                // Each dot is spaced evenly and travels the curve
+                let dot_phase = (dot as f32) / DOTS_PER_EDGE as f32;
+                let t = ((time * speed + phase_offset + dot_phase) % 1.0).abs();
+
+                // Fade out near start/end so dots don't pop in/out
+                let fade = {
+                    let ramp = 0.08_f32;
+                    let fade_in  = (t / ramp).clamp(0.0, 1.0);
+                    let fade_out = ((1.0 - t) / ramp).clamp(0.0, 1.0);
+                    fade_in.min(fade_out)
+                };
+                if fade < 0.01 { continue; }
+
+                let pos = cubic_bezier_point(src, cp1, cp2, tgt, t);
+
+                // Skip if outside canvas rect
+                if !canvas_rect.contains(pos) { continue; }
+
+                // Outer glow ring
+                let glow_color = Color32::from_rgba_premultiplied(
+                    base.r(), base.g(), base.b(),
+                    (80.0 * fade) as u8,
+                );
+                painter.circle_filled(pos, dot_r * 2.0, glow_color);
+
+                // Inner solid dot
+                let dot_color = Color32::from_rgba_premultiplied(
+                    base.r(), base.g(), base.b(),
+                    (220.0 * fade) as u8,
+                );
+                painter.circle_filled(pos, dot_r, dot_color);
+            }
         }
     }
 }

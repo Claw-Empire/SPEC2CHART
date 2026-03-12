@@ -154,6 +154,8 @@ pub struct FlowchartApp {
     pub(crate) quick_notes_text: String,
     /// How many times paste has been invoked since last copy (for progressive offset)
     pub(crate) paste_count: usize,
+    /// When true, animate data-flow dots along edges (toggle with Shift+A)
+    pub(crate) show_flow_animation: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,6 +279,7 @@ impl FlowchartApp {
             show_quick_notes: false,
             quick_notes_text: String::new(),
             paste_count: 0,
+            show_flow_animation: false,
         }
     }
 
