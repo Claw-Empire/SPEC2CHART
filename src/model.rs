@@ -196,6 +196,33 @@ pub const MIN_SIZE_ENTITY: [f32; 2] = [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 
 pub const MIN_SIZE_STICKY: [f32; 2] = [60.0, 60.0];
 pub const MIN_SIZE_TEXT: [f32; 2] = [40.0, 20.0];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeTag {
+    Critical,
+    Warning,
+    Ok,
+    Info,
+}
+
+impl NodeTag {
+    pub fn color(&self) -> [u8; 4] {
+        match self {
+            NodeTag::Critical => [243, 139, 168, 220], // red
+            NodeTag::Warning  => [249, 226, 175, 220], // yellow
+            NodeTag::Ok       => [166, 227, 161, 220], // green
+            NodeTag::Info     => [137, 180, 250, 220], // blue
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            NodeTag::Critical => "Critical",
+            NodeTag::Warning  => "Warning",
+            NodeTag::Ok       => "OK",
+            NodeTag::Info     => "Info",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -206,6 +233,8 @@ pub struct Node {
     pub style: NodeStyle,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub tag: Option<NodeTag>,
 }
 
 impl Node {
@@ -226,7 +255,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false,
+            z_offset: 0.0, pinned: false, tag: None,
             style: NodeStyle::default(),
         }
     }
@@ -240,7 +269,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false,
+            z_offset: 0.0, pinned: false, tag: None,
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -261,7 +290,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false,
+            z_offset: 0.0, pinned: false, tag: None,
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -281,7 +310,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false,
+            z_offset: 0.0, pinned: false, tag: None,
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -355,12 +384,28 @@ pub struct Port {
     pub side: PortSide,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArrowHead {
+    Filled,
+    Open,
+    Circle,
+    None,
+}
+
+impl Default for ArrowHead {
+    fn default() -> Self { Self::Filled }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeStyle {
     pub color: [u8; 4],
     pub width: f32,
     pub dashed: bool,
     pub orthogonal: bool,
+    #[serde(default)]
+    pub arrow_head: ArrowHead,
+    #[serde(default)]
+    pub curve_bend: f32,
 }
 
 impl Default for EdgeStyle {
@@ -370,6 +415,8 @@ impl Default for EdgeStyle {
             width: 2.5,
             dashed: false,
             orthogonal: false,
+            arrow_head: ArrowHead::Filled,
+            curve_bend: 0.0,
         }
     }
 }

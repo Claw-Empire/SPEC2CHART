@@ -1,4 +1,4 @@
-use egui::{Color32, FontId, SidePanel, Stroke};
+use egui::{Color32, FontId, Pos2, Rect, SidePanel, Stroke};
 use crate::model::*;
 use super::FlowchartApp;
 use super::theme::*;
@@ -27,42 +27,123 @@ impl FlowchartApp {
                 let sel_edges = self.selection.edge_ids.len();
                 let total = sel_nodes + sel_edges;
 
-                if total == 0 {
-                    self.draw_empty_selection(ui);
-                } else if total > 1 {
-                    self.draw_multi_selection_tools(ui, sel_nodes, total);
-                } else if sel_nodes == 1 {
-                    self.draw_node_properties(ui);
-                } else if sel_edges == 1 {
-                    self.draw_edge_properties(ui);
-                }
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if total == 0 {
+                            self.draw_empty_selection(ui);
+                        } else if total > 1 {
+                            self.draw_multi_selection_tools(ui, sel_nodes, total);
+                        } else if sel_nodes == 1 {
+                            self.draw_node_properties(ui);
+                        } else if sel_edges == 1 {
+                            self.draw_edge_properties(ui);
+                        }
+                    });
             });
     }
 
     fn draw_empty_selection(&self, ui: &mut egui::Ui) {
-        ui.add_space(40.0);
-        ui.vertical_centered(|ui| {
-            // Subtle icon-like indicator
-            ui.label(
-                egui::RichText::new("\u{25CB}")  // circle outline
-                    .size(28.0)
-                    .color(SURFACE1),
-            );
-            ui.add_space(12.0);
-            ui.label(egui::RichText::new("No selection").size(13.0).color(TEXT_DIM));
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("Click a node or edge\nto edit properties")
-                    .size(11.0)
-                    .color(TEXT_DIM),
-            );
-            ui.add_space(16.0);
-            ui.label(
-                egui::RichText::new("Tip: Double-click to edit labels")
-                    .size(10.0)
-                    .color(SURFACE1),
-            );
-        });
+        let n_nodes = self.document.nodes.len();
+        let n_edges = self.document.edges.len();
+
+        if n_nodes == 0 {
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("\u{25CB}").size(28.0).color(SURFACE1));
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new("Empty canvas").size(13.0).color(TEXT_DIM));
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("Double-click or press R/C/D\nto create a node").size(11.0).color(TEXT_DIM));
+            });
+            return;
+        }
+
+        // Graph statistics
+        ui.add_space(8.0);
+        Self::draw_section_header(ui, "GRAPH OVERVIEW");
+        ui.add_space(6.0);
+
+        let stats: &[(&str, String)] = &[
+            ("Nodes", n_nodes.to_string()),
+            ("Edges", n_edges.to_string()),
+        ];
+        for (label, val) in stats {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(*label).size(11.0).color(TEXT_DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(val).size(11.0).strong().color(TEXT_SECONDARY));
+                });
+            });
+        }
+        ui.add_space(8.0);
+
+        // Orphan detection
+        let orphans: Vec<&str> = self.document.nodes.iter()
+            .filter(|n| {
+                !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id)
+            })
+            .filter_map(|n| match &n.kind {
+                crate::model::NodeKind::Shape { label, .. } => Some(label.as_str()),
+                crate::model::NodeKind::Entity { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .take(5)
+            .collect();
+
+        if !orphans.is_empty() {
+            Self::draw_section_header(ui, "UNCONNECTED NODES");
+            ui.add_space(4.0);
+            for name in &orphans {
+                ui.label(egui::RichText::new(format!("· {}", name)).size(10.5).color(TEXT_DIM));
+            }
+            if orphans.len() == 5 && self.document.nodes.iter().filter(|n| {
+                !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id)
+            }).count() > 5 {
+                ui.label(egui::RichText::new("…and more").size(10.0).color(SURFACE1));
+            }
+            ui.add_space(8.0);
+        }
+
+        // Tags summary
+        let tagged: Vec<_> = self.document.nodes.iter()
+            .filter(|n| n.tag.is_some())
+            .collect();
+        if !tagged.is_empty() {
+            Self::draw_section_header(ui, "TAGGED NODES");
+            ui.add_space(4.0);
+            let mut counts = [0usize; 4];
+            for n in &tagged {
+                match n.tag {
+                    Some(crate::model::NodeTag::Critical) => counts[0] += 1,
+                    Some(crate::model::NodeTag::Warning)  => counts[1] += 1,
+                    Some(crate::model::NodeTag::Ok)       => counts[2] += 1,
+                    Some(crate::model::NodeTag::Info)     => counts[3] += 1,
+                    None => {}
+                }
+            }
+            let names = ["Critical", "Warning", "OK", "Info"];
+            let colors = [
+                egui::Color32::from_rgb(243, 139, 168),
+                egui::Color32::from_rgb(249, 226, 175),
+                egui::Color32::from_rgb(166, 227, 161),
+                egui::Color32::from_rgb(137, 180, 250),
+            ];
+            for (i, (name, c)) in names.iter().zip(colors.iter()).enumerate() {
+                if counts[i] > 0 {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("● {}", name)).size(10.5).color(*c));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(counts[i].to_string()).size(10.5).color(TEXT_DIM));
+                        });
+                    });
+                }
+            }
+            ui.add_space(8.0);
+        }
+
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Click a node or edge to edit properties").size(10.0).color(SURFACE1));
     }
 
     fn draw_node_properties(&mut self, ui: &mut egui::Ui) {
@@ -375,8 +456,40 @@ impl FlowchartApp {
             }
         }
 
+        // Tag
+        ui.add_space(8.0);
+        Self::draw_section_header(ui, "TAG");
+        ui.add_space(4.0);
+        if let Some(node) = self.document.find_node_mut(&node_id) {
+            ui.horizontal_wrapped(|ui| {
+                let none_selected = node.tag.is_none();
+                let none_btn = egui::Button::new(
+                    egui::RichText::new("None").size(11.0).color(if none_selected { ACCENT } else { TEXT_DIM })
+                ).fill(if none_selected { ACCENT_GLOW } else { Color32::TRANSPARENT }).corner_radius(4.0);
+                if ui.add(none_btn).clicked() { node.tag = None; }
+                for variant in [crate::model::NodeTag::Critical, crate::model::NodeTag::Warning, crate::model::NodeTag::Ok, crate::model::NodeTag::Info] {
+                    let selected = node.tag == Some(variant);
+                    let c = to_color32(variant.color());
+                    let text_c = if selected { ACCENT } else { TEXT_PRIMARY };
+                    let bg = if selected { ACCENT_GLOW } else { Color32::TRANSPARENT };
+                    let btn = egui::Button::new(
+                        egui::RichText::new(variant.label()).size(11.0).color(text_c)
+                    ).fill(bg).corner_radius(4.0);
+                    let r = ui.add(btn);
+                    // draw colored swatch indicator
+                    let swatch = Rect::from_min_size(
+                        Pos2::new(r.rect.min.x, r.rect.max.y - 3.0),
+                        egui::Vec2::new(r.rect.width(), 3.0),
+                    );
+                    ui.painter().rect_filled(swatch, egui::CornerRadius::ZERO, c);
+                    if r.clicked() { node.tag = Some(variant); }
+                }
+            });
+        }
+
         // Pin toggle
         if let Some(node) = self.document.find_node_mut(&node_id) {
+            ui.add_space(4.0);
             let pin_label = if node.pinned { "📌 Pinned — click to unpin" } else { "📍 Pin node" };
             if ui.button(pin_label).clicked() {
                 node.pinned = !node.pinned;
@@ -551,16 +664,96 @@ impl FlowchartApp {
                 ui.checkbox(&mut edge.style.orthogonal, egui::RichText::new("Orthogonal").size(11.0).color(TEXT_DIM));
             });
             ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut edge.style.curve_bend, -200.0..=200.0).text("Bend"));
+                if ui.small_button("↺").on_hover_text("Reset curve bend to 0").clicked() {
+                    edge.style.curve_bend = 0.0;
+                }
+            });
+            ui.add_space(8.0);
+
+            Self::draw_section_header(ui, "ARROW HEAD");
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                for (variant, label, tooltip) in [
+                    (ArrowHead::Filled,  "▶ Filled",  "Solid filled triangle"),
+                    (ArrowHead::Open,    "⌄ Open",    "Open chevron (no fill)"),
+                    (ArrowHead::Circle,  "● Circle",  "Circle endpoint"),
+                    (ArrowHead::None,    "— None",    "No arrowhead"),
+                ] {
+                    let selected = edge.style.arrow_head == variant;
+                    let text_color = if selected { ACCENT } else { TEXT_PRIMARY };
+                    let bg = if selected { ACCENT_GLOW } else { Color32::TRANSPARENT };
+                    let btn = egui::Button::new(
+                        egui::RichText::new(label).size(11.0).color(text_color)
+                    ).fill(bg).corner_radius(4.0);
+                    if ui.add(btn).on_hover_text(tooltip).clicked() {
+                        edge.style.arrow_head = variant;
+                    }
+                }
+            });
         }
     }
 
     fn draw_multi_selection_tools(&mut self, ui: &mut egui::Ui, sel_nodes: usize, total: usize) {
+        let sel_edges = self.selection.edge_ids.len();
         ui.label(
             egui::RichText::new(format!("{} items selected", total))
                 .size(13.0)
                 .color(TEXT_SECONDARY),
         );
-        ui.add_space(16.0);
+        ui.add_space(12.0);
+
+        // Batch edge style when edges are selected
+        if sel_edges >= 1 {
+            Self::draw_section_header(ui, "BATCH EDGE STYLE");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.small_button("Solid").clicked() {
+                    let ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(e) = self.document.find_edge_mut(id) { e.style.dashed = false; }
+                    }
+                    self.history.push(&self.document);
+                }
+                if ui.small_button("Dashed").clicked() {
+                    let ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(e) = self.document.find_edge_mut(id) { e.style.dashed = true; }
+                    }
+                    self.history.push(&self.document);
+                }
+                if ui.small_button("Orthog.").clicked() {
+                    let ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(e) = self.document.find_edge_mut(id) { e.style.orthogonal = true; }
+                    }
+                    self.history.push(&self.document);
+                }
+                if ui.small_button("Bezier").clicked() {
+                    let ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(e) = self.document.find_edge_mut(id) { e.style.orthogonal = false; }
+                    }
+                    self.history.push(&self.document);
+                }
+            });
+            ui.add_space(4.0);
+            // Batch arrow head
+            ui.horizontal(|ui| {
+                for (variant, label) in [(ArrowHead::Filled, "▶"), (ArrowHead::Open, "⌄"), (ArrowHead::Circle, "●"), (ArrowHead::None, "—")] {
+                    if ui.small_button(label).on_hover_text(format!("{:?}", variant)).clicked() {
+                        let ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                        for id in &ids {
+                            if let Some(e) = self.document.find_edge_mut(id) { e.style.arrow_head = variant; }
+                        }
+                        self.history.push(&self.document);
+                    }
+                }
+            });
+            ui.add_space(12.0);
+        }
 
         if sel_nodes < 2 { return; }
 

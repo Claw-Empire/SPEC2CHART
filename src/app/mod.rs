@@ -79,6 +79,11 @@ pub enum DragState {
         start_rect: [f32; 4],
         start_mouse: Pos2,
     },
+    DraggingEdgeBend {
+        edge_id: EdgeId,
+        start_bend: f32,
+        start_mouse: Pos2,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -109,9 +114,23 @@ pub struct FlowchartApp {
     pub(crate) pending_fit: bool,
     pub(crate) llm_config: specgraph::LlmConfig,
     pub(crate) show_llm_settings: bool,
+    pub(crate) style_clipboard: Option<crate::model::NodeStyle>,
     pub(crate) show_search: bool,
     pub(crate) search_query: String,
     pub(crate) show_shortcuts_panel: bool,
+    pub(crate) bg_pattern: BgPattern,
+    /// When Some, show a floating shape picker at this screen position
+    pub(crate) shape_picker: Option<Pos2>,
+    /// Saved viewport for overview mode toggle
+    pub(crate) saved_viewport: Option<Viewport>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BgPattern {
+    Dots,
+    Lines,
+    Crosshatch,
+    None,
 }
 
 impl FlowchartApp {
@@ -202,9 +221,13 @@ impl FlowchartApp {
             pending_fit: false,
             llm_config: specgraph::LlmConfig::default(),
             show_llm_settings: false,
+            style_clipboard: None,
             show_search: false,
             search_query: String::new(),
             show_shortcuts_panel: false,
+            bg_pattern: BgPattern::Dots,
+            shape_picker: None,
+            saved_viewport: None,
         }
     }
 
@@ -286,6 +309,73 @@ impl eframe::App for FlowchartApp {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
+        // Shape picker floating palette (N key)
+        if let Some(picker_pos) = self.shape_picker {
+            let shapes: &[(&str, NodeKind)] = &[
+                ("■ Rect",   NodeKind::Shape { shape: crate::model::NodeShape::Rectangle, label: String::new(), description: String::new() }),
+                ("⬮ Round",  NodeKind::Shape { shape: crate::model::NodeShape::RoundedRect, label: String::new(), description: String::new() }),
+                ("◆ Diamond",NodeKind::Shape { shape: crate::model::NodeShape::Diamond, label: String::new(), description: String::new() }),
+                ("● Circle", NodeKind::Shape { shape: crate::model::NodeShape::Circle, label: String::new(), description: String::new() }),
+                ("▱ Parallel",NodeKind::Shape { shape: crate::model::NodeShape::Parallelogram, label: String::new(), description: String::new() }),
+                ("📝 Sticky", NodeKind::StickyNote { text: String::new(), color: crate::model::StickyColor::Yellow }),
+                ("T Text",   NodeKind::Text { content: String::new() }),
+            ];
+            let canvas_pos = self.viewport.screen_to_canvas(picker_pos);
+            let mut chosen: Option<NodeKind> = None;
+            let mut close = false;
+            egui::Window::new("##shape_picker")
+                .title_bar(false)
+                .resizable(false)
+                .collapsible(false)
+                .fixed_pos(picker_pos)
+                .frame(egui::Frame {
+                    fill: SURFACE0,
+                    inner_margin: egui::Margin::same(8),
+                    stroke: egui::Stroke::new(1.0, SURFACE1),
+                    corner_radius: egui::CornerRadius::same(8),
+                    ..Default::default()
+                })
+                .show(ctx, |ui| {
+                    ui.label(egui::RichText::new("Insert node").size(10.0).color(TEXT_DIM));
+                    ui.add_space(4.0);
+                    for (label, kind) in shapes {
+                        if ui.add(
+                            egui::Button::new(egui::RichText::new(*label).size(12.0))
+                                .min_size(egui::vec2(110.0, 22.0))
+                        ).clicked() {
+                            chosen = Some(kind.clone());
+                            close = true;
+                        }
+                    }
+                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) { close = true; }
+                    if ui.ctx().pointer_latest_pos().map_or(false, |p| {
+                        !ui.ctx().is_pointer_over_area()
+                    }) { close = true; }
+                });
+            if let Some(kind) = chosen {
+                let w = 120.0_f32;
+                let h = 70.0_f32;
+                let pos = egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0);
+                let mut node = crate::model::Node {
+                    id: NodeId::new(),
+                    kind,
+                    position: [pos.x, pos.y],
+                    size: [w, h],
+                    z_offset: 0.0,
+                    style: crate::model::NodeStyle::default(),
+                    pinned: false,
+                    tag: None,
+                };
+                let id = node.id;
+                self.document.nodes.push(node);
+                self.selection.select_node(id);
+                self.focus_label_edit = true;
+                self.history.push(&self.document);
+                self.status_message = Some(("Node inserted".to_string(), std::time::Instant::now()));
+            }
+            if close { self.shape_picker = None; }
+        }
+
         // Keyboard shortcuts panel
         if self.show_shortcuts_panel {
             let mut open = self.show_shortcuts_panel;
@@ -307,6 +397,10 @@ impl eframe::App for FlowchartApp {
                         ("⌘C / ⌘V", "Copy / Paste"),
                         ("⌘D", "Duplicate"),
                         ("⌘A", "Select all"),
+                        ("O", "Toggle bird's eye overview"),
+                        ("N", "Insert shape picker"),
+                        ("R / C / D", "Quick-create Rect / Circle / Diamond"),
+                        ("⌘L", "Auto-layout (hierarchical)"),
                         ("⌘1", "Fit to content"),
                         ("⌘2", "Zoom to selection"),
                         ("⌘= / ⌘-", "Zoom in / out"),

@@ -14,7 +14,7 @@ impl FlowchartApp {
 
         painter.rect_filled(canvas_rect, CornerRadius::ZERO, CANVAS_BG);
 
-        if self.show_grid {
+        if self.show_grid && self.bg_pattern != super::BgPattern::None {
             self.draw_grid(&painter, canvas_rect);
         }
 
@@ -121,6 +121,25 @@ impl FlowchartApp {
                         }
                         ui.close_menu();
                     }
+                    // Quick tag submenu
+                    ui.menu_button("🏷 Tag…", |ui| {
+                        let tags = [
+                            (None, "None"),
+                            (Some(crate::model::NodeTag::Critical), "🔴 Critical"),
+                            (Some(crate::model::NodeTag::Warning),  "🟡 Warning"),
+                            (Some(crate::model::NodeTag::Ok),       "🟢 OK"),
+                            (Some(crate::model::NodeTag::Info),     "🔵 Info"),
+                        ];
+                        for (variant, label) in tags {
+                            if ui.button(label).clicked() {
+                                if let Some(n) = self.document.find_node_mut(&node_id) {
+                                    n.tag = variant;
+                                }
+                                self.history.push(&self.document);
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.separator();
                     if ui.button("🗑 Delete").clicked() {
                         self.document.remove_node(&node_id);
@@ -249,12 +268,18 @@ impl FlowchartApp {
             }
         }
 
+        // --- Rulers ---
+        if self.show_grid {
+            self.draw_rulers(&painter, canvas_rect);
+        }
+
         // --- Previews ---
         self.draw_alignment_guides(&painter, canvas_rect);
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
         self.draw_node_tooltip(&painter, hover_pos, canvas_rect);
+        self.draw_edge_tooltip(&painter, hover_pos, canvas_rect, &node_idx);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
@@ -340,6 +365,16 @@ impl FlowchartApp {
                 self.drag = DragState::DraggingNode {
                     start_positions,
                     start_z_offsets: vec![],
+                    start_mouse: canvas_pos,
+                };
+            } else if let Some(edge_id) = self.hit_test_bend_handle(mouse) {
+                // Drag the curve bend handle of a selected edge
+                let bend = self.document.find_edge(&edge_id)
+                    .map(|e| e.style.curve_bend)
+                    .unwrap_or(0.0);
+                self.drag = DragState::DraggingEdgeBend {
+                    edge_id,
+                    start_bend: bend,
                     start_mouse: canvas_pos,
                 };
             } else if let Some(edge_id) = self.hit_test_edge(canvas_pos) {
@@ -440,6 +475,29 @@ impl FlowchartApp {
                     }
                 }
             }
+            DragState::DraggingEdgeBend { edge_id, start_bend, start_mouse } => {
+                let canvas_mouse = self.viewport.screen_to_canvas(mouse);
+                let edge_id = *edge_id;
+                let start_bend = *start_bend;
+                let start_mouse = *start_mouse;
+                // Project drag delta onto perpendicular of the edge direction
+                if let Some(edge) = self.document.find_edge(&edge_id) {
+                    let src = self.document.find_node(&edge.source.node_id)
+                        .map(|n| n.port_position(edge.source.side));
+                    let tgt = self.document.find_node(&edge.target.node_id)
+                        .map(|n| n.port_position(edge.target.side));
+                    if let (Some(s), Some(t)) = (src, tgt) {
+                        let dir = if (t - s).length() > 1.0 { (t - s).normalized() } else { Vec2::X };
+                        let perp = Vec2::new(-dir.y, dir.x);
+                        let delta = canvas_mouse - start_mouse;
+                        let bend_delta = delta.dot(perp);
+                        let edge_id = edge_id;
+                        if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+                            edge.style.curve_bend = start_bend + bend_delta;
+                        }
+                    }
+                }
+            }
             DragState::BoxSelect { .. } | DragState::None => {}
         }
     }
@@ -456,7 +514,9 @@ impl FlowchartApp {
         }
         if let Some(mouse) = pointer_pos {
             match &self.drag {
-                DragState::DraggingNode { .. } | DragState::ResizingNode { .. } => {
+                DragState::DraggingNode { .. }
+                | DragState::ResizingNode { .. }
+                | DragState::DraggingEdgeBend { .. } => {
                     self.history.push(&self.document);
                 }
                 DragState::CreatingEdge { source, .. } => {
@@ -541,6 +601,7 @@ impl FlowchartApp {
                 egui::CursorIcon::Crosshair
             }
             DragState::ResizingNode { handle, .. } => Self::resize_cursor(*handle),
+            DragState::DraggingEdgeBend { .. } => egui::CursorIcon::ResizeNeSw,
             DragState::None => {
                 if self.space_held {
                     egui::CursorIcon::Grab
@@ -798,6 +859,53 @@ impl FlowchartApp {
 
     // --- Node tooltip ---
 
+    fn draw_edge_tooltip(
+        &self,
+        painter: &egui::Painter,
+        hover_pos: Option<Pos2>,
+        canvas_rect: Rect,
+        node_idx: &std::collections::HashMap<NodeId, usize>,
+    ) {
+        let Some(mouse) = hover_pos else { return };
+        if !canvas_rect.contains(mouse) { return }
+
+        // Don't show edge tooltip if we're over a node
+        let canvas_pos = self.viewport.screen_to_canvas(mouse);
+        if self.document.node_at_pos(canvas_pos).is_some() { return; }
+
+        // Find hovered edge
+        let Some(edge_id) = self.hit_test_edge(canvas_pos) else { return };
+        let Some(edge) = self.document.find_edge(&edge_id) else { return };
+
+        let src_name = node_idx.get(&edge.source.node_id)
+            .and_then(|&i| self.document.nodes.get(i))
+            .map(|n| n.display_label())
+            .unwrap_or("?");
+        let tgt_name = node_idx.get(&edge.target.node_id)
+            .and_then(|&i| self.document.nodes.get(i))
+            .map(|n| n.display_label())
+            .unwrap_or("?");
+
+        let line = if edge.label.is_empty() {
+            format!("{} → {}", src_name, tgt_name)
+        } else {
+            format!("{} →[{}]→ {}", src_name, edge.label, tgt_name)
+        };
+
+        let font = egui::FontId::proportional(11.0);
+        let pad = 8.0;
+        let w = 220.0_f32;
+        let h = 26.0_f32;
+        let mut tx = mouse.x + 12.0;
+        let mut ty = mouse.y - h - 6.0;
+        if tx + w > canvas_rect.max.x { tx = mouse.x - w - 12.0; }
+        if ty < canvas_rect.min.y { ty = mouse.y + 12.0; }
+        let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), Vec2::new(w, h));
+        painter.rect_filled(bg_rect, egui::CornerRadius::same(4), TOOLTIP_BG);
+        painter.rect_stroke(bg_rect, egui::CornerRadius::same(4), egui::Stroke::new(1.0, TOOLTIP_BORDER), egui::StrokeKind::Outside);
+        painter.text(Pos2::new(tx + pad, ty + h / 2.0), Align2::LEFT_CENTER, &line, font, TEXT_SECONDARY);
+    }
+
     fn draw_node_tooltip(&self, painter: &egui::Painter, hover_pos: Option<Pos2>, canvas_rect: Rect) {
         let Some(mouse) = hover_pos else { return };
         if !canvas_rect.contains(mouse) { return }
@@ -886,7 +994,13 @@ impl FlowchartApp {
                     Some(acc.map_or(n.rect(), |r| r.union(n.rect())))
                 });
             let size_str = bb.map(|r| format!("  {:.0}×{:.0}", r.width(), r.height())).unwrap_or_default();
-            format!("{} sel{}  ·  {}N {}E", parts.join("+"), size_str, n_nodes, n_edges)
+            // Show node-of-total when single node is selected
+            let node_idx_str = if n_sel_n == 1 && n_sel_e == 0 {
+                let sel_id = *self.selection.node_ids.iter().next().unwrap();
+                let idx = self.document.nodes.iter().position(|n| n.id == sel_id).unwrap_or(0);
+                format!("  ({}/{})", idx + 1, n_nodes)
+            } else { String::new() };
+            format!("{} sel{}{}  ·  {}N {}E", parts.join("+"), size_str, node_idx_str, n_nodes, n_edges)
         } else {
             format!("{}N  {}E", n_nodes, n_edges)
         };
@@ -917,6 +1031,95 @@ impl FlowchartApp {
         }
     }
 
+    // --- Rulers ---
+
+    fn draw_rulers(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        let zoom = self.viewport.zoom;
+        // Choose ruler tick interval: a nice round number in world space
+        let raw_interval = 100.0_f32 / zoom;
+        let magnitude = 10_f32.powf(raw_interval.log10().floor());
+        let normalized = raw_interval / magnitude;
+        let interval = if normalized < 1.5 { magnitude }
+            else if normalized < 3.5 { 2.0 * magnitude }
+            else { 5.0 * magnitude };
+        let interval_screen = interval * zoom;
+        if interval_screen < 20.0 { return; }
+
+        let ruler_h = 12.0_f32;
+        let ruler_color = SURFACE0;
+        let tick_color = TEXT_DIM;
+        let label_font = egui::FontId::proportional(8.5);
+
+        // Horizontal ruler along top
+        painter.rect_filled(
+            Rect::from_min_size(canvas_rect.min, Vec2::new(canvas_rect.width(), ruler_h)),
+            egui::CornerRadius::ZERO, ruler_color,
+        );
+
+        // Vertical ruler along left
+        painter.rect_filled(
+            Rect::from_min_size(canvas_rect.min, Vec2::new(ruler_h, canvas_rect.height())),
+            egui::CornerRadius::ZERO, ruler_color,
+        );
+
+        // Horizontal ticks
+        let world_start_x = ((canvas_rect.min.x - self.viewport.offset[0]) / zoom / interval).floor() * interval;
+        let mut wx = world_start_x;
+        while self.viewport.canvas_to_screen(Pos2::new(wx, 0.0)).x < canvas_rect.max.x {
+            let sx = self.viewport.canvas_to_screen(Pos2::new(wx, 0.0)).x;
+            if sx > canvas_rect.min.x + ruler_h {
+                let is_major = (wx / interval).round() as i32 % 5 == 0;
+                let tick_h = if is_major { ruler_h } else { ruler_h * 0.5 };
+                painter.line_segment(
+                    [Pos2::new(sx, canvas_rect.min.y), Pos2::new(sx, canvas_rect.min.y + tick_h)],
+                    egui::Stroke::new(0.5, tick_color),
+                );
+                if is_major {
+                    painter.text(
+                        Pos2::new(sx + 2.0, canvas_rect.min.y + 1.0),
+                        Align2::LEFT_TOP,
+                        &format!("{}", wx as i32),
+                        label_font.clone(),
+                        tick_color,
+                    );
+                }
+            }
+            wx += interval;
+        }
+
+        // Vertical ticks
+        let world_start_y = ((canvas_rect.min.y - self.viewport.offset[1]) / zoom / interval).floor() * interval;
+        let mut wy = world_start_y;
+        while self.viewport.canvas_to_screen(Pos2::new(0.0, wy)).y < canvas_rect.max.y {
+            let sy = self.viewport.canvas_to_screen(Pos2::new(0.0, wy)).y;
+            if sy > canvas_rect.min.y + ruler_h {
+                let is_major = (wy / interval).round() as i32 % 5 == 0;
+                let tick_w = if is_major { ruler_h } else { ruler_h * 0.5 };
+                painter.line_segment(
+                    [Pos2::new(canvas_rect.min.x, sy), Pos2::new(canvas_rect.min.x + tick_w, sy)],
+                    egui::Stroke::new(0.5, tick_color),
+                );
+                if is_major {
+                    // Rotate text 90° by drawing char by char is complex; just draw a short number
+                    painter.text(
+                        Pos2::new(canvas_rect.min.x + 1.0, sy - 1.0),
+                        Align2::LEFT_BOTTOM,
+                        &format!("{}", wy as i32),
+                        label_font.clone(),
+                        tick_color,
+                    );
+                }
+            }
+            wy += interval;
+        }
+
+        // Corner box
+        painter.rect_filled(
+            Rect::from_min_size(canvas_rect.min, Vec2::splat(ruler_h)),
+            egui::CornerRadius::ZERO, SURFACE1,
+        );
+    }
+
     // --- Grid ---
 
     fn draw_grid(&self, painter: &egui::Painter, canvas_rect: Rect) {
@@ -940,14 +1143,87 @@ impl FlowchartApp {
         let start_x = canvas_rect.min.x + offset_x;
         let start_y = canvas_rect.min.y + offset_y;
 
-        let mut x = start_x;
-        while x < canvas_rect.max.x {
-            let mut y = start_y;
-            while y < canvas_rect.max.y {
-                painter.circle_filled(Pos2::new(x, y), 0.8, GRID_COLOR);
-                y += grid_screen;
+        // Major grid every 5 minor cells
+        let major_every = 5_i32;
+        let major_grid_screen = grid_screen * major_every as f32;
+        let major_offset_x = self.viewport.offset[0] % major_grid_screen;
+        let major_offset_y = self.viewport.offset[1] % major_grid_screen;
+        let major_start_x = canvas_rect.min.x + major_offset_x;
+        let major_start_y = canvas_rect.min.y + major_offset_y;
+
+        match self.bg_pattern {
+            super::BgPattern::None => {}
+            super::BgPattern::Dots => {
+                // Minor dots
+                let mut xi = 0_i32;
+                let mut x = start_x;
+                while x < canvas_rect.max.x {
+                    let mut yi = 0_i32;
+                    let mut y = start_y;
+                    while y < canvas_rect.max.y {
+                        let is_major = (xi % major_every == 0) && (yi % major_every == 0);
+                        let (r, c) = if is_major { (1.8, GRID_MAJOR_COLOR) } else { (0.8, GRID_COLOR) };
+                        painter.circle_filled(Pos2::new(x, y), r, c);
+                        y += grid_screen;
+                        yi += 1;
+                    }
+                    x += grid_screen;
+                    xi += 1;
+                }
             }
-            x += grid_screen;
+            super::BgPattern::Lines => {
+                // Horizontal lines with major emphasis
+                let mut y = start_y;
+                let mut yi = 0_i32;
+                while y < canvas_rect.max.y {
+                    let is_major = yi % major_every == 0;
+                    let stroke = if is_major {
+                        egui::Stroke::new(0.7, GRID_MAJOR_COLOR)
+                    } else {
+                        egui::Stroke::new(0.4, GRID_COLOR)
+                    };
+                    painter.line_segment(
+                        [Pos2::new(canvas_rect.min.x, y), Pos2::new(canvas_rect.max.x, y)],
+                        stroke,
+                    );
+                    y += grid_screen;
+                    yi += 1;
+                }
+            }
+            super::BgPattern::Crosshatch => {
+                let mut y = start_y;
+                let mut yi = 0_i32;
+                while y < canvas_rect.max.y {
+                    let is_major = yi % major_every == 0;
+                    let stroke = if is_major {
+                        egui::Stroke::new(0.7, GRID_MAJOR_COLOR)
+                    } else {
+                        egui::Stroke::new(0.4, GRID_COLOR)
+                    };
+                    painter.line_segment(
+                        [Pos2::new(canvas_rect.min.x, y), Pos2::new(canvas_rect.max.x, y)],
+                        stroke,
+                    );
+                    y += grid_screen;
+                    yi += 1;
+                }
+                let mut x = start_x;
+                let mut xi = 0_i32;
+                while x < canvas_rect.max.x {
+                    let is_major = xi % major_every == 0;
+                    let stroke = if is_major {
+                        egui::Stroke::new(0.7, GRID_MAJOR_COLOR)
+                    } else {
+                        egui::Stroke::new(0.4, GRID_COLOR)
+                    };
+                    painter.line_segment(
+                        [Pos2::new(x, canvas_rect.min.y), Pos2::new(x, canvas_rect.max.y)],
+                        stroke,
+                    );
+                    x += grid_screen;
+                    xi += 1;
+                }
+            }
         }
     }
 
@@ -1179,10 +1455,27 @@ impl FlowchartApp {
         };
 
         for node in &self.document.nodes {
-            let center = node.rect().center();
-            let screen_pt = map_point(center.x, center.y);
-            if minimap_rect.contains(screen_pt) {
-                painter.circle_filled(screen_pt, 2.5, MINIMAP_NODE);
+            let r = node.rect();
+            let min_pt = map_point(r.min.x, r.min.y);
+            let max_pt = map_point(r.max.x, r.max.y);
+            let mini_rect = Rect::from_two_pos(min_pt, max_pt);
+            let is_selected = self.selection.contains_node(&node.id);
+            // Tag color or default minimap color
+            let node_color = if is_selected {
+                ACCENT
+            } else if let Some(tag) = node.tag {
+                to_color32(tag.color())
+            } else {
+                MINIMAP_NODE
+            };
+            let cr_val = (mini_rect.width().min(mini_rect.height()) * 0.2) as u8;
+            if mini_rect.area() > 2.0 {
+                painter.rect_filled(mini_rect, egui::CornerRadius::same(cr_val), node_color);
+            } else {
+                let center = mini_rect.center();
+                if minimap_rect.contains(center) {
+                    painter.circle_filled(center, if is_selected { 3.5 } else { 2.0 }, node_color);
+                }
             }
         }
 

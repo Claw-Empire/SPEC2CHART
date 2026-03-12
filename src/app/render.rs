@@ -41,6 +41,18 @@ impl FlowchartApp {
             }
         }
 
+        // Description indicator (small dot in bottom-right when node has a description)
+        if self.viewport.zoom > 0.4 {
+            let has_desc = match &node.kind {
+                NodeKind::Shape { description, .. } => !description.is_empty(),
+                _ => false,
+            };
+            if has_desc {
+                let dot_pos = Pos2::new(screen_rect.max.x - 5.0, screen_rect.max.y - 5.0);
+                painter.circle_filled(dot_pos, 3.5 * self.viewport.zoom.sqrt(), ACCENT.gamma_multiply(0.6));
+            }
+        }
+
         // Edge connection count badge (shown when hovered)
         if is_hovered && self.viewport.zoom > 0.5 {
             let conn_count = self.document.edges.iter()
@@ -53,6 +65,42 @@ impl FlowchartApp {
                 painter.circle_filled(badge_pos, badge_r, ACCENT);
                 painter.text(badge_pos, Align2::CENTER_CENTER, &badge_text,
                     FontId::proportional(badge_r * 1.2), Color32::BLACK);
+            }
+        }
+
+        // Node tag badge (top-left pill)
+        if let Some(tag) = node.tag {
+            if self.viewport.zoom > 0.35 {
+                let tag_color = to_color32(tag.color());
+                let label = tag.label();
+                let font_size = 8.5 * self.viewport.zoom.sqrt();
+                let pad_x = 4.0 * self.viewport.zoom.sqrt();
+                let pad_y = 2.0 * self.viewport.zoom.sqrt();
+                // Draw tag pill or dot depending on zoom
+                if font_size > 4.0 {
+                    let text_w = font_size * label.len() as f32 * 0.55;
+                    let pill_h = font_size + pad_y * 2.0;
+                    let pill_w = text_w + pad_x * 2.0;
+                    let pill_rect = Rect::from_min_size(
+                        Pos2::new(screen_rect.min.x + 4.0, screen_rect.min.y + 4.0),
+                        Vec2::new(pill_w, pill_h),
+                    );
+                    painter.rect_filled(pill_rect, CornerRadius::same(pill_h as u8 / 2), tag_color);
+                    painter.text(
+                        pill_rect.center(),
+                        Align2::CENTER_CENTER,
+                        label,
+                        FontId::proportional(font_size),
+                        Color32::BLACK,
+                    );
+                } else {
+                    // Tiny dot
+                    painter.circle_filled(
+                        Pos2::new(screen_rect.min.x + 6.0, screen_rect.min.y + 6.0),
+                        4.0 * self.viewport.zoom.sqrt(),
+                        tag_color,
+                    );
+                }
             }
         }
 
@@ -512,7 +560,16 @@ impl FlowchartApp {
 
         // Control points (used for both hover detection and drawing)
         let offset = 60.0 * self.viewport.zoom;
-        let (cp1, cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+        let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+
+        // Apply curve bend — perpendicular offset proportional to zoom
+        if edge.style.curve_bend.abs() > 0.1 {
+            let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
+            let perp = Vec2::new(-dir.y, dir.x);
+            let bend_screen = edge.style.curve_bend * self.viewport.zoom;
+            cp1 = cp1 + perp * bend_screen;
+            cp2 = cp2 + perp * bend_screen;
+        }
 
         // Hover detection: check if cursor is close to bezier curve
         let is_hovered = !is_selected && hover_canvas_pos.map(|hp| {
@@ -634,7 +691,7 @@ impl FlowchartApp {
                 width,
             );
         } else {
-            self.draw_arrow_head(painter, cp2, tgt, edge_color, width);
+            self.draw_arrow_head(painter, cp2, tgt, edge_color, width, edge.style.arrow_head);
         }
 
         // Edge label
@@ -664,6 +721,29 @@ impl FlowchartApp {
                     edge_color,
                 );
             }
+        }
+
+        // Direction tick-marks at 25% and 75% along selected edges
+        if is_selected && !edge.style.orthogonal {
+            for t in [0.25_f32, 0.75] {
+                let p = cubic_bezier_point(src, cp1, cp2, tgt, t);
+                // Derivative direction: forward difference
+                let p_next = cubic_bezier_point(src, cp1, cp2, tgt, (t + 0.02).min(1.0));
+                let dir = (p_next - p).normalized();
+                let perp = Vec2::new(-dir.y, dir.x);
+                let tick_len = 5.0 * self.viewport.zoom.sqrt();
+                let tick_stroke = Stroke::new(width * 0.8, edge_color.gamma_multiply(0.6));
+                painter.line_segment([p + perp * tick_len, p - perp * tick_len], tick_stroke);
+            }
+        }
+
+        // Curve bend drag handle (shown on selected non-orthogonal edges)
+        if is_selected && !edge.style.orthogonal {
+            let handle_pos = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
+            let r = 5.0_f32;
+            painter.circle_filled(handle_pos, r + 2.0, ACCENT_GLOW);
+            painter.circle_filled(handle_pos, r, ACCENT);
+            painter.circle_stroke(handle_pos, r, Stroke::new(1.5, Color32::WHITE));
         }
 
         // Source/target text labels
@@ -768,7 +848,11 @@ impl FlowchartApp {
         to: Pos2,
         color: Color32,
         width: f32,
+        style: ArrowHead,
     ) {
+        if style == ArrowHead::None {
+            return;
+        }
         let dir = (to - from).normalized();
         if dir.length() < 0.01 {
             return;
@@ -776,16 +860,33 @@ impl FlowchartApp {
         let arrow_len = 10.0 * self.viewport.zoom.sqrt();
         let arrow_width = 6.0 * self.viewport.zoom.sqrt();
         let perp = Vec2::new(-dir.y, dir.x);
-
         let tip = to;
-        let left = tip - dir * arrow_len + perp * arrow_width;
-        let right = tip - dir * arrow_len - perp * arrow_width;
 
-        painter.add(egui::Shape::convex_polygon(
-            vec![tip, left, right],
-            color,
-            Stroke::new(width * 0.5, color),
-        ));
+        match style {
+            ArrowHead::Filled => {
+                let left = tip - dir * arrow_len + perp * arrow_width;
+                let right = tip - dir * arrow_len - perp * arrow_width;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![tip, left, right],
+                    color,
+                    Stroke::new(width * 0.5, color),
+                ));
+            }
+            ArrowHead::Open => {
+                let left = tip - dir * arrow_len + perp * arrow_width;
+                let right = tip - dir * arrow_len - perp * arrow_width;
+                let stroke = Stroke::new(width.max(1.5), color);
+                painter.line_segment([left, tip], stroke);
+                painter.line_segment([right, tip], stroke);
+            }
+            ArrowHead::Circle => {
+                let r = arrow_width;
+                let center = tip - dir * r;
+                painter.circle_filled(center, r, color);
+                painter.circle_stroke(center, r, Stroke::new(width * 0.5, color));
+            }
+            ArrowHead::None => {}
+        }
     }
 
     pub(crate) fn draw_resize_handles(&self, painter: &egui::Painter, screen_rect: Rect) {

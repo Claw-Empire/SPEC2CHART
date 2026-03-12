@@ -53,6 +53,33 @@ impl FlowchartApp {
             self.history.push(&self.document);
         }
 
+        // Cmd+Shift+C = copy style of selected node
+        let cmd_shift = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.matches_exact(cmd_shift)) {
+            if let Some(id) = self.selection.node_ids.iter().next() {
+                if let Some(node) = self.document.find_node(id) {
+                    self.style_clipboard = Some(node.style.clone());
+                    self.status_message = Some(("Style copied".to_string(), std::time::Instant::now()));
+                }
+            }
+        }
+
+        // Cmd+Shift+V = paste style to selected nodes
+        if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.matches_exact(cmd_shift)) {
+            if let Some(style) = self.style_clipboard.clone() {
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        node.style = style.clone();
+                    }
+                }
+                if !ids.is_empty() {
+                    self.history.push(&self.document);
+                    self.status_message = Some(("Style pasted".to_string(), std::time::Instant::now()));
+                }
+            }
+        }
+
         // Cmd+C = copy selected nodes
         if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.matches_exact(cmd)) {
             self.clipboard.clear();
@@ -89,10 +116,56 @@ impl FlowchartApp {
         // V = select tool (skip when editing text)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.is_none()) {
             self.tool = super::Tool::Select;
+            self.shape_picker = None;
         }
         // E = connect tool (skip when editing text)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.is_none()) {
             self.tool = super::Tool::Connect;
+            self.shape_picker = None;
+        }
+        // N = open shape picker at pointer (skip when editing text)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.is_none()) {
+            let pos = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(ctx.screen_rect().center());
+            self.shape_picker = Some(pos);
+        }
+
+        // Quick shape creation shortcuts (skip when editing text)
+        let shape_to_create: Option<crate::model::NodeShape> = if !any_text_focused {
+            if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.is_none()) {
+                Some(crate::model::NodeShape::Rectangle)
+            } else if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.is_none()) {
+                Some(crate::model::NodeShape::Circle)
+            } else if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.is_none()) {
+                Some(crate::model::NodeShape::Diamond)
+            } else {
+                None
+            }
+        } else { None };
+
+        if let Some(shape) = shape_to_create {
+            let canvas_center = {
+                let c = self.canvas_rect.center();
+                self.viewport.screen_to_canvas(c)
+            };
+            let mut node = crate::model::Node::new(shape, canvas_center);
+            let w = node.size[0]; let h = node.size[1];
+            node.set_pos(egui::Pos2::new(canvas_center.x - w / 2.0, canvas_center.y - h / 2.0));
+            let id = node.id;
+            self.document.nodes.push(node);
+            self.selection.select_node(id);
+            self.focus_label_edit = true;
+            self.history.push(&self.document);
+            let name = match shape {
+                crate::model::NodeShape::Rectangle => "Rectangle",
+                crate::model::NodeShape::Circle => "Circle",
+                crate::model::NodeShape::Diamond => "Diamond",
+                _ => "Shape",
+            };
+            self.status_message = Some((format!("{name} created"), std::time::Instant::now()));
+        }
+        // Escape also closes shape picker
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.shape_picker = None;
         }
 
         // Cmd+Shift+A = select connected nodes
@@ -215,6 +288,81 @@ impl FlowchartApp {
         // ? = toggle shortcuts panel
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F1) || (i.key_pressed(Key::Slash) && i.modifiers.shift)) {
             self.show_shortcuts_panel = !self.show_shortcuts_panel;
+        }
+
+        // O = toggle overview (bird's eye) mode
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.is_none()) {
+            if let Some(saved) = self.saved_viewport.take() {
+                // Restore
+                self.viewport = saved;
+                self.status_message = Some(("Overview Off".to_string(), std::time::Instant::now()));
+            } else {
+                // Save and zoom out
+                self.saved_viewport = Some(self.viewport.clone());
+                self.fit_to_content();
+                // Zoom out further for "bird's eye" feel
+                let extra = 0.6;
+                let cx = self.canvas_rect.center();
+                self.viewport.offset[0] = cx.x - (cx.x - self.viewport.offset[0]) / extra;
+                self.viewport.offset[1] = cx.y - (cx.y - self.viewport.offset[1]) / extra;
+                self.viewport.zoom *= extra;
+                self.viewport.zoom = self.viewport.zoom.clamp(0.05, 10.0);
+                self.status_message = Some(("Overview Mode — press O to return".to_string(), std::time::Instant::now()));
+            }
+        }
+
+        // Cmd+L = auto-layout (hierarchical)
+        if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) {
+            // Reset all non-pinned node positions so the layout runs on all of them
+            for node in self.document.nodes.iter_mut() {
+                if !node.pinned {
+                    node.position = [0.0, 0.0];
+                }
+            }
+            crate::specgraph::layout::hierarchical_layout(&mut self.document);
+            self.history.push(&self.document);
+            self.pending_fit = true;
+            self.status_message = Some(("Auto-layout applied".to_string(), std::time::Instant::now()));
+        }
+
+        // Tab / Shift+Tab = cycle through nodes
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Tab)) {
+            let n = self.document.nodes.len();
+            if n > 0 {
+                let shift = ctx.input(|i| i.modifiers.shift);
+                let current = self.selection.node_ids.iter().next().copied()
+                    .and_then(|id| self.document.nodes.iter().position(|n| n.id == id));
+                let next_idx = match current {
+                    None => 0,
+                    Some(i) if shift => (i + n - 1) % n,
+                    Some(i) => (i + 1) % n,
+                };
+                let next_id = self.document.nodes[next_idx].id;
+                self.selection.select_node(next_id);
+                // Pan to show selected node
+                let node = &self.document.nodes[next_idx];
+                let c = self.canvas_rect.center();
+                let p = node.pos();
+                self.viewport.offset[0] = c.x - p.x * self.viewport.zoom;
+                self.viewport.offset[1] = c.y - p.y * self.viewport.zoom;
+            }
+        }
+
+        // P = cycle background pattern
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.is_none()) {
+            self.bg_pattern = match self.bg_pattern {
+                super::BgPattern::Dots       => super::BgPattern::Lines,
+                super::BgPattern::Lines      => super::BgPattern::Crosshatch,
+                super::BgPattern::Crosshatch => super::BgPattern::None,
+                super::BgPattern::None       => super::BgPattern::Dots,
+            };
+            let name = match self.bg_pattern {
+                super::BgPattern::Dots       => "Dots",
+                super::BgPattern::Lines      => "Lines",
+                super::BgPattern::Crosshatch => "Crosshatch",
+                super::BgPattern::None       => "No pattern",
+            };
+            self.status_message = Some((name.to_string(), std::time::Instant::now()));
         }
 
         // G = toggle grid

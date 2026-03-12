@@ -5,6 +5,7 @@ use egui::Color32;
 // Canvas
 pub const CANVAS_BG: Color32 = Color32::from_rgb(30, 30, 46);
 pub const GRID_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 50);
+pub const GRID_MAJOR_COLOR: Color32 = Color32::from_rgba_premultiplied(88, 91, 112, 90);
 pub const SELECTION_COLOR: Color32 = Color32::from_rgb(137, 180, 250);
 pub const PORT_FILL: Color32 = Color32::from_rgb(49, 50, 68);
 pub const BOX_SELECT_FILL: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 20);

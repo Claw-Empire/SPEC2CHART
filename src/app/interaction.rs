@@ -45,6 +45,37 @@ impl FlowchartApp {
         None
     }
 
+    /// Returns the EdgeId if `screen_pos` is near the bend handle of a selected, non-orthogonal edge.
+    pub(crate) fn hit_test_bend_handle(&self, screen_pos: Pos2) -> Option<EdgeId> {
+        if self.selection.edge_ids.len() != 1 {
+            return None;
+        }
+        let edge_id = *self.selection.edge_ids.iter().next()?;
+        let edge = self.document.find_edge(&edge_id)?;
+        if edge.style.orthogonal {
+            return None;
+        }
+        let src_node = self.document.find_node(&edge.source.node_id)?;
+        let tgt_node = self.document.find_node(&edge.target.node_id)?;
+        let src = self.viewport.canvas_to_screen(src_node.port_position(edge.source.side));
+        let tgt = self.viewport.canvas_to_screen(tgt_node.port_position(edge.target.side));
+        let offset = 60.0 * self.viewport.zoom;
+        let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+        if edge.style.curve_bend.abs() > 0.1 {
+            let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
+            let perp = Vec2::new(-dir.y, dir.x);
+            let bend_screen = edge.style.curve_bend * self.viewport.zoom;
+            cp1 = cp1 + perp * bend_screen;
+            cp2 = cp2 + perp * bend_screen;
+        }
+        let handle_pos = super::interaction::cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
+        if (screen_pos - handle_pos).length() < 12.0 {
+            Some(edge_id)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn hit_test_resize_handle(
         &self,
         screen_pos: Pos2,
