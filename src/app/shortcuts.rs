@@ -491,6 +491,67 @@ impl FlowchartApp {
             }
         }
 
+        // Shift+H = distribute selected nodes horizontally with equal gaps
+        // Shift+V = distribute selected nodes vertically with equal gaps
+        if !any_text_focused && self.selection.node_ids.len() >= 3 {
+            let distribute_h = ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.shift && !i.modifiers.command);
+            let distribute_v = ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.shift && !i.modifiers.command);
+
+            if distribute_h || distribute_v {
+                let mut selected: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                if distribute_h {
+                    // Sort by X position
+                    selected.sort_by(|a, b| {
+                        let xa = self.document.find_node(a).map_or(0.0, |n| n.position[0]);
+                        let xb = self.document.find_node(b).map_or(0.0, |n| n.position[0]);
+                        xa.partial_cmp(&xb).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    // Compute total width of nodes and available span
+                    let first = self.document.find_node(selected.first().unwrap()).map(|n| n.pos().x).unwrap_or(0.0);
+                    let last_node = self.document.find_node(selected.last().unwrap());
+                    let last_right = last_node.map_or(0.0, |n| n.pos().x + n.size[0]);
+                    let total_node_w: f32 = selected.iter()
+                        .filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.size[0])
+                        .sum();
+                    let span = last_right - first;
+                    let gap = (span - total_node_w) / (selected.len() - 1) as f32;
+                    let mut x_cursor = first;
+                    for id in &selected {
+                        if let Some(node) = self.document.find_node_mut(id) {
+                            node.position[0] = x_cursor;
+                            x_cursor += node.size[0] + gap;
+                        }
+                    }
+                } else {
+                    // Sort by Y position
+                    selected.sort_by(|a, b| {
+                        let ya = self.document.find_node(a).map_or(0.0, |n| n.position[1]);
+                        let yb = self.document.find_node(b).map_or(0.0, |n| n.position[1]);
+                        ya.partial_cmp(&yb).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let first = self.document.find_node(selected.first().unwrap()).map(|n| n.pos().y).unwrap_or(0.0);
+                    let last_node = self.document.find_node(selected.last().unwrap());
+                    let last_bot = last_node.map_or(0.0, |n| n.pos().y + n.size[1]);
+                    let total_node_h: f32 = selected.iter()
+                        .filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.size[1])
+                        .sum();
+                    let span = last_bot - first;
+                    let gap = (span - total_node_h) / (selected.len() - 1) as f32;
+                    let mut y_cursor = first;
+                    for id in &selected {
+                        if let Some(node) = self.document.find_node_mut(id) {
+                            node.position[1] = y_cursor;
+                            y_cursor += node.size[1] + gap;
+                        }
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some(("Distributed evenly".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Arrow keys = nudge selected nodes (1px; 10px with Shift)
         if !any_text_focused && !self.selection.node_ids.is_empty() {
             let shift = ctx.input(|i| i.modifiers.shift);
