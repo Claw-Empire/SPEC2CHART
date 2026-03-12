@@ -137,6 +137,9 @@ pub struct FlowchartApp {
     pub(crate) show_find_replace: bool,
     pub(crate) find_query: String,
     pub(crate) replace_query: String,
+    /// "Go to XY" overlay — type canvas coordinates to pan there
+    pub(crate) show_goto: bool,
+    pub(crate) goto_query: String,
     pub(crate) focus_mode: bool,
     pub(crate) canvas_locked: bool,
     /// Alignment guide lines computed during node drag: (is_horizontal, canvas_coord)
@@ -321,6 +324,8 @@ impl FlowchartApp {
             show_find_replace: false,
             find_query: String::new(),
             replace_query: String::new(),
+            show_goto: false,
+            goto_query: String::new(),
             focus_mode: false,
             canvas_locked: false,
             alignment_guides: Vec::new(),
@@ -410,6 +415,7 @@ impl eframe::App for FlowchartApp {
 
         self.draw_status_bar(ctx);
         self.draw_command_palette(ctx);
+        self.draw_goto_overlay(ctx);
 
         // Zoom change indicator: show a floating pill for 1.5s after zoom changes
         {

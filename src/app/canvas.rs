@@ -4723,6 +4723,63 @@ impl FlowchartApp {
         }
         if changed { self.history.push(&self.document); }
     }
+
+    /// "Go to XY" overlay — Shift+G pops up a small input: type "x, y" to pan there.
+    pub(crate) fn draw_goto_overlay(&mut self, ctx: &egui::Context) {
+        if !self.show_goto { return; }
+        // Close on Escape
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_goto = false;
+            self.goto_query.clear();
+            return;
+        }
+        let w = 220.0_f32;
+        let h = 44.0_f32;
+        let screen_center = ctx.screen_rect().center();
+        egui::Area::new(egui::Id::new("goto_overlay"))
+            .fixed_pos(egui::pos2(screen_center.x - w / 2.0, screen_center.y - h / 2.0 - 60.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(crate::app::theme::TOOLTIP_BG)
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .stroke(egui::Stroke::new(1.0, crate::app::theme::ACCENT.gamma_multiply(0.5)))
+                    .inner_margin(egui::Margin::symmetric(12, 10))
+                    .show(ui, |ui| {
+                        ui.set_min_width(w);
+                        ui.label(egui::RichText::new("Go to position (x, y)").size(11.0).color(crate::app::theme::TEXT_DIM));
+                        ui.add_space(4.0);
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut self.goto_query)
+                                .desired_width(w - 24.0)
+                                .hint_text("e.g. 200, -150")
+                                .font(egui::FontId::proportional(13.0)),
+                        );
+                        resp.request_focus();
+                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            // Parse "x, y" or "x y"
+                            let q = self.goto_query.replace(',', " ");
+                            let nums: Vec<f32> = q.split_whitespace()
+                                .filter_map(|s| s.parse::<f32>().ok())
+                                .collect();
+                            if nums.len() >= 2 {
+                                let (cx, cy) = (nums[0], nums[1]);
+                                let c = self.canvas_rect.center();
+                                self.pan_target = Some([
+                                    c.x - cx * self.viewport.zoom,
+                                    c.y - cy * self.viewport.zoom,
+                                ]);
+                                self.status_message = Some((
+                                    format!("Jumped to ({:.0}, {:.0})", cx, cy),
+                                    std::time::Instant::now(),
+                                ));
+                            }
+                            self.show_goto = false;
+                            self.goto_query.clear();
+                        }
+                    });
+            });
+    }
 }
 
 /// Format a canvas coordinate for ruler labels: suppress ".0" for integers.

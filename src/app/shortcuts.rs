@@ -743,6 +743,12 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // Shift+G = go to canvas position overlay
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.shift && !i.modifiers.command) {
+            self.show_goto = !self.show_goto;
+            if self.show_goto { self.goto_query.clear(); }
+        }
+
         // G = toggle grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;
