@@ -566,6 +566,22 @@ impl FlowchartApp {
             self.draw_presentation_spotlight(&painter, canvas_rect, pointer_pos);
         }
 
+        // Multi-node drag ghost: faint outlines at original positions when dragging 2+ nodes
+        if let DragState::DraggingNode { start_positions, .. } = &self.drag {
+            if start_positions.len() >= 2 {
+                let ghost_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 60));
+                for (node_id, orig_pos) in start_positions {
+                    if let Some(node) = self.document.find_node(node_id) {
+                        let screen_tl = self.viewport.canvas_to_screen(*orig_pos);
+                        let ghost_rect = Rect::from_min_size(screen_tl, node.size_vec() * self.viewport.zoom);
+                        if ghost_rect.intersects(canvas_rect) {
+                            painter.rect_stroke(ghost_rect, CornerRadius::same(4), ghost_stroke, StrokeKind::Outside);
+                        }
+                    }
+                }
+            }
+        }
+
         // Resize ghost: show original node rect when resizing
         if let DragState::ResizingNode { start_rect, .. } = &self.drag {
             let sr = *start_rect; // [x, y, w, h] in canvas space
