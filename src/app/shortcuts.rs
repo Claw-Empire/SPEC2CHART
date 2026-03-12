@@ -769,8 +769,10 @@ impl FlowchartApp {
                             if let Some(n) = self.document.find_node(&target_id) {
                                 let c = self.canvas_rect.center();
                                 let np = n.rect().center();
-                                self.viewport.offset[0] = c.x - np.x * self.viewport.zoom;
-                                self.viewport.offset[1] = c.y - np.y * self.viewport.zoom;
+                                self.pan_target = Some([
+                                    c.x - np.x * self.viewport.zoom,
+                                    c.y - np.y * self.viewport.zoom,
+                                ]);
                             }
                         }
                     }
