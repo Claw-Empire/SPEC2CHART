@@ -35,7 +35,7 @@ impl FlowchartApp {
             .exact_width(PROPERTIES_WIDTH)
             .frame(egui::Frame {
                 fill: MANTLE,
-                inner_margin: egui::Margin::same(0),
+                inner_margin: egui::Margin { left: 6, right: 10, top: 10, bottom: 8 },
                 stroke: Stroke::new(1.0, SURFACE1),
                 ..Default::default()
             })
@@ -65,9 +65,7 @@ impl FlowchartApp {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.add_space(4.0);
                         ui.with_layout(egui::Layout::top_down(egui::Align::Min).with_cross_justify(true), |ui| {
-                            ui.set_width(PROPERTIES_WIDTH - 12.0);
                             if total == 0 {
                                 self.draw_empty_selection(ui);
                             } else if total > 1 {
@@ -612,31 +610,38 @@ impl FlowchartApp {
             });
             ui.add_space(12.0);
 
-            // Style section
-            Self::draw_section_header(ui, "Style");
-            ui.add_space(4.0);
-            // Recent colors row — collect click result first, apply below after node borrow released
+            // Style section (collapsible)
+            // Recent colors: clone before borrow to avoid split-borrow issue inside closure
+            let recent_colors_snapshot = self.recent_colors.clone();
             let mut recent_color_pick: Option<[u8; 4]> = None;
-            if !self.recent_colors.is_empty() {
-                let recent = self.recent_colors.clone();
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(egui::RichText::new("Recent:").size(11.0).color(TEXT_DIM));
-                    for col in &recent {
-                        let c = to_color32(*col);
-                        let (r, painter) = ui.allocate_painter(egui::vec2(16.0, 16.0), egui::Sense::click());
-                        painter.rect_filled(r.rect, egui::CornerRadius::same(3), c);
-                        painter.rect_stroke(r.rect, egui::CornerRadius::same(3),
-                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255,255,255,30)),
-                            egui::StrokeKind::Inside);
-                        if r.clicked() { recent_color_pick = Some(*col); }
-                        r.on_hover_text(format!("#{:02X}{:02X}{:02X}", col[0], col[1], col[2]));
-                    }
-                });
+            let mut style_changed = false;
+            egui::CollapsingHeader::new(
+                egui::RichText::new("Style").size(11.0).color(TEXT_SECONDARY).strong()
+            )
+            .default_open(true)
+            .id_salt("prop_style")
+            .show(ui, |ui| {
                 ui.add_space(4.0);
-            }
-            if let Some(picked) = recent_color_pick {
-                node.style.fill_color = picked;
-            }
+                if !recent_colors_snapshot.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new("Recent:").size(11.0).color(TEXT_DIM));
+                        for col in &recent_colors_snapshot {
+                            let c = to_color32(*col);
+                            let (r, painter) = ui.allocate_painter(egui::vec2(16.0, 16.0), egui::Sense::click());
+                            painter.rect_filled(r.rect, egui::CornerRadius::same(3), c);
+                            painter.rect_stroke(r.rect, egui::CornerRadius::same(3),
+                                egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255,255,255,30)),
+                                egui::StrokeKind::Inside);
+                            if r.clicked() { recent_color_pick = Some(*col); }
+                            r.on_hover_text(format!("#{:02X}{:02X}{:02X}", col[0], col[1], col[2]));
+                        }
+                    });
+                    ui.add_space(4.0);
+                }
+                if let Some(picked) = recent_color_pick {
+                    node.style.fill_color = picked;
+                    style_changed = true;
+                }
             ui.horizontal(|ui| {
                 let mut c = to_color32(node.style.fill_color);
                 ui.label(egui::RichText::new("Fill").size(11.0).color(TEXT_DIM));
@@ -696,55 +701,66 @@ impl FlowchartApp {
             if ui.add(egui::Slider::new(&mut node_opacity, 0.0..=100.0).text("Node opacity").suffix("%")).changed() {
                 node.style.opacity = (node_opacity / 100.0).clamp(0.0, 1.0);
             }
-            ui.add_space(16.0);
-
-            // Dimensions
-            Self::draw_section_header(ui, "Dimensions");
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                for (label, w, h) in [("S", 80.0_f32, 50.0_f32), ("M", 150.0, 80.0), ("L", 240.0, 120.0)] {
-                    if ui.small_button(label).on_hover_text(format!("{}×{}", w as i32, h as i32)).clicked() {
-                        node.size[0] = w;
-                        node.size[1] = h;
-                    }
+            }); // end Style CollapsingHeader
+            // Apply recent color pick to recent_colors list (split borrow resolved)
+            if style_changed {
+                if let Some(col) = recent_color_pick {
+                    self.recent_colors.retain(|&x| x != col);
+                    self.recent_colors.insert(0, col);
+                    self.recent_colors.truncate(10);
                 }
-                // Fit size to content: estimate from label length and font size
-                let fit_label = match &node.kind {
-                    NodeKind::Shape { label, .. } => Some(label.clone()),
-                    NodeKind::StickyNote { text, .. } => Some(text.clone()),
-                    _ => None,
-                };
-                if let Some(text) = fit_label {
-                    let font_px = node.style.font_size;
-                    let ch_w = font_px * 0.6;
-                    let line_h = font_px * 1.4;
-                    let max_w = 200.0_f32;
-                    let chars_per_line = (max_w / ch_w).max(1.0) as usize;
-                    let lines = text.chars().count().div_ceil(chars_per_line).max(1);
-                    let pad = 20.0;
-                    let fit_w = ((text.chars().count().min(chars_per_line) as f32) * ch_w + pad * 2.0).max(80.0).min(max_w);
-                    let fit_h = (lines as f32 * line_h + pad * 2.0).max(40.0);
-                    if ui.small_button("⇲ Fit").on_hover_text("Resize to fit content").clicked() {
-                        node.size[0] = fit_w;
-                        node.size[1] = fit_h;
-                    }
-                }
-            });
-            ui.add_space(4.0);
-            ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
-            ui.add_space(4.0);
-            ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
-            ui.add_space(12.0);
+            }
+            ui.add_space(8.0);
 
-            // Position
-            Self::draw_section_header(ui, "Position");
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("X").size(11.0).color(TEXT_DIM));
-                ui.add(egui::DragValue::new(&mut node.position[0]).speed(1.0).suffix(" px"));
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("Y").size(11.0).color(TEXT_DIM));
-                ui.add(egui::DragValue::new(&mut node.position[1]).speed(1.0).suffix(" px"));
+            // Dimensions (collapsible)
+            egui::CollapsingHeader::new(
+                egui::RichText::new("Dimensions").size(11.0).color(TEXT_SECONDARY).strong()
+            )
+            .default_open(true)
+            .id_salt("prop_dimensions")
+            .show(ui, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    for (label, w, h) in [("S", 80.0_f32, 50.0_f32), ("M", 150.0, 80.0), ("L", 240.0, 120.0)] {
+                        if ui.small_button(label).on_hover_text(format!("{}×{}", w as i32, h as i32)).clicked() {
+                            node.size[0] = w;
+                            node.size[1] = h;
+                        }
+                    }
+                    let fit_label = match &node.kind {
+                        NodeKind::Shape { label, .. } => Some(label.clone()),
+                        NodeKind::StickyNote { text, .. } => Some(text.clone()),
+                        _ => None,
+                    };
+                    if let Some(text) = fit_label {
+                        let font_px = node.style.font_size;
+                        let ch_w = font_px * 0.6;
+                        let line_h = font_px * 1.4;
+                        let max_w = 200.0_f32;
+                        let chars_per_line = (max_w / ch_w).max(1.0) as usize;
+                        let lines = text.chars().count().div_ceil(chars_per_line).max(1);
+                        let pad = 20.0;
+                        let fit_w = ((text.chars().count().min(chars_per_line) as f32) * ch_w + pad * 2.0).max(80.0).min(max_w);
+                        let fit_h = (lines as f32 * line_h + pad * 2.0).max(40.0);
+                        if ui.small_button("⇲ Fit").on_hover_text("Resize to fit content").clicked() {
+                            node.size[0] = fit_w;
+                            node.size[1] = fit_h;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
+                ui.add_space(4.0);
+                ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
+                ui.add_space(4.0);
+                // Position inline
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("X").size(11.0).color(TEXT_DIM));
+                    ui.add(egui::DragValue::new(&mut node.position[0]).speed(1.0).suffix(" px"));
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Y").size(11.0).color(TEXT_DIM));
+                    ui.add(egui::DragValue::new(&mut node.position[1]).speed(1.0).suffix(" px"));
+                });
             });
         }
 
