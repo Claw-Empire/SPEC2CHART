@@ -173,8 +173,58 @@ impl FlowchartApp {
             ui.add_space(8.0);
         }
 
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new("Click a node or edge to edit properties").size(10.0).color(SURFACE1));
+        ui.add_space(8.0);
+        Self::draw_divider(ui);
+        ui.add_space(8.0);
+
+        // Keyboard shortcuts reference
+        Self::draw_section_header(ui, "SHORTCUTS");
+        ui.add_space(6.0);
+
+        let shortcut_groups: &[(&str, &[(&str, &str)])] = &[
+            ("Navigation", &[
+                ("V / E", "Select / Connect"),
+                ("Tab / ⇧Tab", "Cycle nodes"),
+                ("F", "Fit to content / Pres"),
+                ("⌘+ / ⌘-", "Zoom in / out"),
+                ("⌘0", "Reset zoom"),
+                ("H", "Heatmap overlay"),
+            ]),
+            ("Editing", &[
+                ("⌘Z / ⌘⇧Z", "Undo / Redo"),
+                ("⌘D", "Duplicate"),
+                ("⌘A", "Select all"),
+                ("Del / ⌫", "Delete"),
+                ("⌘C / ⌘V", "Copy / Paste"),
+                ("⌘L", "Lock / unlock"),
+            ]),
+            ("Layout", &[
+                ("⇧L", "Force-directed layout"),
+                ("⇧H / ⇧V", "Distribute H / V"),
+                ("⌘] / ⌘[", "Raise / lower Z"),
+                ("⌘⇧] / ⌘⇧[", "Front / Back"),
+                ("↑↓←→", "Navigate connected"),
+            ]),
+        ];
+
+        for (group_name, shortcuts) in shortcut_groups {
+            ui.label(egui::RichText::new(*group_name).size(10.0).color(TEXT_DIM).strong());
+            ui.add_space(3.0);
+            for (key, action) in *shortcuts {
+                ui.horizontal(|ui| {
+                    let key_text = egui::RichText::new(*key)
+                        .size(9.5)
+                        .monospace()
+                        .color(ACCENT)
+                        .background_color(Color32::from_rgba_unmultiplied(137, 180, 250, 15));
+                    ui.label(key_text);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new(*action).size(9.5).color(TEXT_DIM));
+                    });
+                });
+            }
+            ui.add_space(8.0);
+        }
     }
 
     fn draw_node_properties(&mut self, ui: &mut egui::Ui) {
