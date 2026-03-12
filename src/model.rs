@@ -486,6 +486,9 @@ pub struct EdgeStyle {
     /// When true, draw a wider, semi-transparent stroke beneath the edge for a neon glow
     #[serde(default)]
     pub glow: bool,
+    /// When true, animate the dash pattern to show flow direction
+    #[serde(default)]
+    pub animated: bool,
 }
 
 impl Default for EdgeStyle {
@@ -498,6 +501,7 @@ impl Default for EdgeStyle {
             arrow_head: ArrowHead::Filled,
             curve_bend: 0.0,
             glow: false,
+            animated: false,
         }
     }
 }

@@ -847,6 +847,9 @@ impl FlowchartApp {
                 ui.checkbox(&mut edge.style.orthogonal, egui::RichText::new("Orthogonal").size(11.0).color(TEXT_DIM));
                 ui.add_space(8.0);
                 ui.checkbox(&mut edge.style.glow, egui::RichText::new("Glow").size(11.0).color(TEXT_DIM));
+                ui.add_space(8.0);
+                ui.checkbox(&mut edge.style.animated, egui::RichText::new("Flow ▶").size(11.0).color(TEXT_DIM))
+                    .on_hover_text("Animate dashes to show data flow direction");
             });
             ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
             ui.add_space(4.0);

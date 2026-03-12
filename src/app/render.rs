@@ -752,18 +752,32 @@ impl FlowchartApp {
             painter.add(glow_shape2);
         }
 
-        if edge.style.dashed {
-            // Approximate dashed edge by sampling the bezier and drawing alternating segments
+        if edge.style.dashed || edge.style.animated {
+            // Approximate dashed/animated edge by sampling the bezier and drawing alternating segments
             let dash = 10.0 * self.viewport.zoom.sqrt();
             let gap = 6.0 * self.viewport.zoom.sqrt();
+            // For animated edges: shift the starting progress by time to create flow effect
+            let time_offset = if edge.style.animated {
+                let t = painter.ctx().input(|i| i.time) as f32;
+                painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+                let period = dash + gap;
+                (t * period * 1.5) % period
+            } else {
+                0.0
+            };
             let steps = 80;
-            let mut pts: Vec<egui::Pos2> = (0..=steps)
+            let pts: Vec<egui::Pos2> = (0..=steps)
                 .map(|i| cubic_bezier_point(src, cp1, cp2, tgt, i as f32 / steps as f32))
                 .collect();
-            let mut dist = 0.0_f32;
             let mut drawing = true;
             let mut seg_start = pts[0];
-            let mut progress = 0.0_f32;
+            let mut progress = time_offset;
+            // Skip initial gap for animated offset
+            if progress > 0.0 && progress < gap {
+                drawing = false;
+            } else if progress >= gap {
+                progress -= gap;
+            }
             for i in 1..pts.len() {
                 let seg_len = (pts[i] - pts[i - 1]).length();
                 let mut remaining = seg_len;
