@@ -530,6 +530,21 @@ impl FlowchartApp {
                         self.history.push(&self.document);
                         ui.close_menu();
                     }
+                    // Sync edge color to source node fill
+                    {
+                        let src_color = self.document.find_edge(&edge_id)
+                            .and_then(|e| self.document.find_node(&e.source.node_id))
+                            .map(|n| n.style.fill_color);
+                        if let Some(col) = src_color {
+                            if ui.button("🎨 Sync color to source node").clicked() {
+                                if let Some(e) = self.document.find_edge_mut(&edge_id) {
+                                    e.style.color = col;
+                                }
+                                self.history.push(&self.document);
+                                ui.close_menu();
+                            }
+                        }
+                    }
                     if ui.button("🗑 Delete edge").clicked() {
                         self.document.remove_edge(&edge_id);
                         self.selection.clear();
@@ -625,6 +640,22 @@ impl FlowchartApp {
                     if ui.button(snap_label).clicked() {
                         self.snap_to_grid = !self.snap_to_grid;
                         ui.close_menu();
+                    }
+                    if !self.document.edges.is_empty() {
+                        ui.separator();
+                        if ui.button("🎨 Sync all edge colors to source").clicked() {
+                            for i in 0..self.document.edges.len() {
+                                let src_id = self.document.edges[i].source.node_id;
+                                if let Some(col) = self.document.nodes.iter()
+                                    .find(|n| n.id == src_id)
+                                    .map(|n| n.style.fill_color)
+                                {
+                                    self.document.edges[i].style.color = col;
+                                }
+                            }
+                            self.history.push(&self.document);
+                            ui.close_menu();
+                        }
                     }
                 }
             }
