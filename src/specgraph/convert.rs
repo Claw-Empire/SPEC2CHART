@@ -324,6 +324,7 @@ fn shape_to_str(s: &NodeShape) -> &'static str {
         NodeShape::Diamond => "diamond",
         NodeShape::Circle => "circle",
         NodeShape::Parallelogram => "parallelogram",
+        NodeShape::Hexagon => "hexagon",
         NodeShape::Connector => "connector",
     }
 }
@@ -335,6 +336,7 @@ fn str_to_shape(s: &str) -> Result<NodeShape, String> {
         "diamond" => Ok(NodeShape::Diamond),
         "circle" => Ok(NodeShape::Circle),
         "parallelogram" => Ok(NodeShape::Parallelogram),
+        "hexagon" => Ok(NodeShape::Hexagon),
         "connector" => Ok(NodeShape::Connector),
         other => Err(format!("Unknown shape: '{}'", other)),
     }

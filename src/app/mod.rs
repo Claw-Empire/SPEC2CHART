@@ -587,6 +587,7 @@ impl eframe::App for FlowchartApp {
                 ("◆ Diamond",NodeKind::Shape { shape: crate::model::NodeShape::Diamond, label: String::new(), description: String::new() }),
                 ("● Circle", NodeKind::Shape { shape: crate::model::NodeShape::Circle, label: String::new(), description: String::new() }),
                 ("▱ Parallel",NodeKind::Shape { shape: crate::model::NodeShape::Parallelogram, label: String::new(), description: String::new() }),
+                ("⬡ Hexagon",NodeKind::Shape { shape: crate::model::NodeShape::Hexagon, label: String::new(), description: String::new() }),
                 ("📝 Sticky", NodeKind::StickyNote { text: String::new(), color: crate::model::StickyColor::Yellow }),
                 ("T Text",   NodeKind::Text { content: String::new() }),
             ];

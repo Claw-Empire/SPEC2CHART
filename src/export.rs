@@ -478,6 +478,26 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                             nx, ny, nw, nh, ry, ry, fill, fill_opacity * 0.4, stroke, stroke_opacity, stroke_width,
                         ));
                     }
+                    NodeShape::Hexagon => {
+                        let cx = nx + nw / 2.0;
+                        let cy = ny + nh / 2.0;
+                        let hw = nw / 2.0;
+                        let hh = nh / 2.0;
+                        let inset = hw * 0.3;
+                        let points_str = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            cx - hw, cy,
+                            cx - inset, cy - hh,
+                            cx + inset, cy - hh,
+                            cx + hw, cy,
+                            cx + inset, cy + hh,
+                            cx - inset, cy + hh,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
                 }
                 svg.push('\n');
 
@@ -827,6 +847,27 @@ fn draw_pdf_node(
                     (Point::new(Mm(nx + nw), Mm(top_y)), false),
                     (Point::new(Mm(nx + nw), Mm(bottom_y)), false),
                     (Point::new(Mm(nx), Mm(bottom_y)), false),
+                ];
+                let polygon = Polygon {
+                    rings: vec![points],
+                    mode: PaintMode::FillStroke,
+                    winding_order: printpdf::path::WindingOrder::NonZero,
+                };
+                layer.add_polygon(polygon);
+            }
+            NodeShape::Hexagon => {
+                let cx = nx + nw / 2.0;
+                let cy = (top_y + bottom_y) / 2.0;
+                let hw = nw / 2.0;
+                let hh = nh / 2.0;
+                let inset = hw * 0.3;
+                let points = vec![
+                    (Point::new(Mm(cx - hw),    Mm(cy)), false),
+                    (Point::new(Mm(cx - inset), Mm(cy + hh)), false),
+                    (Point::new(Mm(cx + inset), Mm(cy + hh)), false),
+                    (Point::new(Mm(cx + hw),    Mm(cy)), false),
+                    (Point::new(Mm(cx + inset), Mm(cy - hh)), false),
+                    (Point::new(Mm(cx - inset), Mm(cy - hh)), false),
                 ];
                 let polygon = Polygon {
                     rings: vec![points],

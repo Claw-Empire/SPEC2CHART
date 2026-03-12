@@ -17,6 +17,8 @@ impl FlowchartApp {
         let total_nodes = self.document.nodes.len();
         let total_edges = self.document.edges.len();
         let tag_active = self.tag_filter.is_some();
+        let undo_steps = self.history.undo_steps();
+        let redo_steps = self.history.redo_steps();
 
         // Compute canvas cursor position from raw pointer
         let cursor_canvas = ctx.input(|i| i.pointer.hover_pos()).map(|sp| {
@@ -135,6 +137,15 @@ impl FlowchartApp {
                         if tag_active {
                             ui.add_space(4.0);
                             label(ui, "🏷", ACCENT);
+                        }
+                        // Undo/redo depth indicator
+                        if undo_steps > 0 || redo_steps > 0 {
+                            ui.add_space(8.0);
+                            separator(ui);
+                            ui.add_space(8.0);
+                            let has_history = undo_steps > 0 || redo_steps > 0;
+                            let hist_col = if has_history { TEXT_DIM } else { TEXT_DIM.gamma_multiply(0.4) };
+                            label(ui, &format!("↺{} ↻{}", undo_steps, redo_steps), hist_col);
                         }
                     });
                 });

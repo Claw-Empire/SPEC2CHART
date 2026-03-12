@@ -277,11 +277,31 @@ impl FlowchartApp {
                     node.style.text_color[2], node.style.text_color[3],
                 );
                 let font_size = (node.style.font_size * self.viewport.zoom.sqrt()).clamp(9.0, 14.0);
-                painter.text(
-                    screen_rect.left_top() + Vec2::new(4.0, -font_size - 4.0),
-                    Align2::LEFT_BOTTOM, label,
-                    FontId::proportional(font_size), text_col,
-                );
+                let label_pos = screen_rect.left_top() + Vec2::new(4.0, -font_size - 4.0);
+                painter.text(label_pos, Align2::LEFT_BOTTOM, label,
+                    FontId::proportional(font_size), text_col);
+
+                // Child count badge: count nodes whose rects are contained within this frame
+                if self.viewport.zoom > 0.35 {
+                    let frame_canvas_rect = node.rect();
+                    let child_count = self.document.nodes.iter()
+                        .filter(|n| n.id != node.id && !n.is_frame && frame_canvas_rect.contains_rect(n.rect()))
+                        .count();
+                    if child_count > 0 {
+                        let badge_text = child_count.to_string();
+                        let badge_font = FontId::proportional((font_size * 0.85).clamp(8.0, 12.0));
+                        let galley = painter.ctx().fonts(|f| f.layout_no_wrap(badge_text.clone(), badge_font.clone(), TEXT_PRIMARY));
+                        let badge_w = galley.size().x + 8.0;
+                        let badge_h = galley.size().y + 4.0;
+                        let badge_x = label_pos.x + painter.ctx().fonts(|f| f.layout_no_wrap(label.clone(), FontId::proportional(font_size), text_col)).size().x + 6.0;
+                        let badge_rect = Rect::from_min_size(
+                            Pos2::new(badge_x, label_pos.y - badge_h),
+                            Vec2::new(badge_w, badge_h),
+                        );
+                        painter.rect_filled(badge_rect, CornerRadius::same(3), Color32::from_rgba_unmultiplied(89, 91, 118, 160));
+                        painter.text(badge_rect.center(), Align2::CENTER_CENTER, &badge_text, badge_font, TEXT_PRIMARY);
+                    }
+                }
             }
             return;
         }
@@ -392,6 +412,14 @@ impl FlowchartApp {
         if let Some(tag) = node.tag {
             if self.viewport.zoom > 0.35 {
                 let tag_color = to_color32(tag.color());
+                // Left accent stripe — 3px wide, full node height
+                let stripe_w = (3.0 * self.viewport.zoom.sqrt()).max(2.0);
+                let cr = node.style.corner_radius * self.viewport.zoom.sqrt();
+                let stripe_rect = Rect::from_min_max(
+                    screen_rect.min,
+                    Pos2::new(screen_rect.min.x + stripe_w, screen_rect.max.y),
+                );
+                painter.rect_filled(stripe_rect, CornerRadius { nw: cr as u8, sw: cr as u8, ne: 0, se: 0 }, tag_color.gamma_multiply(0.7));
                 let label = tag.label();
                 let font_size = 8.5 * self.viewport.zoom.sqrt();
                 let pad_x = 4.0 * self.viewport.zoom.sqrt();
@@ -584,6 +612,22 @@ impl FlowchartApp {
             }
         };
 
+        // Selection glow halo — draw progressively larger, lower-opacity rings
+        if is_selected && self.viewport.zoom > 0.3 {
+            let glow_col = SELECTION_COLOR;
+            for i in 1u8..=3 {
+                let expand = i as f32 * 2.5 * self.viewport.zoom.sqrt();
+                let alpha = (60 - i * 18) as u8;
+                let glow_rect = screen_rect.expand(expand);
+                painter.rect_stroke(
+                    glow_rect,
+                    CornerRadius::same((cr_user as f32 + expand * 0.5) as u8),
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(glow_col.r(), glow_col.g(), glow_col.b(), alpha)),
+                    StrokeKind::Outside,
+                );
+            }
+        }
+
         match shape {
             NodeShape::Rectangle => {
                 if style.gradient {
@@ -643,6 +687,22 @@ impl FlowchartApp {
                     Pos2::new(screen_rect.max.x, screen_rect.min.y),
                     Pos2::new(screen_rect.max.x - skew, screen_rect.max.y),
                     Pos2::new(screen_rect.min.x, screen_rect.max.y),
+                ];
+                painter.add(egui::Shape::convex_polygon(points, fill, stroke));
+            }
+            NodeShape::Hexagon => {
+                let cx = screen_rect.center().x;
+                let cy = screen_rect.center().y;
+                let hw = screen_rect.width() / 2.0;
+                let hh = screen_rect.height() / 2.0;
+                let inset = hw * 0.3; // horizontal flat sides
+                let points = vec![
+                    Pos2::new(cx - hw,      cy),
+                    Pos2::new(cx - inset,   cy - hh),
+                    Pos2::new(cx + inset,   cy - hh),
+                    Pos2::new(cx + hw,      cy),
+                    Pos2::new(cx + inset,   cy + hh),
+                    Pos2::new(cx - inset,   cy + hh),
                 ];
                 painter.add(egui::Shape::convex_polygon(points, fill, stroke));
             }
@@ -1280,6 +1340,9 @@ impl FlowchartApp {
                 painter.line_segment([prev_pt, pt], Stroke::new(width, seg_color));
                 prev_pt = pt;
             }
+        } else if self.viewport.zoom < 0.25 {
+            // LOD: very low zoom — straight line for performance
+            painter.line_segment([src, tgt], Stroke::new(width, edge_color));
         } else {
             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
                 [src, cp1, cp2, tgt],
@@ -1505,8 +1568,11 @@ impl FlowchartApp {
         if dir.length() < 0.01 {
             return;
         }
-        let arrow_len = 10.0 * self.viewport.zoom.sqrt();
-        let arrow_width = 6.0 * self.viewport.zoom.sqrt();
+        // Scale arrowhead with both zoom and edge width for visual consistency
+        let base_scale = self.viewport.zoom.sqrt();
+        let width_factor = (1.0 + (width - 1.0) * 0.4).max(1.0); // subtle scaling with thickness
+        let arrow_len = 10.0 * base_scale * width_factor;
+        let arrow_width = 6.0 * base_scale * width_factor;
         let perp = Vec2::new(-dir.y, dir.x);
         let tip = to;
 

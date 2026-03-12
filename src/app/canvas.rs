@@ -114,6 +114,22 @@ impl FlowchartApp {
         self.handle_dragging(&response, ui, pointer_pos);
         self.handle_drag_end(&response, ui, pointer_pos, canvas_rect);
 
+        // Live resize tooltip — show W×H while ResizingNode
+        if let DragState::ResizingNode { node_id, .. } = &self.drag {
+            if let (Some(node), Some(mp)) = (self.document.find_node(node_id), pointer_pos) {
+                let nw = node.size[0].round() as i32;
+                let nh = node.size[1].round() as i32;
+                let text = format!("{}×{}", nw, nh);
+                let tp = mp + Vec2::new(12.0, -22.0);
+                let pad = Vec2::new(6.0, 3.0);
+                let font = FontId::proportional(10.5);
+                let galley = ui.ctx().fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), ACCENT));
+                let bg_rect = Rect::from_min_size(tp - pad, galley.size() + pad * 2.0);
+                painter.rect_filled(bg_rect, CornerRadius::same(3), TOOLTIP_BG);
+                painter.text(tp, Align2::LEFT_TOP, &text, font, ACCENT);
+            }
+        }
+
         // Click (non-drag) for selection / deselection
         if response.clicked() {
             if let Some(mouse) = pointer_pos {
@@ -571,6 +587,7 @@ impl FlowchartApp {
                             (NodeShape::RoundedRect, "▢ Rounded"),
                             (NodeShape::Diamond,     "◇ Diamond"),
                             (NodeShape::Circle,      "○ Circle"),
+                            (NodeShape::Hexagon,     "⬡ Hexagon"),
                         ] {
                             if ui.button(label).clicked() {
                                 let w = 140.0_f32; let h = 60.0_f32;
@@ -2402,7 +2419,14 @@ impl FlowchartApp {
                 rows.push((format!("Tag: {}", tag), TEXT_DIM));
             }
             if has_url  { rows.push(("🔗 URL attached".to_string(), TEXT_DIM)); }
-            if has_comment { rows.push(("💬 Has comment".to_string(), TEXT_DIM)); }
+            if has_comment {
+                let preview = if node.comment.len() > 60 {
+                    format!("💬 {}…", &node.comment[..60])
+                } else {
+                    format!("💬 {}", &node.comment)
+                };
+                rows.push((preview, Color32::from_rgba_unmultiplied(166, 227, 161, 200)));
+            }
             if node.locked { rows.push(("🔒 Locked".to_string(), TEXT_DIM)); }
         }
         if rows.is_empty() && !rich_mode { return; }
@@ -4127,6 +4151,17 @@ impl FlowchartApp {
                 Stroke::new(1.0, MINIMAP_VP_STROKE),
                 StrokeKind::Outside,
             );
+            // Zoom % label inside the viewport rect if large enough
+            if clipped.width() > 22.0 && clipped.height() > 9.0 {
+                let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
+                painter.text(
+                    clipped.center(),
+                    Align2::CENTER_CENTER,
+                    &format!("{}%", zoom_pct),
+                    FontId::proportional(6.5),
+                    Color32::from_rgba_unmultiplied(137, 180, 250, 180),
+                );
+            }
         }
 
         // Draw bookmark pins on minimap

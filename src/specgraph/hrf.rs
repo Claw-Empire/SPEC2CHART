@@ -161,6 +161,7 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                         NodeShape::Diamond => " {diamond}",
                         NodeShape::Circle => " {circle}",
                         NodeShape::Parallelogram => " {parallelogram}",
+                        NodeShape::Hexagon => " {hexagon}",
                         NodeShape::Connector => " {connector}",
                     };
                     let z_tag = if node.z_offset != 0.0 {
@@ -444,6 +445,7 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "diamond" | "decision" => NodeShape::Diamond,
         "circle" => NodeShape::Circle,
         "parallelogram" | "parallel" | "io" => NodeShape::Parallelogram,
+        "hexagon" | "hex" | "process" => NodeShape::Hexagon,
         "connector" | "api" | "interface" | "protocol" | "gateway" => NodeShape::Connector,
         _ => NodeShape::RoundedRect,
     }

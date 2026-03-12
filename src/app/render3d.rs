@@ -1238,6 +1238,26 @@ impl FlowchartApp {
                         Stroke::NONE,
                     ));
                 }
+                NodeShape::Hexagon => {
+                    // 3D Hexagon — extruded flat-top hex
+                    let cx = screen_rect.center().x;
+                    let cy = screen_rect.center().y;
+                    let hw = screen_rect.width() / 2.0;
+                    let hh = screen_rect.height() / 2.0;
+                    let inset = hw * 0.3;
+                    let hex_pts = |dx: f32, dy: f32| vec![
+                        Pos2::new(cx - hw + dx,    cy + dy),
+                        Pos2::new(cx - inset + dx, cy - hh + dy),
+                        Pos2::new(cx + inset + dx, cy - hh + dy),
+                        Pos2::new(cx + hw + dx,    cy + dy),
+                        Pos2::new(cx + inset + dx, cy + hh + dy),
+                        Pos2::new(cx - inset + dx, cy + hh + dy),
+                    ];
+                    // Back face
+                    painter.add(egui::Shape::convex_polygon(hex_pts(extrude.x, extrude.y), shade_color(fill, 0.55), Stroke::NONE));
+                    // Front face
+                    painter.add(egui::Shape::convex_polygon(hex_pts(0.0, 0.0), fill, stroke));
+                }
             },
             NodeKind::StickyNote { .. } => {
                 // --- 3D STICKY NOTE ---

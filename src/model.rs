@@ -30,6 +30,7 @@ pub enum NodeShape {
     Circle,
     Parallelogram,
     Connector,
+    Hexagon,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

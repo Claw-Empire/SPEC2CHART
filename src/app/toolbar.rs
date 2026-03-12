@@ -623,6 +623,7 @@ impl FlowchartApp {
             (NodeShape::Diamond, "Diamond"),
             (NodeShape::Circle, "Circle"),
             (NodeShape::Parallelogram, "Parallel"),
+            (NodeShape::Hexagon, "Hexagon"),
             (NodeShape::Connector, "Connector"),
         ];
 
@@ -828,6 +829,20 @@ impl FlowchartApp {
                     Pos2::new(preview_center.x + half_w, preview_center.y - half_h),
                     Pos2::new(preview_center.x + half_w - skew, preview_center.y + half_h),
                     Pos2::new(preview_center.x - half_w, preview_center.y + half_h),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+            NodeShape::Hexagon => {
+                let hw = pw * 0.48;
+                let hh = ph * 0.40;
+                let inset = hw * 0.3;
+                let pts = vec![
+                    Pos2::new(preview_center.x - hw,    preview_center.y),
+                    Pos2::new(preview_center.x - inset, preview_center.y - hh),
+                    Pos2::new(preview_center.x + inset, preview_center.y - hh),
+                    Pos2::new(preview_center.x + hw,    preview_center.y),
+                    Pos2::new(preview_center.x + inset, preview_center.y + hh),
+                    Pos2::new(preview_center.x - inset, preview_center.y + hh),
                 ];
                 painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
             }
