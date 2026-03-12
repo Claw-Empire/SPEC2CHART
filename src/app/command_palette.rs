@@ -44,6 +44,7 @@ enum PaletteAction {
     SetBgNone,
     OpenFindReplace,
     OpenSearch,
+    ExportMermaid,
 }
 
 impl FlowchartApp {
@@ -202,12 +203,12 @@ impl FlowchartApp {
         }
 
         if let Some(action) = execute_action {
-            self.run_palette_action(action);
+            self.run_palette_action(action, ctx);
             ctx.request_repaint();
         }
     }
 
-    fn run_palette_action(&mut self, action: PaletteAction) {
+    fn run_palette_action(&mut self, action: PaletteAction, ctx: &egui::Context) {
         match action {
             PaletteAction::FitAll => { self.pending_fit = true; }
             PaletteAction::ZoomIn  => { self.zoom_target *= 1.25; }
@@ -320,6 +321,11 @@ impl FlowchartApp {
             PaletteAction::SetBgNone              => { self.bg_pattern = BgPattern::None; }
             PaletteAction::OpenFindReplace        => { self.show_find_replace = true; self.find_query.clear(); }
             PaletteAction::OpenSearch             => { self.show_search = true; self.search_query.clear(); }
+            PaletteAction::ExportMermaid          => {
+                let mermaid = crate::app::export_mermaid::to_mermaid(&self.document);
+                ctx.copy_text(mermaid);
+                self.status_message = Some(("Mermaid copied to clipboard".to_string(), std::time::Instant::now()));
+            }
         }
     }
 }
@@ -361,5 +367,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
+        // Export
+        PaletteEntry { icon: "⎘",  label: "Copy as Mermaid to clipboard", category: "Export", action: PaletteAction::ExportMermaid },
     ]
 }

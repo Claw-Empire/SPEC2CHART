@@ -7,6 +7,7 @@ mod render;
 mod render3d;
 mod statusbar;
 mod command_palette;
+pub(crate) mod export_mermaid;
 pub(crate) mod camera;
 pub(crate) mod interaction;
 

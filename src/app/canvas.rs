@@ -1543,9 +1543,19 @@ impl FlowchartApp {
                 ..
             } => {
                 let canvas_mouse = self.viewport.screen_to_canvas(mouse);
-                let delta = canvas_mouse - *start_mouse;
+                let raw_delta = canvas_mouse - *start_mouse;
+                let (alt_held, shift_held) = _ui.ctx().input(|i| (i.modifiers.alt, i.modifiers.shift));
+                // Shift+drag: constrain to dominant axis
+                let delta = if shift_held {
+                    if raw_delta.x.abs() >= raw_delta.y.abs() {
+                        egui::Vec2::new(raw_delta.x, 0.0)
+                    } else {
+                        egui::Vec2::new(0.0, raw_delta.y)
+                    }
+                } else {
+                    raw_delta
+                };
                 let positions = start_positions.clone();
-                let alt_held = _ui.ctx().input(|i| i.modifiers.alt);
                 self.alignment_guides.clear();
 
                 // Alignment snap: only for single-node drags (unless alt suppresses)

@@ -66,6 +66,37 @@ impl FlowchartApp {
                             "1 edge".to_string()
                         };
                         label(ui, &sel_text, TEXT_PRIMARY);
+
+                        // Geometry info for selected node(s)
+                        if sel_count == 1 {
+                            if let Some(node) = self.selection.node_ids.iter().next()
+                                .and_then(|id| self.document.find_node(id))
+                            {
+                                let pos = node.pos();
+                                ui.add_space(6.0);
+                                let pos_text = format!("({},{}) {}×{}", pos.x.round() as i32, pos.y.round() as i32, node.size[0].round() as i32, node.size[1].round() as i32);
+                                label(ui, &pos_text, TEXT_DIM);
+                            }
+                        } else if sel_count > 1 {
+                            // Bounding box of selection
+                            let mut bb_min = egui::pos2(f32::MAX, f32::MAX);
+                            let mut bb_max = egui::pos2(f32::MIN, f32::MIN);
+                            for id in &self.selection.node_ids {
+                                if let Some(n) = self.document.find_node(id) {
+                                    let r = n.rect();
+                                    bb_min.x = bb_min.x.min(r.min.x);
+                                    bb_min.y = bb_min.y.min(r.min.y);
+                                    bb_max.x = bb_max.x.max(r.max.x);
+                                    bb_max.y = bb_max.y.max(r.max.y);
+                                }
+                            }
+                            if bb_min.x < f32::MAX {
+                                ui.add_space(6.0);
+                                let bw = (bb_max.x - bb_min.x).round() as i32;
+                                let bh = (bb_max.y - bb_min.y).round() as i32;
+                                label(ui, &format!("bbox {}×{}", bw, bh), TEXT_DIM);
+                            }
+                        }
                     }
 
                     // Right side — graph stats, zoom, cursor
