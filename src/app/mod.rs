@@ -586,11 +586,27 @@ impl eframe::App for FlowchartApp {
                     ..Default::default()
                 })
                 .show(ctx, |ui| {
-                    ui.label(egui::RichText::new("Edge label").size(10.0).color(TEXT_DIM));
+                    // Title row with char count
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Edge label").size(10.0).color(TEXT_DIM));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let char_count = self.document.find_edge(&edge_id)
+                                .map(|e| e.label.chars().count())
+                                .unwrap_or(0);
+                            let count_color = if char_count > 45 { Color32::from_rgb(243, 139, 168) } else { TEXT_DIM };
+                            ui.label(egui::RichText::new(format!("{}/50", char_count)).size(9.5).color(count_color));
+                        });
+                    });
                     if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+                        // Cap at 50 chars
+                        if edge.label.chars().count() > 50 {
+                            let trimmed: String = edge.label.chars().take(50).collect();
+                            edge.label = trimmed;
+                        }
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut edge.label)
-                                .desired_width(160.0)
+                                .desired_width(180.0)
+                                .hint_text("e.g. depends on, owns, sends to…")
                                 .font(egui::FontId::proportional(13.0)),
                         );
                         resp.request_focus();
@@ -601,10 +617,14 @@ impl eframe::App for FlowchartApp {
                     } else {
                         close_editor = true;
                     }
-                    if ui.button("✓ Done").clicked() {
-                        close_editor = true;
-                        self.history.push(&self.document);
-                    }
+                    // Hint row
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Enter").monospace().size(9.5).color(ACCENT.gamma_multiply(0.7)));
+                        ui.label(egui::RichText::new("save").size(9.5).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("·").size(9.5).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("Esc").monospace().size(9.5).color(ACCENT.gamma_multiply(0.7)));
+                        ui.label(egui::RichText::new("cancel").size(9.5).color(TEXT_DIM));
+                    });
                 });
             if close_editor { self.inline_edge_edit = None; }
         }
