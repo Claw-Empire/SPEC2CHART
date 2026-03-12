@@ -333,6 +333,14 @@ impl FlowchartApp {
             painter.text(icon_pos, Align2::LEFT_BOTTOM, "🔗", FontId::proportional(9.0 * self.viewport.zoom.sqrt()), TEXT_DIM.gamma_multiply(0.7));
         }
 
+        // Node icon badge (shown in top-left when node has an icon)
+        if !node.icon.is_empty() && self.viewport.zoom > 0.4 {
+            let icon_size = (14.0 * self.viewport.zoom.sqrt()).clamp(10.0, 20.0);
+            let icon_pos = Pos2::new(screen_rect.min.x + 3.0, screen_rect.min.y + 3.0);
+            painter.text(icon_pos, Align2::LEFT_TOP, &node.icon,
+                FontId::proportional(icon_size), Color32::WHITE);
+        }
+
         // Lock badge (shown as a small 🔒 in top-right when node is locked)
         if node.locked && self.viewport.zoom > 0.4 {
             let icon_size = (9.0 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);

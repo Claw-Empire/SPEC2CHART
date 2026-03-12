@@ -330,6 +330,26 @@ impl FlowchartApp {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(&node.url));
                         }
                     });
+                    // Node icon badge field
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Icon").size(11.0).color(TEXT_DIM));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut node.icon)
+                                .hint_text("emoji…")
+                                .desired_width(42.0)
+                                .font(FontId::proportional(13.0)),
+                        );
+                        if !node.icon.is_empty() && ui.small_button("✕").on_hover_text("Clear icon").clicked() {
+                            node.icon.clear();
+                        }
+                    });
+                    ui.add_space(2.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for badge in ["📦","🔧","⚙️","🗄️","🌐","🔒","💡","📊","🚀","❌","✅","⚠️","🔑","🧩","📌","🎯","🔵","🟢","🟡","🔴"] {
+                            if ui.small_button(badge).clicked() { node.icon = badge.to_string(); }
+                        }
+                    });
                     // Quick emoji prefix buttons
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {

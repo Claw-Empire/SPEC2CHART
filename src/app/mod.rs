@@ -581,6 +581,7 @@ impl eframe::App for FlowchartApp {
                     comment: String::new(),
                     is_frame: false,
                     frame_color: crate::model::default_frame_color(),
+                    icon: String::new(),
                 };
                 let id = node.id;
                 self.document.nodes.push(node);
