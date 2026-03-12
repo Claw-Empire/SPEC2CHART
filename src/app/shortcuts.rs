@@ -678,9 +678,44 @@ impl FlowchartApp {
 
         // S = toggle snap to grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.is_none()) {
-            self.snap_to_grid = !self.snap_to_grid;
-            let msg = if self.snap_to_grid { "Snap On" } else { "Snap Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            if !self.selection.edge_ids.is_empty() {
+                // Cycle edge style: solid → dashed → animated → thick → back to solid
+                let edge_ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                let mut style_label = "Solid";
+                for id in &edge_ids {
+                    if let Some(edge) = self.document.find_edge_mut(id) {
+                        if !edge.style.dashed && !edge.style.animated && edge.style.width <= 2.5 {
+                            // solid → dashed
+                            edge.style.dashed = true;
+                            edge.style.animated = false;
+                            style_label = "Dashed";
+                        } else if edge.style.dashed && !edge.style.animated {
+                            // dashed → animated
+                            edge.style.dashed = false;
+                            edge.style.animated = true;
+                            style_label = "Animated";
+                        } else if edge.style.animated {
+                            // animated → thick
+                            edge.style.animated = false;
+                            edge.style.dashed = false;
+                            edge.style.width = 3.5;
+                            style_label = "Thick";
+                        } else {
+                            // thick → solid default
+                            edge.style.dashed = false;
+                            edge.style.animated = false;
+                            edge.style.width = 1.5;
+                            style_label = "Solid";
+                        }
+                    }
+                }
+                self.status_message = Some((format!("Edge style: {}", style_label), std::time::Instant::now()));
+                self.history.push(&self.document);
+            } else {
+                self.snap_to_grid = !self.snap_to_grid;
+                let msg = if self.snap_to_grid { "Snap On" } else { "Snap Off" };
+                self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            }
         }
 
         // Tab / Shift+Tab = cycle selection through nodes

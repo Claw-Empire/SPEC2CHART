@@ -732,7 +732,7 @@ impl eframe::App for FlowchartApp {
                             ("⌘0", "Reset zoom to 100%"),
                             ("F", "Focus mode — dim unconnected nodes"),
                             ("G", "Toggle grid"),
-                            ("S", "Toggle snap to grid"),
+                            ("S", "Toggle snap · S with edge selected = cycle edge style"),
                             ("O", "Bird's-eye overview"),
                             ("Alt+hover", "Show distance rulers"),
                         ]),
