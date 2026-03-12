@@ -750,6 +750,35 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // Cmd+G = wrap selected nodes in a frame
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.matches_exact(cmd))
+            && self.selection.node_ids.len() >= 2
+        {
+            let mut bb_min = egui::pos2(f32::MAX, f32::MAX);
+            let mut bb_max = egui::pos2(f32::MIN, f32::MIN);
+            for id in &self.selection.node_ids {
+                if let Some(n) = self.document.find_node(id) {
+                    let r = n.rect();
+                    bb_min.x = bb_min.x.min(r.min.x);
+                    bb_min.y = bb_min.y.min(r.min.y);
+                    bb_max.x = bb_max.x.max(r.max.x);
+                    bb_max.y = bb_max.y.max(r.max.y);
+                }
+            }
+            if bb_min.x < f32::MAX {
+                let pad = 20.0_f32;
+                let frame_pos = egui::pos2(bb_min.x - pad, bb_min.y - pad);
+                let mut frame = crate::model::Node::new_frame(frame_pos);
+                frame.size = [bb_max.x - bb_min.x + pad * 2.0, bb_max.y - bb_min.y + pad * 2.0];
+                let fid = frame.id;
+                // Insert frame at beginning (so it's behind all nodes)
+                self.document.nodes.insert(0, frame);
+                self.selection.select_node(fid);
+                self.history.push(&self.document);
+                self.status_message = Some(("Group frame created".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // S = toggle snap to grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.is_none()) {
             if !self.selection.edge_ids.is_empty() {

@@ -141,6 +141,8 @@ pub struct FlowchartApp {
     pub(crate) canvas_locked: bool,
     /// Alignment guide lines computed during node drag: (is_horizontal, canvas_coord)
     pub(crate) alignment_guides: Vec<(bool, f32)>,
+    /// User-placed ruler guides: (is_vertical, canvas_coordinate). Cleared with Cmd+Shift+G.
+    pub(crate) ruler_guides: Vec<(bool, f32)>,
     /// When true, hide all panels for a clean presentation view (toggle with F)
     pub(crate) presentation_mode: bool,
     /// Custom canvas background color (overrides default CANVAS_BG)
@@ -322,6 +324,7 @@ impl FlowchartApp {
             focus_mode: false,
             canvas_locked: false,
             alignment_guides: Vec::new(),
+            ruler_guides: Vec::new(),
             presentation_mode: false,
             canvas_bg: [30, 30, 46, 255], // default = CANVAS_BG
             project_title: String::new(),
