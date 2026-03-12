@@ -251,6 +251,9 @@ pub struct Node {
     /// Saved full size before collapse, so expand restores original dimensions
     #[serde(default)]
     pub uncollapsed_size: Option<[f32; 2]>,
+    /// Optional URL — Cmd+click on canvas opens this in the browser
+    #[serde(default)]
+    pub url: String,
 }
 
 impl Node {
@@ -271,7 +274,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle::default(),
         }
     }
@@ -285,7 +288,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -306,7 +309,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -326,7 +329,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],

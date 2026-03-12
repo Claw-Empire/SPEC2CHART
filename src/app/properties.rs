@@ -192,6 +192,20 @@ impl FlowchartApp {
                         label_response.request_focus();
                         self.focus_label_edit = false;
                     }
+                    ui.add_space(4.0);
+                    // URL field
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("🔗").size(11.0));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut node.url)
+                                .hint_text("https://…")
+                                .desired_width(f32::INFINITY)
+                                .font(FontId::monospace(11.0)),
+                        );
+                        if !node.url.is_empty() && ui.small_button("Open").clicked() {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(&node.url));
+                        }
+                    });
                     // Quick emoji prefix buttons
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {

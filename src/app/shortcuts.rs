@@ -283,19 +283,31 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+D = duplicate selected nodes
+        // Cmd+D = duplicate selected nodes (smart offset avoids stacking)
         if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.matches_exact(cmd))
             && !self.selection.node_ids.is_empty()
         {
-            let offset = Vec2::new(24.0, 24.0);
+            let base_offset = Vec2::new(24.0, 24.0);
             let originals: Vec<crate::model::Node> = self.selection.node_ids.iter()
                 .filter_map(|id| self.document.find_node(id).cloned())
                 .collect();
             self.selection.clear();
             for template in originals {
-                let mut node = template;
+                let mut node = template.clone();
                 node.id = NodeId::new();
-                node.set_pos(node.pos() + offset);
+                // Find a non-overlapping position by nudging by multiples of base_offset
+                let mut candidate = template.pos() + base_offset;
+                let mut attempts = 0;
+                while attempts < 8 {
+                    let snap_r = egui::Rect::from_min_size(candidate, node.size_vec());
+                    let overlaps = self.document.nodes.iter().any(|n| {
+                        n.rect().expand(-4.0).intersects(snap_r)
+                    });
+                    if !overlaps { break; }
+                    candidate = candidate + base_offset;
+                    attempts += 1;
+                }
+                node.set_pos(candidate);
                 self.selection.node_ids.insert(node.id);
                 self.document.nodes.push(node);
             }

@@ -71,9 +71,14 @@ impl FlowchartApp {
                 let cmd_held = ui.ctx().input(|i| i.modifiers.command);
 
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
-                    // Click on node => select it
+                    // Cmd+click on node with URL => open the URL
                     if cmd_held {
-                        self.selection.toggle_node(node_id);
+                        let url = self.document.find_node(&node_id).map(|n| n.url.clone()).unwrap_or_default();
+                        if !url.is_empty() {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
+                        } else {
+                            self.selection.toggle_node(node_id);
+                        }
                     } else {
                         self.selection.select_node(node_id);
                     }
@@ -98,7 +103,7 @@ impl FlowchartApp {
             if let Some(mouse) = pointer_pos {
                 let canvas_pos = self.viewport.screen_to_canvas(mouse);
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
-                    // Node context menu
+                    // Node context menu (handled below)
                     self.selection.select_node(node_id);
                     if ui.button("✏ Edit label").clicked() {
                         self.focus_label_edit = true;
@@ -146,6 +151,47 @@ impl FlowchartApp {
                     ui.separator();
                     if ui.button("🗑 Delete").clicked() {
                         self.document.remove_node(&node_id);
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                } else if let Some(edge_id) = self.hit_test_edge(canvas_pos) {
+                    // Edge context menu
+                    self.selection.select_edge(edge_id);
+                    ui.label(egui::RichText::new("Edge").size(11.0).color(TEXT_DIM));
+                    ui.separator();
+                    // Color presets
+                    let colors: &[([u8; 4], &str)] = &[
+                        ([100, 100, 100, 255], "Gray"),
+                        ([137, 180, 250, 255], "Blue"),
+                        ([166, 227, 161, 255], "Green"),
+                        ([243, 139, 168, 255], "Red"),
+                        ([249, 226, 175, 255], "Yellow"),
+                        ([203, 166, 247, 255], "Purple"),
+                    ];
+                    ui.horizontal_wrapped(|ui| {
+                        for (color, name) in colors {
+                            let c = to_color32(*color);
+                            if ui.add(egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(22.0, 22.0)))
+                                .on_hover_text(*name).clicked() {
+                                if let Some(e) = self.document.find_edge_mut(&edge_id) {
+                                    e.style.color = *color;
+                                }
+                                self.history.push(&self.document);
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.separator();
+                    if ui.button("↺ Reset style").clicked() {
+                        if let Some(e) = self.document.find_edge_mut(&edge_id) {
+                            e.style = EdgeStyle::default();
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                    if ui.button("🗑 Delete edge").clicked() {
+                        self.document.remove_edge(&edge_id);
                         self.selection.clear();
                         self.history.push(&self.document);
                         ui.close_menu();
@@ -287,12 +333,39 @@ impl FlowchartApp {
             }
         }
 
+        // Compute search matches (for highlight overlay)
+        let search_matches: std::collections::HashSet<NodeId> = if self.show_search && !self.search_query.is_empty() {
+            let q = self.search_query.to_lowercase();
+            self.document.nodes.iter()
+                .filter(|n| n.display_label().to_lowercase().contains(&q))
+                .map(|n| n.id)
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+
         // Nodes (visible only)
         for node in &self.document.nodes {
             let screen_pos = self.viewport.canvas_to_screen(node.pos());
             let screen_size = node.size_vec() * self.viewport.zoom;
             let screen_rect = Rect::from_min_size(screen_pos, screen_size).expand(20.0);
             if screen_rect.intersects(canvas_rect) {
+                // Draw search highlight ring before rendering the node
+                if search_matches.contains(&node.id) {
+                    let node_screen_rect = Rect::from_min_size(
+                        self.viewport.canvas_to_screen(node.pos()),
+                        node.size_vec() * self.viewport.zoom,
+                    );
+                    let time = ui.ctx().input(|i| i.time);
+                    let pulse = ((time * 3.0 * std::f64::consts::PI).sin() as f32) * 0.4 + 0.6;
+                    painter.rect_stroke(
+                        node_screen_rect.expand(4.0),
+                        CornerRadius::same(8),
+                        Stroke::new(2.5, Color32::from_rgba_unmultiplied(137, 220, 235, (200.0 * pulse) as u8)),
+                        StrokeKind::Outside,
+                    );
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+                }
                 self.draw_node(node, &painter, hover_pos);
             }
         }

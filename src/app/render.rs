@@ -36,10 +36,16 @@ impl FlowchartApp {
         let is_selected = self.selection.contains_node(&node.id);
         let is_hovered = hover_pos.map_or(false, |hp| screen_rect.expand(6.0).contains(hp));
 
-        // Selection glow
+        // Selection glow (pulsing animation)
         if is_selected {
-            let glow_rect = screen_rect.expand(5.0);
-            painter.rect_filled(glow_rect, CornerRadius::same(6), ACCENT_GLOW);
+            let time = painter.ctx().input(|i| i.time);
+            // Pulse: oscillates between 0.3 and 1.0 at ~0.8 Hz
+            let pulse = ((time * 1.6 * std::f64::consts::PI).sin() as f32) * 0.35 + 0.65;
+            let glow_rect = screen_rect.expand(5.0 + pulse * 2.0);
+            let glow_color = ACCENT_GLOW.gamma_multiply(pulse);
+            painter.rect_filled(glow_rect, CornerRadius::same(6), glow_color);
+            // Request continuous repaint for animation
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
         } else if is_hovered {
             painter.rect_stroke(
                 screen_rect.expand(2.0),
@@ -99,6 +105,12 @@ impl FlowchartApp {
                 let dot_pos = Pos2::new(screen_rect.max.x - 5.0, screen_rect.max.y - 5.0);
                 painter.circle_filled(dot_pos, 3.5 * self.viewport.zoom.sqrt(), ACCENT.gamma_multiply(0.6));
             }
+        }
+
+        // URL indicator (shown as a small 🔗 in bottom-left when node has a URL)
+        if !node.url.is_empty() && self.viewport.zoom > 0.5 {
+            let icon_pos = Pos2::new(screen_rect.min.x + 4.0, screen_rect.max.y - 4.0);
+            painter.text(icon_pos, Align2::LEFT_BOTTOM, "🔗", FontId::proportional(9.0 * self.viewport.zoom.sqrt()), TEXT_DIM.gamma_multiply(0.7));
         }
 
         // Edge connection count badge (shown when hovered)
