@@ -165,6 +165,37 @@ impl FlowchartApp {
             );
         }
 
+        // Node freshness ring: bright expanding border for "just created" nodes (0–3s)
+        if let Some(&birth) = self.node_birth_times.get(&node.id) {
+            let now = painter.ctx().input(|i| i.time);
+            let age = (now - birth) as f32;
+            let duration = 3.0_f32;
+            if age < duration {
+                // Phase 1 (0–0.4s): bright solid ring; Phase 2 (0.4–3s): fade away
+                let alpha = if age < 0.4 {
+                    220u8
+                } else {
+                    ((1.0 - (age - 0.4) / (duration - 0.4)).powf(1.5) * 120.0) as u8
+                };
+                let ring_color = Color32::from_rgba_unmultiplied(120, 220, 180, alpha);
+                let expand = if age < 0.4 {
+                    2.0 + age * 8.0  // expand outward during birth flash
+                } else {
+                    5.0
+                };
+                let cr = CornerRadius::same((node.style.corner_radius as f32 + expand * 0.5) as u8);
+                painter.rect_stroke(
+                    screen_rect.expand(expand),
+                    cr,
+                    Stroke::new(1.5, ring_color),
+                    StrokeKind::Outside,
+                );
+                if age < duration - 0.1 {
+                    painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+                }
+            }
+        }
+
         // Drop shadow (rendered before node so it appears behind)
         if node.style.shadow && !node.is_frame {
             let shadow_offset = Vec2::new(3.0, 5.0) * self.viewport.zoom.sqrt();

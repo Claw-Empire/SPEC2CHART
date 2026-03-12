@@ -746,10 +746,13 @@ impl FlowchartApp {
             let now = ui.ctx().input(|i| i.time);
             let current_ids: std::collections::HashSet<NodeId> =
                 self.document.nodes.iter().map(|n| n.id).collect();
+            // Prune stale node birth entries (3s freshness window)
+            self.node_birth_times.retain(|_, t| now - *t < 3.0);
             for node in &self.document.nodes {
-                if !self.prev_node_ids.contains(&node.id) {
+                if !self.prev_node_ids.contains(&node.id) && !self.prev_node_ids.is_empty() {
                     let center = node.rect().center();
                     self.creation_ripples.push(([center.x, center.y], now));
+                    self.node_birth_times.insert(node.id, now);
                 }
             }
             self.prev_node_ids = current_ids;

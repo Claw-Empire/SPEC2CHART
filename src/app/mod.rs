@@ -182,6 +182,8 @@ pub struct FlowchartApp {
     pub(crate) prev_edge_ids: std::collections::HashSet<EdgeId>,
     /// Canvas location bookmarks: Cmd+Shift+1..5 saves, Shift+1..5 jumps
     pub(crate) bookmarks: [Option<crate::model::Viewport>; 5],
+    /// Node freshness: (node_id → birth_time_secs) for "just created" ring animation
+    pub(crate) node_birth_times: std::collections::HashMap<NodeId, f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,6 +320,7 @@ impl FlowchartApp {
             edge_birth_times: std::collections::HashMap::new(),
             prev_edge_ids: std::collections::HashSet::new(),
             bookmarks: [None, None, None, None, None],
+            node_birth_times: std::collections::HashMap::new(),
         }
     }
 
