@@ -264,6 +264,42 @@ impl FlowchartApp {
             painter.text(pin_pos, Align2::LEFT_BOTTOM, "📌", FontId::proportional(10.0 * self.viewport.zoom.sqrt()), Color32::WHITE);
         }
 
+        // Status icon strip (top-right): 💬 comment, 🔗 url, 🔒 locked
+        if self.viewport.zoom > 0.45 {
+            let icon_size = (9.5 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);
+            let icon_font = FontId::proportional(icon_size);
+            let mut icons: Vec<&str> = Vec::new(); // glyph only
+            if !node.comment.is_empty() { icons.push("💬"); }
+            if !node.url.is_empty()     { icons.push("🔗"); }
+            if node.locked              { icons.push("🔒"); }
+            if !icons.is_empty() {
+                let gap = icon_size * 1.1;
+                let strip_w = icons.len() as f32 * gap;
+                let strip_x = screen_rect.max.x - strip_w - 3.0;
+                let strip_y = screen_rect.min.y + 3.0;
+
+                // Dim background pill behind the icons
+                let bg_rect = Rect::from_min_size(
+                    Pos2::new(strip_x - 2.0, strip_y - 1.0),
+                    Vec2::new(strip_w + 4.0, icon_size + 4.0),
+                );
+                painter.rect_filled(bg_rect, CornerRadius::same(4),
+                    Color32::from_rgba_premultiplied(10, 10, 20, 140));
+
+                for (i, glyph) in icons.iter().enumerate() {
+                    let x = strip_x + i as f32 * gap + gap * 0.5;
+                    let y = strip_y + icon_size * 0.5;
+                    painter.text(
+                        Pos2::new(x, y),
+                        Align2::CENTER_CENTER,
+                        *glyph,
+                        icon_font.clone(),
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
+
         // Ports
         let show_ports = self.tool == super::Tool::Connect || {
             if let Some(hover) = hover_pos {
