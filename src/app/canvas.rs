@@ -177,7 +177,132 @@ impl FlowchartApp {
         response.context_menu(|ui| {
             if let Some(mouse) = pointer_pos {
                 let canvas_pos = self.viewport.screen_to_canvas(mouse);
-                if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
+
+                // Multi-selection context menu: ≥ 2 nodes selected and clicking within any of them
+                let multi_click = if self.selection.node_ids.len() > 1 {
+                    self.document.node_at_pos(canvas_pos)
+                        .map(|id| self.selection.node_ids.contains(&id))
+                        .unwrap_or(false)
+                } else { false };
+
+                if multi_click {
+                    let n_sel = self.selection.node_ids.len();
+                    ui.label(egui::RichText::new(format!("{} nodes", n_sel))
+                        .size(11.0).color(TEXT_DIM).strong());
+                    ui.separator();
+
+                    // Quick bulk-color row
+                    let bulk_colors: &[([u8;4], &str)] = &[
+                        ([137, 180, 250, 255], "Blue"),
+                        ([166, 227, 161, 255], "Green"),
+                        ([243, 139, 168, 255], "Red"),
+                        ([249, 226, 175, 255], "Yellow"),
+                        ([203, 166, 247, 255], "Purple"),
+                        ([148, 226, 213, 255], "Teal"),
+                    ];
+                    let mut bulk_color_pick: Option<[u8;4]> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        for (color, name) in bulk_colors {
+                            let c = to_color32(*color);
+                            if ui.add(egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(22.0, 22.0)))
+                                .on_hover_text(*name).clicked() {
+                                bulk_color_pick = Some(*color);
+                            }
+                        }
+                    });
+                    if let Some(col) = bulk_color_pick {
+                        let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                        for id in ids {
+                            if let Some(n) = self.document.find_node_mut(&id) {
+                                n.style.fill_color = col;
+                            }
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+
+                    // Bulk tag
+                    ui.menu_button("🏷 Tag all…", |ui| {
+                        let tags = [
+                            (None, "None"),
+                            (Some(crate::model::NodeTag::Critical), "🔴 Critical"),
+                            (Some(crate::model::NodeTag::Warning),  "🟡 Warning"),
+                            (Some(crate::model::NodeTag::Ok),       "🟢 OK"),
+                            (Some(crate::model::NodeTag::Info),     "🔵 Info"),
+                        ];
+                        for (variant, label) in tags {
+                            if ui.button(label).clicked() {
+                                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                                for id in ids {
+                                    if let Some(n) = self.document.find_node_mut(&id) {
+                                        n.tag = variant;
+                                    }
+                                }
+                                self.history.push(&self.document);
+                                ui.close_menu();
+                            }
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Align submenu
+                    ui.menu_button("⟺ Align…", |ui| {
+                        if ui.button("← Left edges").clicked() {
+                            self.align_nodes_left(); ui.close_menu();
+                        }
+                        if ui.button("→ Right edges").clicked() {
+                            self.align_nodes_right(); ui.close_menu();
+                        }
+                        if ui.button("↕ Center H").clicked() {
+                            self.align_nodes_center_h(); ui.close_menu();
+                        }
+                        if ui.button("↑ Top edges").clicked() {
+                            self.align_nodes_top(); ui.close_menu();
+                        }
+                        if ui.button("↓ Bottom edges").clicked() {
+                            self.align_nodes_bottom(); ui.close_menu();
+                        }
+                        if ui.button("⟺ Center V").clicked() {
+                            self.align_nodes_center_v(); ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("⟺ Distribute H").clicked() {
+                            self.distribute_nodes_h(); ui.close_menu();
+                        }
+                        if ui.button("↕ Distribute V").clicked() {
+                            self.distribute_nodes_v(); ui.close_menu();
+                        }
+                    });
+
+                    if ui.button("⎘ Duplicate all").clicked() {
+                        let to_dup: Vec<_> = self.selection.node_ids.iter()
+                            .filter_map(|id| self.document.find_node(id).cloned())
+                            .collect();
+                        self.selection.clear();
+                        for mut node in to_dup {
+                            node.id = NodeId::new();
+                            node.set_pos(node.pos() + Vec2::new(24.0, 24.0));
+                            let new_id = node.id;
+                            self.document.nodes.push(node);
+                            self.selection.node_ids.insert(new_id);
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("🗑 Delete all").clicked() {
+                        let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                        for id in ids {
+                            self.document.remove_node(&id);
+                        }
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                } else if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                     // Node context menu (handled below)
                     self.selection.select_node(node_id);
 

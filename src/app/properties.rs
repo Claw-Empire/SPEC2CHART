@@ -1263,7 +1263,7 @@ impl FlowchartApp {
         self.selection.node_ids.iter().copied().collect()
     }
 
-    fn align_nodes_left(&mut self) {
+    pub(crate) fn align_nodes_left(&mut self) {
         let ids = self.selected_node_ids();
         let min_x = ids.iter()
             .filter_map(|id| self.document.find_node(id))
@@ -1274,7 +1274,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn align_nodes_right(&mut self) {
+    pub(crate) fn align_nodes_right(&mut self) {
         let ids = self.selected_node_ids();
         let max_x = ids.iter()
             .filter_map(|id| self.document.find_node(id))
@@ -1285,7 +1285,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn align_nodes_center_h(&mut self) {
+    pub(crate) fn align_nodes_center_h(&mut self) {
         let ids = self.selected_node_ids();
         let centers: Vec<f32> = ids.iter()
             .filter_map(|id| self.document.find_node(id))
@@ -1297,7 +1297,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn align_nodes_top(&mut self) {
+    pub(crate) fn align_nodes_top(&mut self) {
         let ids = self.selected_node_ids();
         let min_y = ids.iter()
             .filter_map(|id| self.document.find_node(id))
@@ -1308,7 +1308,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn align_nodes_bottom(&mut self) {
+    pub(crate) fn align_nodes_bottom(&mut self) {
         let ids = self.selected_node_ids();
         let max_y = ids.iter()
             .filter_map(|id| self.document.find_node(id))
@@ -1319,7 +1319,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn align_nodes_center_v(&mut self) {
+    pub(crate) fn align_nodes_center_v(&mut self) {
         let ids = self.selected_node_ids();
         let centers: Vec<f32> = ids.iter()
             .filter_map(|id| self.document.find_node(id))
