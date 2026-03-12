@@ -855,29 +855,29 @@ impl FlowchartApp {
         // Edge label
         if !edge.label.is_empty() {
             let mid = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
-            let font_size = 12.0 * self.viewport.zoom;
+            let font_size = (12.0 * self.viewport.zoom).clamp(8.0, 24.0);
             if font_size > 4.0 {
                 let galley = painter.layout_no_wrap(
                     edge.label.clone(),
                     FontId::proportional(font_size),
-                    Color32::WHITE,
-                );
-                let text_rect = Rect::from_min_size(
-                    Pos2::new(
-                        mid.x - galley.size().x / 2.0,
-                        mid.y - galley.size().y / 2.0,
-                    ),
-                    galley.size(),
-                )
-                .expand(3.0);
-                painter.rect_filled(text_rect, CornerRadius::same(3), EDGE_LABEL_BG);
-                painter.text(
-                    mid,
-                    Align2::CENTER_CENTER,
-                    &edge.label,
-                    FontId::proportional(font_size),
                     edge_color,
                 );
+                let text_rect = Rect::from_center_size(mid, galley.size()).expand2(Vec2::new(5.0, 3.0));
+                // Subtle drop shadow
+                painter.rect_filled(
+                    text_rect.translate(Vec2::new(1.0, 1.5)),
+                    CornerRadius::same(5),
+                    Color32::from_rgba_unmultiplied(0, 0, 0, 60),
+                );
+                // Background pill
+                painter.rect_filled(text_rect, CornerRadius::same(5), EDGE_LABEL_BG);
+                // Border on selected
+                if is_selected {
+                    painter.rect_stroke(text_rect, CornerRadius::same(5),
+                        Stroke::new(1.0, ACCENT.gamma_multiply(0.6)), StrokeKind::Outside);
+                }
+                painter.text(mid, Align2::CENTER_CENTER, &edge.label,
+                    FontId::proportional(font_size), edge_color);
             }
         }
 
