@@ -1056,8 +1056,40 @@ impl FlowchartApp {
         );
         painter.add(bezier);
 
-        // Highlight target port
+        // Draw all port side labels on nearby nodes to guide connection
         let canvas_dst = self.viewport.screen_to_canvas(*current_screen);
+        for node in &self.document.nodes {
+            if node.id == source.node_id { continue; }
+            let node_screen_rect = Rect::from_min_size(
+                self.viewport.canvas_to_screen(node.pos()),
+                node.size_vec() * self.viewport.zoom,
+            );
+            // Only label if close enough (within 250px of cursor)
+            if (node_screen_rect.center() - *current_screen).length() > 250.0 { continue; }
+            let r = PORT_RADIUS * self.viewport.zoom.sqrt();
+            for (side, label) in [
+                (PortSide::Top, "T"), (PortSide::Bottom, "B"),
+                (PortSide::Left, "L"), (PortSide::Right, "R"),
+            ] {
+                let port_canvas = node.port_position(side);
+                let port_screen = self.viewport.canvas_to_screen(port_canvas);
+                let near = (port_screen - *current_screen).length() < 20.0;
+                let color = if near { ACCENT } else { Color32::from_rgba_unmultiplied(147, 153, 178, 160) };
+                painter.circle_filled(port_screen, if near { r * 1.8 } else { r }, color);
+                if near || self.viewport.zoom > 0.7 {
+                    let offset = match side {
+                        PortSide::Top    => Vec2::new(0.0, -12.0),
+                        PortSide::Bottom => Vec2::new(0.0,  12.0),
+                        PortSide::Left   => Vec2::new(-12.0, 0.0),
+                        PortSide::Right  => Vec2::new( 12.0, 0.0),
+                    };
+                    painter.text(port_screen + offset, Align2::CENTER_CENTER, label,
+                        FontId::proportional(9.0), color);
+                }
+            }
+        }
+
+        // Highlight target port with name badge
         if let Some(target_port) = self.hit_test_port(canvas_dst) {
             if target_port.node_id != source.node_id {
                 if let Some(tgt_node) = node_idx
@@ -1071,6 +1103,17 @@ impl FlowchartApp {
                     painter.circle_filled(port_pos, r * 1.5, ACCENT_SELECT_BG);
                     painter.circle_filled(port_pos, r, ACCENT);
                     painter.circle_stroke(port_pos, r, Stroke::new(2.0, Color32::WHITE));
+                    // Port name badge
+                    let side_name = match target_port.side {
+                        PortSide::Top => "Top", PortSide::Bottom => "Bottom",
+                        PortSide::Left => "Left", PortSide::Right => "Right",
+                    };
+                    let badge_pos = port_pos + Vec2::new(0.0, r * 2.2);
+                    let badge_w = side_name.len() as f32 * 5.5 + 10.0;
+                    let badge_rect = Rect::from_center_size(badge_pos, Vec2::new(badge_w, 16.0));
+                    painter.rect_filled(badge_rect, CornerRadius::same(4), ACCENT);
+                    painter.text(badge_pos, Align2::CENTER_CENTER, side_name,
+                        FontId::proportional(9.5), Color32::BLACK);
                 }
             }
         }
