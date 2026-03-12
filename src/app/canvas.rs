@@ -643,6 +643,73 @@ impl FlowchartApp {
             }
         }
 
+        // Multi-selection bounding box with dimension labels (shown when ≥2 nodes selected)
+        if self.selection.node_ids.len() >= 2 {
+            let sel_nodes: Vec<&Node> = self.document.nodes.iter()
+                .filter(|n| self.selection.contains_node(&n.id))
+                .collect();
+            if !sel_nodes.is_empty() {
+                let mut min_x = f32::MAX; let mut min_y = f32::MAX;
+                let mut max_x = f32::MIN; let mut max_y = f32::MIN;
+                for n in &sel_nodes {
+                    let p = n.pos();
+                    let s = n.size_vec();
+                    min_x = min_x.min(p.x); min_y = min_y.min(p.y);
+                    max_x = max_x.max(p.x + s.x); max_y = max_y.max(p.y + s.y);
+                }
+                let tl = self.viewport.canvas_to_screen(Pos2::new(min_x, min_y));
+                let br = self.viewport.canvas_to_screen(Pos2::new(max_x, max_y));
+                let bbox = Rect::from_min_max(tl, br).expand(8.0);
+                // Dashed border segments
+                let dash_color = SELECTION_COLOR.gamma_multiply(0.55);
+                let dash_len = 6.0_f32;
+                let gap_len = 4.0_f32;
+                let corners = [bbox.left_top(), bbox.right_top(), bbox.right_bottom(), bbox.left_bottom(), bbox.left_top()];
+                for pair in corners.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    let total = (b - a).length();
+                    if total < 1.0 { continue; }
+                    let dir = (b - a) / total;
+                    let mut t = 0.0_f32;
+                    let mut drawing = true;
+                    while t < total {
+                        let seg_end = (t + if drawing { dash_len } else { gap_len }).min(total);
+                        if drawing {
+                            painter.line_segment([a + dir * t, a + dir * seg_end],
+                                Stroke::new(1.2, dash_color));
+                        }
+                        t = seg_end;
+                        drawing = !drawing;
+                    }
+                }
+                // Dimension labels
+                let w_canvas = max_x - min_x;
+                let h_canvas = max_y - min_y;
+                let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(9.0, 13.0);
+                let lbl_color = SELECTION_COLOR.gamma_multiply(0.75);
+                let bg = Color32::from_rgba_premultiplied(16, 16, 28, 180);
+                // Width label (bottom-center)
+                let w_text = format!("{:.0}", w_canvas);
+                let w_pos = Pos2::new(bbox.center().x, bbox.max.y + 10.0);
+                let w_galley = painter.layout_no_wrap(w_text.clone(), FontId::proportional(font_sz), lbl_color);
+                let wr = Rect::from_center_size(w_pos, w_galley.size()).expand2(Vec2::new(4.0, 2.0));
+                painter.rect_filled(wr, CornerRadius::same(3), bg);
+                painter.text(w_pos, Align2::CENTER_CENTER, &w_text, FontId::proportional(font_sz), lbl_color);
+                // Height label (right-center)
+                let h_text = format!("{:.0}", h_canvas);
+                let h_pos = Pos2::new(bbox.max.x + 10.0, bbox.center().y);
+                let h_galley = painter.layout_no_wrap(h_text.clone(), FontId::proportional(font_sz), lbl_color);
+                let hr = Rect::from_center_size(h_pos, h_galley.size()).expand2(Vec2::new(4.0, 2.0));
+                painter.rect_filled(hr, CornerRadius::same(3), bg);
+                painter.text(h_pos, Align2::CENTER_CENTER, &h_text, FontId::proportional(font_sz), lbl_color);
+                // Count label (top-left corner)
+                let count_text = format!("{}×", sel_nodes.len());
+                let count_pos = Pos2::new(bbox.min.x - 1.0, bbox.min.y - 10.0);
+                painter.text(count_pos, Align2::LEFT_BOTTOM, &count_text, FontId::proportional(font_sz), lbl_color);
+                let _ = (w_galley, h_galley); // suppress unused warnings
+            }
+        }
+
         // Compute search matches (for highlight overlay)
         let search_matches: std::collections::HashSet<NodeId> = if self.show_search && !self.search_query.is_empty() {
             let q = self.search_query.to_lowercase();
