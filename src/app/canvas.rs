@@ -57,6 +57,8 @@ impl FlowchartApp {
         // Regular scroll => pan canvas (with inertia accumulation)
         let dt = ui.ctx().input(|i| i.stable_dt).clamp(0.001, 0.1);
         if !cmd_held && scroll.length() > 0.0 {
+            // User is scrolling — cancel any in-progress fly-to animation
+            self.pan_target = None;
             // Add scroll to velocity (weighted by frame time for consistent feel)
             self.pan_velocity[0] += scroll.x * 0.6;
             self.pan_velocity[1] += scroll.y * 0.6;
@@ -84,6 +86,22 @@ impl FlowchartApp {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         } else {
             self.zoom_target = self.viewport.zoom;
+        }
+
+        // Smooth pan interpolation toward pan_target (used by fit-to-content / minimap fly-to)
+        if let Some(target) = self.pan_target {
+            let lerp = 1.0 - 0.80_f32.powf(dt * 60.0);
+            let dx = target[0] - self.viewport.offset[0];
+            let dy = target[1] - self.viewport.offset[1];
+            if dx.abs() > 0.5 || dy.abs() > 0.5 {
+                self.viewport.offset[0] += dx * lerp;
+                self.viewport.offset[1] += dy * lerp;
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+            } else {
+                self.viewport.offset[0] = target[0];
+                self.viewport.offset[1] = target[1];
+                self.pan_target = None;
+            }
         }
 
         self.handle_drag_start(&response, ui, pointer_pos);
@@ -718,6 +736,8 @@ impl FlowchartApp {
             .input(|i| i.pointer.button_down(egui::PointerButton::Middle));
 
         if self.space_held || middle_button {
+            // Cancel any fly-to animation when user grabs the canvas
+            self.pan_target = None;
             self.drag = DragState::Panning {
                 start_offset: self.viewport.offset,
                 start_mouse: mouse,
@@ -2836,10 +2856,12 @@ impl FlowchartApp {
         let world_x = bb_min.x + (click_pos.x - offset_x) / scale;
         let world_y = bb_min.y + (click_pos.y - offset_y) / scale;
 
-        // Pan viewport so (world_x, world_y) is at canvas center
+        // Smoothly fly viewport so (world_x, world_y) is at canvas center
         let c = canvas_rect.center();
-        self.viewport.offset[0] = c.x - world_x * self.viewport.zoom;
-        self.viewport.offset[1] = c.y - world_y * self.viewport.zoom;
+        self.pan_target = Some([
+            c.x - world_x * self.viewport.zoom,
+            c.y - world_y * self.viewport.zoom,
+        ]);
     }
 
     fn draw_minimap(&self, painter: &egui::Painter, canvas_rect: Rect) {

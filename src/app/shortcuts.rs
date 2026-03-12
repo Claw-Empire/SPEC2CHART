@@ -356,10 +356,10 @@ impl FlowchartApp {
             self.step_zoom(0.8);
         }
 
-        // Cmd+0 = reset zoom (smooth)
+        // Cmd+0 = reset zoom (smooth animated)
         if ctx.input(|i| i.key_pressed(Key::Num0) && i.modifiers.matches_exact(cmd)) {
             self.zoom_target = 1.0;
-            self.viewport.offset = [0.0, 0.0];
+            self.pan_target = Some([0.0, 0.0]);
         }
 
         // F = fit selection (or all if nothing selected)

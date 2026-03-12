@@ -148,6 +148,8 @@ pub struct FlowchartApp {
     pub(crate) pan_velocity: [f32; 2],
     /// Target zoom for smooth keyboard zoom interpolation
     pub(crate) zoom_target: f32,
+    /// Target pan offset for smooth fly-to animation (None = no animation)
+    pub(crate) pan_target: Option<[f32; 2]>,
     /// Floating quick-notes panel visible/hidden (Shift+P)
     pub(crate) show_quick_notes: bool,
     /// Contents of the floating quick-notes panel
@@ -276,6 +278,7 @@ impl FlowchartApp {
             show_heatmap: false,
             pan_velocity: [0.0, 0.0],
             zoom_target: 1.0,
+            pan_target: None,
             show_quick_notes: false,
             quick_notes_text: String::new(),
             paste_count: 0,

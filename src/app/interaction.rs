@@ -231,11 +231,11 @@ impl FlowchartApp {
             .min(canvas_h / bb.height())
             .clamp(0.1, 10.0);
 
-        self.viewport.zoom = zoom;
-        self.viewport.offset[0] =
-            self.canvas_rect.min.x + canvas_w / 2.0 - bb.center().x * zoom;
-        self.viewport.offset[1] =
-            self.canvas_rect.min.y + canvas_h / 2.0 - bb.center().y * zoom;
+        // Animate to target instead of snapping (smooth fly-to)
+        self.zoom_target = zoom;
+        let target_ox = self.canvas_rect.min.x + canvas_w / 2.0 - bb.center().x * zoom;
+        let target_oy = self.canvas_rect.min.y + canvas_h / 2.0 - bb.center().y * zoom;
+        self.pan_target = Some([target_ox, target_oy]);
     }
 
     pub(crate) fn step_zoom(&mut self, factor: f32) {
