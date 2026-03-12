@@ -588,12 +588,14 @@ impl FlowchartApp {
                 };
                 let next_id = self.document.nodes[next_idx].id;
                 self.selection.select_node(next_id);
-                // Pan to show selected node
-                let node = &self.document.nodes[next_idx];
+                // Smoothly pan to show selected node via animated pan_target
+                let node_rect = self.document.nodes[next_idx].rect();
+                let node_center = node_rect.center();
                 let c = self.canvas_rect.center();
-                let p = node.pos();
-                self.viewport.offset[0] = c.x - p.x * self.viewport.zoom;
-                self.viewport.offset[1] = c.y - p.y * self.viewport.zoom;
+                self.pan_target = Some([
+                    c.x - node_center.x * self.viewport.zoom,
+                    c.y - node_center.y * self.viewport.zoom,
+                ]);
             }
         }
 
@@ -696,11 +698,13 @@ impl FlowchartApp {
                 };
                 let next_id = self.document.nodes[next_idx].id;
                 self.selection.select_node(next_id);
-                // Pan viewport to show the selected node
-                let node_pos = self.document.nodes[next_idx].pos();
+                // Smoothly pan to show the selected node (uses animated pan_target)
+                let node_rect = self.document.nodes[next_idx].rect();
+                let node_center = node_rect.center();
                 let screen_center = self.canvas_rect.center();
-                self.viewport.offset[0] = screen_center.x - node_pos.x * self.viewport.zoom;
-                self.viewport.offset[1] = screen_center.y - node_pos.y * self.viewport.zoom;
+                let target_offset_x = screen_center.x - node_center.x * self.viewport.zoom;
+                let target_offset_y = screen_center.y - node_center.y * self.viewport.zoom;
+                self.pan_target = Some([target_offset_x, target_offset_y]);
             }
         }
 
