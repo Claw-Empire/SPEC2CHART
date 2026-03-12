@@ -491,6 +491,11 @@ impl FlowchartApp {
             self.draw_ruler_crosshair(&painter, canvas_rect, pointer_pos);
         }
 
+        // --- Presentation spotlight ---
+        if self.presentation_mode {
+            self.draw_presentation_spotlight(&painter, canvas_rect, pointer_pos);
+        }
+
         // --- Previews ---
         self.draw_alignment_guides(&painter, canvas_rect);
         self.draw_distance_indicators(&painter);
@@ -1806,6 +1811,92 @@ impl FlowchartApp {
         let color = Color32::from_rgba_premultiplied(180, 180, 200, 100);
         let pos = Pos2::new(canvas_rect.min.x + 20.0, canvas_rect.min.y + 20.0);
         painter.text(pos, Align2::LEFT_TOP, &self.project_title, font, color);
+    }
+
+    fn draw_presentation_spotlight(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {
+        // Soft radial vignette centered on cursor; fallback to canvas center
+        let center = pointer_pos.unwrap_or(canvas_rect.center());
+        let radius = (canvas_rect.width().min(canvas_rect.height()) * 0.38).max(200.0);
+
+        // Draw vignette as a mesh: concentric rings from transparent near center to dark at edges
+        // We approximate with painter.add(Shape::mesh) using vertex colors
+        use egui::{epaint::{Mesh, Vertex}, Shape};
+        let dark = Color32::from_rgba_unmultiplied(0, 0, 0, 160);
+        let transparent = Color32::TRANSPARENT;
+
+        // Corners of the canvas get darkened; region near cursor stays clear
+        // Approach: draw 4 corner triangulated quads that fade from dark at canvas corners to transparent near spotlight
+        // Simpler approach: draw dark overlay rect, then punch a gradient circle on top using blending via many small quads
+
+        // Actually render as a set of thin concentric "ring" polys isn't easy without custom shaders.
+        // Use additive approach: draw dark-filled canvas rect, then draw bright circle with gamma_multiply trick.
+        // Since egui compositing is additive/alpha, we do:
+        //   1. Semi-transparent dark overlay over whole canvas
+        //   2. Bright transparent "erase" circle — achieved by drawing a slightly lighter circle on top
+        // This isn't true vignette but gives a useful spotlight visual.
+
+        // Layer 1: dark overlay
+        painter.rect_filled(canvas_rect, CornerRadius::ZERO, dark);
+
+        // Layer 2: "spotlight" — lighter circle at cursor to lift the darkness
+        // Use a mesh with 32 segments, alpha = 0 at center fading to 0 at edge (i.e., a hole in the dark)
+        // We can't "erase" in egui, so instead we lighten by drawing a bright overlay with ZERO at edge
+        // Strategy: draw gradient circle from white/transparent at center to fully transparent at radius
+        // Combined with the dark overlay, this creates a spotlight feel.
+        let segments = 48usize;
+        let mut mesh = Mesh::default();
+
+        // Center vertex: bright (lifts dark overlay)
+        let center_color = Color32::from_rgba_unmultiplied(30, 30, 50, 0); // transparent at center
+        mesh.vertices.push(Vertex { pos: center, uv: egui::pos2(0.0, 0.0), color: center_color });
+
+        for i in 0..=segments {
+            let angle = i as f32 / segments as f32 * std::f32::consts::TAU;
+            let p = center + Vec2::new(angle.cos(), angle.sin()) * radius;
+            let t = 1.0_f32; // edge: fully dark (matches overlay, no additional brightening)
+            let _ = t;
+            mesh.vertices.push(Vertex { pos: p, uv: egui::pos2(0.0, 0.0), color: transparent });
+        }
+
+        // Indices: triangle fan from center (vertex 0) to ring vertices
+        for i in 0..segments as u32 {
+            mesh.indices.extend_from_slice(&[0, i + 1, i + 2]);
+        }
+
+        // Paint the "spotlight hole" — this is still dark, but punches through the overlay.
+        // Because egui alpha-blends, this transparent region lets the actual canvas show through more.
+        // To actually lighten, we need a bright-colored center — use a subtle white with partial alpha:
+        for v in mesh.vertices.iter_mut() {
+            if (v.pos - center).length() < 1.0 {
+                v.color = Color32::from_rgba_unmultiplied(255, 255, 240, 0);
+            }
+        }
+
+        painter.add(Shape::mesh(mesh));
+
+        // Soft glow ring at cursor
+        let glow_color = Color32::from_rgba_unmultiplied(255, 255, 200, 25);
+        painter.circle_filled(center, radius * 0.12, glow_color);
+        painter.circle_filled(center, radius * 0.06, Color32::from_rgba_unmultiplied(255, 255, 220, 40));
+
+        // Cursor circle indicator
+        painter.circle_stroke(center, 18.0, Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 240, 180, 160)));
+        painter.circle_stroke(center, 4.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 240, 180, 220)));
+
+        // "PRESENT" badge in top-left
+        let badge_pos = Pos2::new(canvas_rect.min.x + 12.0, canvas_rect.min.y + 12.0);
+        painter.rect_filled(
+            Rect::from_min_size(badge_pos, Vec2::new(58.0, 16.0)),
+            CornerRadius::same(4),
+            Color32::from_rgba_unmultiplied(200, 60, 60, 200),
+        );
+        painter.text(
+            badge_pos + Vec2::new(29.0, 8.0),
+            Align2::CENTER_CENTER,
+            "● PRESENT",
+            FontId::proportional(9.0),
+            Color32::WHITE,
+        );
     }
 
     fn draw_rulers(&self, painter: &egui::Painter, canvas_rect: Rect) {
