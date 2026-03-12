@@ -2046,14 +2046,34 @@ impl FlowchartApp {
             )
         };
 
+        // Draw edges first (behind nodes)
+        let edge_color_mm = Color32::from_rgba_unmultiplied(100, 110, 130, 120);
+        let edge_sel_col  = Color32::from_rgba_unmultiplied(137, 180, 250, 200);
+        for edge in &self.document.edges {
+            let src_node = self.document.find_node(&edge.source.node_id);
+            let tgt_node = self.document.find_node(&edge.target.node_id);
+            if let (Some(sn), Some(tn)) = (src_node, tgt_node) {
+                let sp = sn.port_position(edge.source.side);
+                let tp = tn.port_position(edge.target.side);
+                let ms = map_point(sp.x, sp.y);
+                let mt = map_point(tp.x, tp.y);
+                if minimap_rect.contains(ms) || minimap_rect.contains(mt) {
+                    let col = if self.selection.contains_edge(&edge.id) { edge_sel_col } else { edge_color_mm };
+                    painter.line_segment([ms, mt], Stroke::new(0.8, col));
+                }
+            }
+        }
+
         for node in &self.document.nodes {
             let r = node.rect();
             let min_pt = map_point(r.min.x, r.min.y);
             let max_pt = map_point(r.max.x, r.max.y);
             let mini_rect = Rect::from_two_pos(min_pt, max_pt);
             let is_selected = self.selection.contains_node(&node.id);
-            // Tag color or default minimap color
-            let node_color = if is_selected {
+            // Frame nodes: very transparent
+            let node_color = if node.is_frame {
+                Color32::from_rgba_unmultiplied(89, 91, 118, 50)
+            } else if is_selected {
                 ACCENT
             } else if let Some(tag) = node.tag {
                 to_color32(tag.color())
