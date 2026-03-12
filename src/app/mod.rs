@@ -164,6 +164,8 @@ pub struct FlowchartApp {
     pub(crate) prev_node_ids: std::collections::HashSet<NodeId>,
     /// Active creation ripples: (world_center, birth_time_secs)
     pub(crate) creation_ripples: Vec<([f32; 2], f64)>,
+    /// Inline canvas label editor: (node_id, editing_text)
+    pub(crate) inline_node_edit: Option<(NodeId, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +294,7 @@ impl FlowchartApp {
             layout_targets: std::collections::HashMap::new(),
             prev_node_ids: std::collections::HashSet::new(),
             creation_ripples: Vec::new(),
+            inline_node_edit: None,
         }
     }
 

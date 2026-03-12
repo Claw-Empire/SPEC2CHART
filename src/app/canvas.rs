@@ -385,7 +385,19 @@ impl FlowchartApp {
                 let canvas_pos = self.viewport.screen_to_canvas(mouse);
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                     self.selection.select_node(node_id);
-                    self.focus_label_edit = true;
+                    // Open inline canvas editor for editable label types
+                    let current_label = self.document.find_node(&node_id)
+                        .and_then(|n| match &n.kind {
+                            NodeKind::Shape { label, .. } => Some(label.clone()),
+                            NodeKind::Text { content } => Some(content.clone()),
+                            NodeKind::Entity { name, .. } => Some(name.clone()),
+                            NodeKind::StickyNote { text, .. } => Some(text.clone()),
+                        });
+                    if let Some(label) = current_label {
+                        self.inline_node_edit = Some((node_id, label));
+                    } else {
+                        self.focus_label_edit = true;
+                    }
                 } else if let Some(edge_id) = self.hit_test_edge(canvas_pos) {
                     // Double-click edge => open inline label editor near click position
                     self.selection.select_edge(edge_id);
@@ -399,7 +411,7 @@ impl FlowchartApp {
                     let id = node.id;
                     self.document.nodes.push(node);
                     self.selection.select_node(id);
-                    self.focus_label_edit = true;
+                    self.inline_node_edit = Some((id, String::new()));
                     self.history.push(&self.document);
                     self.status_message = Some(("Node created".to_string(), std::time::Instant::now()));
                 }
@@ -745,6 +757,7 @@ impl FlowchartApp {
             }
         }
 
+        self.draw_inline_node_editor(ui, canvas_rect);
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
@@ -3173,6 +3186,119 @@ impl FlowchartApp {
                 painter.circle_filled(pos, dot_r, dot_color);
             }
         }
+    }
+
+    /// Render the inline canvas label editor overlay when a node is being edited.
+    fn draw_inline_node_editor(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        let node_id = match &self.inline_node_edit {
+            Some((id, _)) => *id,
+            None => return,
+        };
+
+        // Get the node's screen rect
+        let (screen_rect, is_multiline) = match self.document.find_node(&node_id) {
+            Some(node) => {
+                let sr = Rect::from_min_size(
+                    self.viewport.canvas_to_screen(node.pos()),
+                    node.size_vec() * self.viewport.zoom,
+                );
+                let multi = matches!(&node.kind, NodeKind::StickyNote { .. } | NodeKind::Text { .. });
+                (sr, multi)
+            }
+            None => {
+                self.inline_node_edit = None;
+                return;
+            }
+        };
+
+        if !canvas_rect.intersects(screen_rect) {
+            return;
+        }
+
+        // Clamp editor rect to canvas bounds and add small inset
+        let edit_rect = screen_rect.shrink(6.0).intersect(canvas_rect);
+        if !edit_rect.is_positive() { return; }
+
+        // Background: semi-transparent dark overlay matching node
+        let painter = ui.painter();
+        painter.rect_filled(
+            screen_rect,
+            CornerRadius::same(4),
+            Color32::from_rgba_premultiplied(20, 20, 35, 200),
+        );
+        painter.rect_stroke(
+            screen_rect,
+            CornerRadius::same(4),
+            Stroke::new(2.0, ACCENT),
+            StrokeKind::Outside,
+        );
+
+        // Place an egui TextEdit directly on the canvas
+        let font_size = (13.0 * self.viewport.zoom).clamp(10.0, 22.0);
+        let mut area = egui::Area::new(egui::Id::new("inline_node_edit"))
+            .fixed_pos(edit_rect.min)
+            .order(egui::Order::Foreground);
+
+        // Prevent the area from being dragged
+        area = area.interactable(true);
+
+        area.show(ui.ctx(), |ui| {
+            ui.set_width(edit_rect.width());
+            ui.set_height(edit_rect.height());
+
+            let text = match &mut self.inline_node_edit {
+                Some((_, t)) => t,
+                None => return,
+            };
+
+            let edit_response = if is_multiline {
+                ui.add_sized(
+                    edit_rect.size(),
+                    egui::TextEdit::multiline(text)
+                        .font(egui::FontId::proportional(font_size))
+                        .frame(false)
+                        .desired_width(edit_rect.width()),
+                )
+            } else {
+                ui.add_sized(
+                    edit_rect.size(),
+                    egui::TextEdit::singleline(text)
+                        .font(egui::FontId::proportional(font_size))
+                        .frame(false)
+                        .desired_width(edit_rect.width()),
+                )
+            };
+
+            // Auto-focus on first frame
+            if !edit_response.has_focus() {
+                edit_response.request_focus();
+            }
+
+            let committed = ui.ctx().input(|i| {
+                i.key_pressed(egui::Key::Enter) && (!is_multiline || !i.modifiers.shift)
+            });
+            let escaped = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
+            let clicked_away = ui.ctx().input(|i| i.pointer.primary_clicked())
+                && !screen_rect.contains(ui.ctx().input(|i| i.pointer.interact_pos().unwrap_or(Pos2::ZERO)));
+
+            if committed || clicked_away {
+                // Commit: apply the edited text back to the node
+                let final_text = text.clone();
+                if let Some(node) = self.document.find_node_mut(&node_id) {
+                    match &mut node.kind {
+                        NodeKind::Shape { label, .. } => *label = final_text,
+                        NodeKind::Text { content } => *content = final_text,
+                        NodeKind::Entity { name, .. } => *name = final_text,
+                        NodeKind::StickyNote { text: t, .. } => *t = final_text,
+                    }
+                }
+                self.inline_node_edit = None;
+                self.history.push(&self.document);
+            } else if escaped {
+                // Discard
+                self.inline_node_edit = None;
+            }
+        });
     }
 
     /// Draw Figma-style distance rulers from `source_id` to its nearest neighbours.
