@@ -196,6 +196,32 @@ impl FlowchartApp {
             }
         }
 
+        // Connection density ring: thin outer ring color-coded by node degree
+        // Only visible at normal zoom and not for frames
+        if !node.is_frame && self.viewport.zoom > 0.4 {
+            let degree = self.document.edges.iter()
+                .filter(|e| e.source.node_id == node.id || e.target.node_id == node.id)
+                .count();
+            if degree >= 3 {
+                // 3–5: blue  6–9: orange  10+: red-orange
+                let ring_color = if degree >= 10 {
+                    Color32::from_rgba_unmultiplied(235, 120, 70, 70)
+                } else if degree >= 6 {
+                    Color32::from_rgba_unmultiplied(235, 175, 60, 65)
+                } else {
+                    Color32::from_rgba_unmultiplied(120, 180, 255, 60)
+                };
+                let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + 0.5) as u8);
+                let ring_width = (0.8 + (degree as f32 / 10.0).min(1.0) * 1.5).clamp(0.8, 2.3);
+                painter.rect_stroke(
+                    screen_rect.expand(4.5),
+                    cr,
+                    Stroke::new(ring_width, ring_color),
+                    StrokeKind::Outside,
+                );
+            }
+        }
+
         // Drop shadow (rendered before node so it appears behind)
         if node.style.shadow && !node.is_frame {
             let shadow_offset = Vec2::new(3.0, 5.0) * self.viewport.zoom.sqrt();
