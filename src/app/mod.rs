@@ -166,6 +166,9 @@ pub struct FlowchartApp {
     pub(crate) creation_ripples: Vec<([f32; 2], f64)>,
     /// Inline canvas label editor: (node_id, editing_text)
     pub(crate) inline_node_edit: Option<(NodeId, String)>,
+    /// Tracks when a node hover started: (node_id, egui_time_secs)
+    /// Used for progressive tooltip delay.
+    pub(crate) hover_node_start: Option<(NodeId, f64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +298,7 @@ impl FlowchartApp {
             prev_node_ids: std::collections::HashSet::new(),
             creation_ripples: Vec::new(),
             inline_node_edit: None,
+            hover_node_start: None,
         }
     }
 

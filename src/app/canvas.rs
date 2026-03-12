@@ -445,6 +445,24 @@ impl FlowchartApp {
             _ => None,
         };
 
+        // Progressive tooltip: track how long we've been hovering the same node
+        {
+            let now = ui.ctx().input(|i| i.time);
+            match (hover_node_id, self.hover_node_start) {
+                (Some(hid), Some((prev_id, _))) if hid == prev_id => {
+                    // Same node — keep the timer running, request repaint for animation
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                }
+                (Some(hid), _) => {
+                    // New node hovered — reset timer
+                    self.hover_node_start = Some((hid, now));
+                }
+                (None, _) => {
+                    self.hover_node_start = None;
+                }
+            }
+        }
+
         // Edges (visible only)
         for edge in &self.document.edges {
             let src_visible = node_idx
@@ -1694,42 +1712,110 @@ impl FlowchartApp {
         let Some(mouse) = hover_pos else { return };
         if !canvas_rect.contains(mouse) { return }
 
-        // Find hovered node and extract description
-        let description = self.document.nodes.iter().rev().find_map(|node| {
+        // Determine hover duration to decide tooltip richness
+        let now = painter.ctx().input(|i| i.time);
+        let hover_duration = self.hover_node_start
+            .and_then(|(_, start)| Some(now - start))
+            .unwrap_or(0.0);
+
+        // Find hovered node
+        let hovered_node = self.document.nodes.iter().rev().find(|node| {
             let top_left = self.viewport.canvas_to_screen(node.pos());
             let sr = Rect::from_min_size(top_left, node.size_vec() * self.viewport.zoom);
-            if !sr.contains(mouse) { return None; }
-            match &node.kind {
-                crate::model::NodeKind::Shape { description, label, .. } if !description.is_empty() => {
-                    Some((label.clone(), description.clone()))
-                }
-                _ => None,
-            }
+            sr.contains(mouse)
         });
+        let Some(node) = hovered_node else { return };
 
-        let Some((label, desc)) = description else { return };
+        // Basic tooltip: show if node has a description (immediate)
+        let desc = match &node.kind {
+            crate::model::NodeKind::Shape { description, .. } => description.as_str(),
+            _ => "",
+        };
+        let label = node.display_label();
+
+        // Only show if there's something to show
+        let rich_mode = hover_duration > 0.8;
+        let has_basic = !desc.is_empty();
+        if !has_basic && !rich_mode { return; }
 
         let max_w = 240.0;
         let pad = 10.0;
-        let font_label = egui::FontId::proportional(12.0);
-        let font_desc  = egui::FontId::proportional(11.0);
 
-        // Measure text height (approximate: 14px per line)
-        let desc_lines = desc.lines().count().max(1);
-        let total_h = 14.0 + (desc_lines as f32) * 14.0 + pad * 2.0 + 4.0;
+        // Collect rich data
+        let conn_in  = self.document.edges.iter().filter(|e| e.target.node_id == node.id).count();
+        let conn_out = self.document.edges.iter().filter(|e| e.source.node_id == node.id).count();
+        let has_url     = !node.url.is_empty();
+        let has_comment = !node.comment.is_empty();
+        let tag_label   = node.tag.map(|t| t.label());
+
+        // Build rows to render
+        let mut rows: Vec<(String, Color32)> = Vec::new();
+        if !desc.is_empty() {
+            rows.push((desc.to_string(), TEXT_DIM));
+        }
+        if rich_mode {
+            if conn_in > 0 || conn_out > 0 {
+                rows.push((format!("↑{} in  ↓{} out", conn_in, conn_out), TEXT_DIM));
+            }
+            if let Some(tag) = tag_label {
+                rows.push((format!("Tag: {}", tag), TEXT_DIM));
+            }
+            if has_url  { rows.push(("🔗 URL attached".to_string(), TEXT_DIM)); }
+            if has_comment { rows.push(("💬 Has comment".to_string(), TEXT_DIM)); }
+            if node.locked { rows.push(("🔒 Locked".to_string(), TEXT_DIM)); }
+        }
+        if rows.is_empty() && !rich_mode { return; }
+
+        let line_h = 14.0_f32;
+        let header_h = 16.0_f32;
+        let total_h = pad * 2.0 + header_h + (rows.len() as f32) * line_h + if !rows.is_empty() { 4.0 } else { 0.0 };
 
         let mut tx = mouse.x + 14.0;
         let mut ty = mouse.y + 14.0;
-        // Keep on screen
         if tx + max_w + pad > canvas_rect.max.x { tx = mouse.x - max_w - 14.0; }
         if ty + total_h > canvas_rect.max.y { ty = mouse.y - total_h - 14.0; }
 
-        let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), egui::Vec2::new(max_w, total_h));
-        painter.rect_filled(bg_rect, egui::CornerRadius::same(6), TOOLTIP_BG);
-        painter.rect_stroke(bg_rect, egui::CornerRadius::same(6), egui::Stroke::new(1.0, TOOLTIP_BORDER), egui::StrokeKind::Outside);
+        // Fade-in effect when switching to rich mode
+        let alpha_factor = if rich_mode {
+            ((hover_duration - 0.8) / 0.3).clamp(0.0, 1.0) as f32
+        } else { 1.0 };
 
-        painter.text(Pos2::new(tx + pad, ty + pad), egui::Align2::LEFT_TOP, &label, font_label, TEXT_SECONDARY);
-        painter.text(Pos2::new(tx + pad, ty + pad + 16.0), egui::Align2::LEFT_TOP, &desc, font_desc, TEXT_DIM);
+        let bg = TOOLTIP_BG;
+        let border_col = if rich_mode {
+            Color32::from_rgba_unmultiplied(137, 180, 250, (80.0 * alpha_factor) as u8)
+        } else {
+            TOOLTIP_BORDER
+        };
+
+        let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), egui::Vec2::new(max_w, total_h));
+        painter.rect_filled(bg_rect, egui::CornerRadius::same(6), bg);
+        painter.rect_stroke(bg_rect, egui::CornerRadius::same(6),
+            egui::Stroke::new(1.0, border_col), egui::StrokeKind::Outside);
+
+        // Label header
+        painter.text(Pos2::new(tx + pad, ty + pad), egui::Align2::LEFT_TOP, &label,
+            egui::FontId::proportional(12.0), TEXT_SECONDARY);
+
+        // Separator line when rich
+        if rich_mode && !rows.is_empty() {
+            painter.line_segment(
+                [Pos2::new(tx + pad, ty + pad + header_h + 1.0),
+                 Pos2::new(tx + max_w - pad, ty + pad + header_h + 1.0)],
+                egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(100, 100, 140, (60.0 * alpha_factor) as u8)),
+            );
+        }
+
+        // Detail rows
+        for (i, (text, color)) in rows.iter().enumerate() {
+            let row_color = Color32::from_rgba_unmultiplied(
+                color.r(), color.g(), color.b(), (color.a() as f32 * alpha_factor) as u8,
+            );
+            painter.text(
+                Pos2::new(tx + pad, ty + pad + header_h + 4.0 + i as f32 * line_h),
+                egui::Align2::LEFT_TOP, text,
+                egui::FontId::proportional(10.5), row_color,
+            );
+        }
     }
 
     // --- Canvas HUD ---
