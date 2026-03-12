@@ -5,23 +5,58 @@ use super::theme::*;
 
 impl FlowchartApp {
     pub(crate) fn draw_properties_panel(&mut self, ctx: &egui::Context) {
+        // Collapsed: show a thin strip with just an expand button
+        if self.properties_collapsed {
+            SidePanel::right("properties")
+                .resizable(false)
+                .exact_width(28.0)
+                .frame(egui::Frame {
+                    fill: MANTLE,
+                    inner_margin: egui::Margin::same(0),
+                    stroke: Stroke::new(1.0, SURFACE1),
+                    ..Default::default()
+                })
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        let btn = egui::Button::new(
+                            egui::RichText::new("◀").size(11.0).color(TEXT_DIM)
+                        ).fill(egui::Color32::TRANSPARENT).frame(false);
+                        if ui.add(btn).on_hover_text("Expand properties").clicked() {
+                            self.properties_collapsed = false;
+                        }
+                    });
+                });
+            return;
+        }
+
         SidePanel::right("properties")
             .resizable(false)
             .exact_width(PROPERTIES_WIDTH)
             .frame(egui::Frame {
                 fill: MANTLE,
-                inner_margin: egui::Margin::same(16),
+                inner_margin: egui::Margin::same(0),
                 stroke: Stroke::new(1.0, SURFACE1),
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                ui.label(
-                    egui::RichText::new("Properties")
-                        .size(14.0)
-                        .color(TEXT_PRIMARY)
-                        .strong(),
-                );
-                ui.add_space(12.0);
+                // Header with collapse button
+                ui.horizontal(|ui| {
+                    let btn = egui::Button::new(
+                        egui::RichText::new("▶").size(10.0).color(TEXT_DIM)
+                    ).fill(egui::Color32::TRANSPARENT).frame(false);
+                    if ui.add(btn).on_hover_text("Collapse properties").clicked() {
+                        self.properties_collapsed = true;
+                    }
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Properties")
+                            .size(14.0)
+                            .color(TEXT_PRIMARY)
+                            .strong(),
+                    );
+                });
+                ui.add_space(8.0);
 
                 let sel_nodes = self.selection.node_ids.len();
                 let sel_edges = self.selection.edge_ids.len();
@@ -30,15 +65,19 @@ impl FlowchartApp {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        if total == 0 {
-                            self.draw_empty_selection(ui);
-                        } else if total > 1 {
-                            self.draw_multi_selection_tools(ui, sel_nodes, total);
-                        } else if sel_nodes == 1 {
-                            self.draw_node_properties(ui);
-                        } else if sel_edges == 1 {
-                            self.draw_edge_properties(ui);
-                        }
+                        ui.add_space(4.0);
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min).with_cross_justify(true), |ui| {
+                            ui.set_width(PROPERTIES_WIDTH - 12.0);
+                            if total == 0 {
+                                self.draw_empty_selection(ui);
+                            } else if total > 1 {
+                                self.draw_multi_selection_tools(ui, sel_nodes, total);
+                            } else if sel_nodes == 1 {
+                                self.draw_node_properties(ui);
+                            } else if sel_edges == 1 {
+                                self.draw_edge_properties(ui);
+                            }
+                        });
                     });
             });
     }

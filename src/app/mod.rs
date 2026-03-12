@@ -188,6 +188,10 @@ pub struct FlowchartApp {
     pub(crate) tag_filter: Option<crate::model::NodeTag>,
     /// Deletion ghost animations: (canvas_center, canvas_size, fill_color, death_time)
     pub(crate) deletion_ghosts: Vec<([f32; 2], [f32; 2], [u8; 4], f64)>,
+    /// Toolbar (left panel) collapse state
+    pub(crate) toolbar_collapsed: bool,
+    /// Properties panel (right panel) collapse state
+    pub(crate) properties_collapsed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,6 +331,8 @@ impl FlowchartApp {
             node_birth_times: std::collections::HashMap::new(),
             tag_filter: None,
             deletion_ghosts: Vec::new(),
+            toolbar_collapsed: false,
+            properties_collapsed: false,
         }
     }
 
@@ -745,6 +751,8 @@ impl eframe::App for FlowchartApp {
                         ]),
                         ("Help", &[
                             ("F1 / ?", "This shortcuts panel"),
+                            ("[", "Collapse / expand left toolbar"),
+                            ("]", "Collapse / expand right panel"),
                         ]),
                     ];
                     egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {

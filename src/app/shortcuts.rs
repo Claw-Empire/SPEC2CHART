@@ -630,6 +630,14 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // [ = toggle left toolbar   ] = toggle right properties panel
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::OpenBracket) && i.modifiers.is_none()) {
+            self.toolbar_collapsed = !self.toolbar_collapsed;
+        }
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::CloseBracket) && i.modifiers.is_none()) {
+            self.properties_collapsed = !self.properties_collapsed;
+        }
+
         // Shift+P = toggle quick-notes panel
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.shift && !i.modifiers.command) {
             self.show_quick_notes = !self.show_quick_notes;

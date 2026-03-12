@@ -10,24 +10,69 @@ use super::theme::*;
 
 impl FlowchartApp {
     pub(crate) fn draw_toolbar(&mut self, ctx: &egui::Context) {
+        // Collapsed: show a thin strip with just an expand button
+        if self.toolbar_collapsed {
+            SidePanel::left("toolbar")
+                .resizable(false)
+                .exact_width(28.0)
+                .frame(egui::Frame {
+                    fill: MANTLE,
+                    inner_margin: egui::Margin::same(0),
+                    stroke: Stroke::new(1.0, SURFACE1),
+                    ..Default::default()
+                })
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        let btn = egui::Button::new(
+                            egui::RichText::new("▶").size(11.0).color(TEXT_DIM)
+                        ).fill(egui::Color32::TRANSPARENT).frame(false);
+                        if ui.add(btn).on_hover_text("Expand toolbar").clicked() {
+                            self.toolbar_collapsed = false;
+                        }
+                    });
+                });
+            return;
+        }
+
         SidePanel::left("toolbar")
             .resizable(false)
             .exact_width(TOOLBAR_WIDTH)
             .frame(egui::Frame {
                 fill: MANTLE,
-                inner_margin: egui::Margin::same(16),
+                inner_margin: egui::Margin::same(0),
                 stroke: Stroke::new(1.0, SURFACE1),
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                // Collapse button row at very top
                 ui.horizontal(|ui| {
+                    ui.add_space(10.0);
                     ui.label(
                         egui::RichText::new("Light Figma")
                             .size(18.0)
                             .strong()
                             .color(TEXT_PRIMARY),
                     );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(6.0);
+                        let btn = egui::Button::new(
+                            egui::RichText::new("◀").size(10.0).color(TEXT_DIM)
+                        ).fill(egui::Color32::TRANSPARENT).frame(false);
+                        if ui.add(btn).on_hover_text("Collapse toolbar").clicked() {
+                            self.toolbar_collapsed = true;
+                        }
+                    });
                 });
+                ui.add_space(4.0);
+
+                // All content in a scrollable area
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add_space(8.0);
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min).with_cross_justify(true), |ui| {
+                        ui.set_width(TOOLBAR_WIDTH - 12.0);
                 // Project title (shown as canvas watermark)
                 ui.add(
                     egui::TextEdit::singleline(&mut self.project_title)
@@ -531,27 +576,30 @@ impl FlowchartApp {
                     }
                 });
 
-                // Bottom spacer + node count
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} nodes  {}  edges",
-                            self.document.nodes.len(),
-                            self.document.edges.len()
-                        ))
-                        .size(11.0)
-                        .color(TEXT_DIM),
-                    );
-                    // Quick actions
-                    ui.add_space(4.0);
-                    if ui.small_button("Select All").clicked() {
-                        self.selection.clear();
-                        for n in &self.document.nodes { self.selection.node_ids.insert(n.id); }
-                        for e in &self.document.edges { self.selection.edge_ids.insert(e.id); }
-                    }
-                });
-            });
+                // Node count + quick actions
+                ui.add_space(8.0);
+                Self::draw_divider(ui);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} nodes  ·  {} edges",
+                        self.document.nodes.len(),
+                        self.document.edges.len()
+                    ))
+                    .size(11.0)
+                    .color(TEXT_DIM),
+                );
+                ui.add_space(4.0);
+                if ui.small_button("Select All").clicked() {
+                    self.selection.clear();
+                    for n in &self.document.nodes { self.selection.node_ids.insert(n.id); }
+                    for e in &self.document.edges { self.selection.edge_ids.insert(e.id); }
+                }
+                ui.add_space(16.0);
+
+                        }); // end with_layout (top_down)
+                    }); // end ScrollArea
+            }); // end SidePanel::show
     }
 
     fn draw_flowchart_shapes(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
