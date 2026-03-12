@@ -818,5 +818,79 @@ impl FlowchartApp {
                 self.history.push(&self.document);
             }
         }
+
+        // Enter = chain: create a new node connected to the right of the selected node
+        // Shift+Enter = chain downward
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
+            let shift = ctx.input(|i| i.modifiers.shift);
+            self.chain_create_node(shift);
+        }
+    }
+
+    /// Create a new node connected to the currently selected node.
+    /// If `downward` is false, place it to the right; if true, place it below.
+    fn chain_create_node(&mut self, downward: bool) {
+        // Only act when exactly one node is selected
+        let sel_id = match self.selection.node_ids.iter().next().copied() {
+            Some(id) if self.selection.node_ids.len() == 1 => id,
+            _ => return,
+        };
+        let (new_pos, new_size, src_side, tgt_side) = {
+            let node = match self.document.find_node(&sel_id) {
+                Some(n) => n,
+                None => return,
+            };
+            let gap = 60.0_f32;
+            if downward {
+                let pos = egui::Pos2::new(
+                    node.position[0],
+                    node.position[1] + node.size[1] + gap,
+                );
+                (pos, node.size, PortSide::Bottom, PortSide::Top)
+            } else {
+                let pos = egui::Pos2::new(
+                    node.position[0] + node.size[0] + gap,
+                    node.position[1],
+                );
+                (pos, node.size, PortSide::Right, PortSide::Left)
+            }
+        };
+
+        // Clone the shape kind from parent, but clear the label
+        let shape = match self.document.find_node(&sel_id) {
+            Some(n) => match &n.kind {
+                NodeKind::Shape { shape, .. } => *shape,
+                _ => NodeShape::Rectangle,
+            },
+            None => NodeShape::Rectangle,
+        };
+
+        let mut new_node = Node::new(shape, new_pos);
+        new_node.size = new_size;
+        // Inherit parent's style
+        if let Some(parent) = self.document.find_node(&sel_id) {
+            new_node.style = parent.style.clone();
+        }
+        let new_id = new_node.id;
+        self.document.nodes.push(new_node);
+
+        // Connect with an edge from parent → new
+        let edge = Edge::new(
+            Port { node_id: sel_id, side: src_side },
+            Port { node_id: new_id,  side: tgt_side },
+        );
+        self.document.edges.push(edge);
+
+        // Select new node and focus its label for immediate rename
+        self.selection.clear();
+        self.selection.select_node(new_id);
+        self.focus_label_edit = true;
+        self.history.push(&self.document);
+
+        let dir = if downward { "below" } else { "right" };
+        self.status_message = Some((
+            format!("New node → chained {dir} (Enter to continue)"),
+            std::time::Instant::now(),
+        ));
     }
 }

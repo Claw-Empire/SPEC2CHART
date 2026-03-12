@@ -190,6 +190,8 @@ impl FlowchartApp {
                 ("⌘0", "Reset zoom"),
                 ("H", "Heatmap overlay"),
                 ("⇧A", "Flow animation"),
+                ("↵ Enter", "Chain node →right"),
+                ("⇧↵", "Chain node ↓down"),
             ]),
             ("Editing", &[
                 ("⌘Z / ⌘⇧Z", "Undo / Redo"),
