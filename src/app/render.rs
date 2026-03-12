@@ -789,6 +789,22 @@ impl FlowchartApp {
             painter.add(glow);
         }
 
+        // Hover glow: soft warm halo under hovered edge
+        if is_hovered {
+            let halo_color = Color32::from_rgba_unmultiplied(255, 200, 100, 45);
+            let halo_color2 = Color32::from_rgba_unmultiplied(255, 220, 140, 80);
+            let halo_outer = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt], false, Color32::TRANSPARENT,
+                Stroke::new(width + 12.0, halo_color),
+            );
+            let halo_inner = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt], false, Color32::TRANSPARENT,
+                Stroke::new(width + 5.0, halo_color2),
+            );
+            painter.add(halo_outer);
+            painter.add(halo_inner);
+        }
+
         // Edge glow effect: draw a wider, semi-transparent halo beneath the edge
         if edge.style.glow && !is_selected {
             let glow_color = Color32::from_rgba_unmultiplied(
