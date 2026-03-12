@@ -533,6 +533,9 @@ impl FlowchartApp {
                 ui.checkbox(&mut node.style.border_dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
                 ui.add_space(8.0);
                 ui.checkbox(&mut node.style.gradient, egui::RichText::new("Gradient").size(11.0).color(TEXT_DIM));
+                ui.add_space(8.0);
+                ui.checkbox(&mut node.style.shadow, egui::RichText::new("Shadow").size(11.0).color(TEXT_DIM))
+                    .on_hover_text("Render a soft drop shadow beneath the node");
             });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));

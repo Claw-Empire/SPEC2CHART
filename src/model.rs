@@ -175,6 +175,9 @@ pub struct NodeStyle {
     /// Overall node opacity: 0.0 = invisible, 1.0 = fully opaque (default)
     #[serde(default = "default_opacity")]
     pub opacity: f32,
+    /// When true, render a subtle drop shadow beneath the node
+    #[serde(default)]
+    pub shadow: bool,
 }
 
 fn default_opacity() -> f32 { 1.0 }
@@ -192,6 +195,7 @@ impl Default for NodeStyle {
             border_dashed: false,
             gradient: false,
             opacity: 1.0,
+            shadow: false,
         }
     }
 }
@@ -308,7 +312,7 @@ impl Node {
                 border_width: 0.0,
                 text_color: color.text_rgba(),
                 font_size: 14.0,
-                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0,
+                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false,
             },
         }
     }
@@ -329,7 +333,7 @@ impl Node {
                 border_width: 1.5,
                 text_color: [205, 214, 244, 255],
                 font_size: 12.0,
-                corner_radius: 4.0, border_dashed: false, gradient: false, opacity: 1.0,
+                corner_radius: 4.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false,
             },
         }
     }
@@ -349,7 +353,7 @@ impl Node {
                 border_width: 0.0,
                 text_color: [205, 214, 244, 255],
                 font_size: 16.0,
-                corner_radius: 0.0, border_dashed: false, gradient: false, opacity: 1.0,
+                corner_radius: 0.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false,
             },
         }
     }
@@ -377,7 +381,7 @@ impl Node {
                 border_width: 1.5,
                 text_color: [147, 153, 178, 255],
                 font_size: 12.0,
-                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0,
+                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0, shadow: false,
             },
         }
     }

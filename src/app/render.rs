@@ -55,6 +55,21 @@ impl FlowchartApp {
             );
         }
 
+        // Drop shadow (rendered before node so it appears behind)
+        if node.style.shadow && !node.is_frame {
+            let shadow_offset = Vec2::new(3.0, 5.0) * self.viewport.zoom.sqrt();
+            let shadow_rect = screen_rect.translate(shadow_offset);
+            let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt()) as u8);
+            // Multi-layer shadow for softness
+            for (expand, alpha) in [(8.0_f32, 15_u8), (5.0, 25), (2.0, 40)] {
+                painter.rect_filled(
+                    shadow_rect.expand(expand * self.viewport.zoom.sqrt()),
+                    CornerRadius::same((cr.nw as f32 + expand * 0.5) as u8),
+                    Color32::from_rgba_unmultiplied(0, 0, 0, alpha),
+                );
+            }
+        }
+
         // Group frame: translucent container with label in top-left corner
         if node.is_frame {
             let fc = node.frame_color;
