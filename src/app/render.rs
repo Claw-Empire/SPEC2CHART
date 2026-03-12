@@ -822,16 +822,48 @@ impl FlowchartApp {
                 painter.line_segment([seg_start, *pts.last().unwrap()], Stroke::new(width, edge_color));
             }
         } else if edge.style.orthogonal {
-            // Orthogonal routing: exit source perpendicularly, turn at midpoint, enter target perpendicularly
-            use egui::Pos2;
+            // Orthogonal routing with rounded corners (8px radius)
             let mid_x = (src.x + tgt.x) / 2.0;
             let mid_y = (src.y + tgt.y) / 2.0;
             let pts: Vec<Pos2> = match edge.source.side {
                 PortSide::Right | PortSide::Left => vec![src, Pos2::new(mid_x, src.y), Pos2::new(mid_x, tgt.y), tgt],
                 PortSide::Top | PortSide::Bottom => vec![src, Pos2::new(src.x, mid_y), Pos2::new(tgt.x, mid_y), tgt],
             };
-            for w in pts.windows(2) {
-                painter.line_segment([w[0], w[1]], Stroke::new(width, edge_color));
+            let r = (8.0 * self.viewport.zoom.sqrt()).min(20.0); // corner radius in screen px
+            // Draw segments with rounded elbows at interior corners
+            let n = pts.len();
+            for i in 0..n - 1 {
+                let p0 = pts[i];
+                let p1 = pts[i + 1];
+                let seg_dir = (p1 - p0).normalized();
+                // Start of this segment: skip radius if not first
+                let seg_start = if i > 0 { p0 + seg_dir * r } else { p0 };
+                // End of this segment: skip radius if not last
+                let seg_end = if i < n - 2 { p1 - seg_dir * r } else { p1 };
+                if (seg_end - seg_start).length() > 0.5 {
+                    painter.line_segment([seg_start, seg_end], Stroke::new(width, edge_color));
+                }
+                // Rounded elbow at p1 (interior corner)
+                if i < n - 2 {
+                    let next_dir = (pts[i + 2] - p1).normalized();
+                    // Draw a small quadratic arc from (p1 - r*seg_dir) through p1 to (p1 + r*next_dir)
+                    let q0 = p1 - seg_dir * r;
+                    let q2 = p1 + next_dir * r;
+                    // Approximate with 5 line segments
+                    let steps = 5_usize;
+                    let mut prev = q0;
+                    for step in 1..=steps {
+                        let t = step as f32 / steps as f32;
+                        // Quadratic bezier: B(t) = (1-t)^2 * q0 + 2(1-t)t * p1 + t^2 * q2
+                        let s = 1.0 - t;
+                        let pt = Pos2::new(
+                            s * s * q0.x + 2.0 * s * t * p1.x + t * t * q2.x,
+                            s * s * q0.y + 2.0 * s * t * p1.y + t * t * q2.y,
+                        );
+                        painter.line_segment([prev, pt], Stroke::new(width, edge_color));
+                        prev = pt;
+                    }
+                }
             }
         } else {
             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
