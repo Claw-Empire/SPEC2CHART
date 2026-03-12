@@ -604,8 +604,12 @@ impl FlowchartApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let pin_label = if node.pinned { "📌 Pinned" } else { "📍 Pin" };
-                if ui.small_button(pin_label).clicked() {
+                if ui.small_button(pin_label).on_hover_text("Pin prevents movement while dragging").clicked() {
                     node.pinned = !node.pinned;
+                }
+                let lock_label = if node.locked { "🔓 Unlock" } else { "🔒 Lock" };
+                if ui.small_button(lock_label).on_hover_text("Lock prevents movement, resize, and deletion (Cmd+L)").clicked() {
+                    node.locked = !node.locked;
                 }
                 if matches!(node.kind, NodeKind::Shape { .. }) && !node.is_frame {
                     let col_label = if node.collapsed { "▶ Expand" } else { "▼ Collapse" };

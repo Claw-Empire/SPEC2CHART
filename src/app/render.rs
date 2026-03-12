@@ -140,6 +140,14 @@ impl FlowchartApp {
             painter.text(icon_pos, Align2::LEFT_BOTTOM, "🔗", FontId::proportional(9.0 * self.viewport.zoom.sqrt()), TEXT_DIM.gamma_multiply(0.7));
         }
 
+        // Lock badge (shown as a small 🔒 in top-right when node is locked)
+        if node.locked && self.viewport.zoom > 0.4 {
+            let icon_size = (9.0 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);
+            let icon_pos = Pos2::new(screen_rect.max.x - 3.0, screen_rect.min.y + 3.0);
+            painter.text(icon_pos, Align2::RIGHT_TOP, "🔒", FontId::proportional(icon_size),
+                Color32::from_rgba_unmultiplied(255, 200, 80, 220));
+        }
+
         // Edge connection count badge (shown when hovered)
         if is_hovered && self.viewport.zoom > 0.5 {
             let conn_count = self.document.edges.iter()

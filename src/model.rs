@@ -255,6 +255,9 @@ pub struct Node {
     /// Optional URL — Cmd+click on canvas opens this in the browser
     #[serde(default)]
     pub url: String,
+    /// When true, node cannot be moved, resized, or deleted — shows a lock badge
+    #[serde(default)]
+    pub locked: bool,
     /// When true, node is a group frame: renders as a large translucent container behind other nodes
     #[serde(default)]
     pub is_frame: bool,
@@ -281,7 +284,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle::default(),
         }
     }
@@ -295,7 +298,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -316,7 +319,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -336,7 +339,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), is_frame: false, frame_color: default_frame_color(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, is_frame: false, frame_color: default_frame_color(),
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -361,6 +364,7 @@ impl Node {
             size: [300.0, 220.0],
             z_offset: -100.0, // render behind regular nodes
             is_frame: true,
+            locked: false,
             frame_color: default_frame_color(),
             pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {

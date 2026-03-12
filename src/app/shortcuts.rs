@@ -41,7 +41,10 @@ impl FlowchartApp {
             && ctx.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
             && !self.selection.is_empty()
         {
-            let node_ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            // Skip locked nodes
+            let node_ids: Vec<NodeId> = self.selection.node_ids.iter()
+                .filter(|id| !self.document.find_node(id).map_or(false, |n| n.locked))
+                .copied().collect();
             let edge_ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
             for id in &node_ids {
                 self.document.remove_node(id);
@@ -50,6 +53,20 @@ impl FlowchartApp {
                 self.document.remove_edge(id);
             }
             self.selection.clear();
+            self.history.push(&self.document);
+        }
+
+        // Cmd+L = toggle lock on selected nodes
+        if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let all_locked = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.locked));
+            for id in &ids {
+                if let Some(node) = self.document.find_node_mut(id) {
+                    node.locked = !all_locked;
+                }
+            }
+            let msg = if all_locked { "Unlocked" } else { "Locked" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
             self.history.push(&self.document);
         }
 

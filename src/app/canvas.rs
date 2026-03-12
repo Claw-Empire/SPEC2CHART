@@ -568,7 +568,7 @@ impl FlowchartApp {
                     let (snapped, guides) = self.compute_alignment_snap(id, new_pos, 8.0 / self.viewport.zoom);
                     self.alignment_guides = guides;
                     if let Some(node) = self.document.find_node_mut(&id) {
-                        if !node.pinned {
+                        if !node.pinned && !node.locked {
                             node.set_pos(snapped);
                         }
                     }
@@ -579,7 +579,7 @@ impl FlowchartApp {
                             new_pos = self.snap_pos(new_pos);
                         }
                         if let Some(node) = self.document.find_node_mut(id) {
-                            if !node.pinned {
+                            if !node.pinned && !node.locked {
                                 node.set_pos(new_pos);
                             }
                         }
