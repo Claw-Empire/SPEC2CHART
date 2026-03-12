@@ -105,6 +105,45 @@ impl FlowchartApp {
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                     // Node context menu (handled below)
                     self.selection.select_node(node_id);
+
+                    // Quick-color row at top
+                    ui.label(egui::RichText::new("Fill").size(9.5).color(TEXT_DIM));
+                    let quick_colors: &[([u8;4], &str)] = &[
+                        ([30, 30, 46, 255],  "Surface"),
+                        ([137, 180, 250, 255], "Blue"),
+                        ([166, 227, 161, 255], "Green"),
+                        ([243, 139, 168, 255], "Red"),
+                        ([249, 226, 175, 255], "Yellow"),
+                        ([203, 166, 247, 255], "Purple"),
+                        ([245, 194, 231, 255], "Pink"),
+                        ([148, 226, 213, 255], "Teal"),
+                        ([255, 255, 255, 255], "White"),
+                        ([17, 17, 27, 255],   "Black"),
+                    ];
+                    let mut color_pick: Option<[u8;4]> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        for (color, name) in quick_colors {
+                            let c = to_color32(*color);
+                            let is_current = self.document.find_node(&node_id)
+                                .map(|n| n.style.fill_color == *color)
+                                .unwrap_or(false);
+                            let btn = egui::Button::new(if is_current { "✓" } else { "  " })
+                                .fill(c)
+                                .min_size(egui::Vec2::new(22.0, 22.0));
+                            if ui.add(btn).on_hover_text(*name).clicked() {
+                                color_pick = Some(*color);
+                            }
+                        }
+                    });
+                    if let Some(col) = color_pick {
+                        if let Some(n) = self.document.find_node_mut(&node_id) {
+                            n.style.fill_color = col;
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+
                     if ui.button("✏ Edit label").clicked() {
                         self.focus_label_edit = true;
                         ui.close_menu();
