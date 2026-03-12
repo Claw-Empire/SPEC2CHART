@@ -465,7 +465,64 @@ impl FlowchartApp {
                             }
                         }
                     });
+                    // Thickness presets
+                    ui.label(egui::RichText::new("Thickness").size(9.5).color(TEXT_DIM));
+                    ui.horizontal(|ui| {
+                        for (w, label, tip) in [(1.0_f32, "─", "Thin"), (2.5, "━", "Normal"), (5.0, "▬", "Thick"), (9.0, "█", "Bold")] {
+                            let is_cur = self.document.find_edge(&edge_id)
+                                .map(|e| (e.style.width - w).abs() < 0.5)
+                                .unwrap_or(false);
+                            let btn = egui::Button::new(
+                                egui::RichText::new(label).size(14.0).color(if is_cur { ACCENT } else { TEXT_SECONDARY })
+                            ).fill(if is_cur { SURFACE1 } else { SURFACE0 })
+                             .min_size(egui::Vec2::new(36.0, 28.0));
+                            if ui.add(btn).on_hover_text(tip).clicked() {
+                                if let Some(e) = self.document.find_edge_mut(&edge_id) {
+                                    e.style.width = w;
+                                }
+                                self.history.push(&self.document);
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    // Style toggles
+                    ui.horizontal(|ui| {
+                        let (is_dashed, is_animated, is_ortho, is_glow) = self.document.find_edge(&edge_id)
+                            .map(|e| (e.style.dashed, e.style.animated, e.style.orthogonal, e.style.glow))
+                            .unwrap_or_default();
+                        let tog = |ui: &mut egui::Ui, active: bool, label: &str, tip: &str| {
+                            ui.add(egui::Button::new(egui::RichText::new(label).size(11.0)
+                                .color(if active { ACCENT } else { TEXT_DIM }))
+                                .fill(if active { SURFACE1 } else { SURFACE0 })
+                                .min_size(egui::Vec2::new(44.0, 24.0)))
+                                .on_hover_text(tip).clicked()
+                        };
+                        if tog(ui, is_dashed,   "- - -",  "Dashed") {
+                            if let Some(e) = self.document.find_edge_mut(&edge_id) { e.style.dashed = !e.style.dashed; }
+                            self.history.push(&self.document); ui.close_menu();
+                        }
+                        if tog(ui, is_animated, "→→→", "Animated flow") {
+                            if let Some(e) = self.document.find_edge_mut(&edge_id) { e.style.animated = !e.style.animated; }
+                            self.history.push(&self.document); ui.close_menu();
+                        }
+                        if tog(ui, is_ortho,    "┐", "Orthogonal") {
+                            if let Some(e) = self.document.find_edge_mut(&edge_id) { e.style.orthogonal = !e.style.orthogonal; }
+                            self.history.push(&self.document); ui.close_menu();
+                        }
+                        if tog(ui, is_glow,     "✦", "Glow") {
+                            if let Some(e) = self.document.find_edge_mut(&edge_id) { e.style.glow = !e.style.glow; }
+                            self.history.push(&self.document); ui.close_menu();
+                        }
+                    });
                     ui.separator();
+                    // Reverse edge direction
+                    if ui.button("⇄ Reverse direction").clicked() {
+                        if let Some(e) = self.document.find_edge_mut(&edge_id) {
+                            std::mem::swap(&mut e.source, &mut e.target);
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
                     if ui.button("↺ Reset style").clicked() {
                         if let Some(e) = self.document.find_edge_mut(&edge_id) {
                             e.style = EdgeStyle::default();
