@@ -189,6 +189,12 @@ impl FlowchartApp {
             self.selection.clear();
         }
 
+        // Cmd+F = search
+        if ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd)) {
+            self.show_search = !self.show_search;
+            if self.show_search { self.search_query.clear(); }
+        }
+
         // G = toggle grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;

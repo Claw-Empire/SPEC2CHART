@@ -109,6 +109,8 @@ pub struct FlowchartApp {
     pub(crate) pending_fit: bool,
     pub(crate) llm_config: specgraph::LlmConfig,
     pub(crate) show_llm_settings: bool,
+    pub(crate) show_search: bool,
+    pub(crate) search_query: String,
 }
 
 impl FlowchartApp {
@@ -199,6 +201,8 @@ impl FlowchartApp {
             pending_fit: false,
             llm_config: specgraph::LlmConfig::default(),
             show_llm_settings: false,
+            show_search: false,
+            search_query: String::new(),
         }
     }
 

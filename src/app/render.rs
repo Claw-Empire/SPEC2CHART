@@ -428,6 +428,7 @@ impl FlowchartApp {
         edge: &Edge,
         painter: &egui::Painter,
         node_idx: &std::collections::HashMap<NodeId, usize>,
+        hover_canvas_pos: Option<egui::Pos2>,
     ) {
         let src_node = node_idx
             .get(&edge.source.node_id)
@@ -448,20 +449,37 @@ impl FlowchartApp {
             .canvas_to_screen(tgt_node.port_position(edge.target.side));
 
         let is_selected = self.selection.contains_edge(&edge.id);
+
+        // Control points (used for both hover detection and drawing)
+        let offset = 60.0 * self.viewport.zoom;
+        let (cp1, cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+
+        // Hover detection: check if cursor is close to bezier curve
+        let is_hovered = !is_selected && hover_canvas_pos.map(|hp| {
+            let hp_screen = self.viewport.canvas_to_screen(hp);
+            let threshold = 14.0;
+            (0..=20).any(|i| {
+                let t = i as f32 / 20.0;
+                let p = cubic_bezier_point(src, cp1, cp2, tgt, t);
+                (hp_screen - p).length() < threshold
+            })
+        }).unwrap_or(false);
+
         let edge_color = if is_selected {
             SELECTION_COLOR
+        } else if is_hovered {
+            to_color32(edge.style.color).gamma_multiply(1.6)
         } else {
             to_color32(edge.style.color)
         };
         let base_width = edge.style.width * self.viewport.zoom.sqrt();
         let width = if is_selected {
             base_width.max(3.0)
+        } else if is_hovered {
+            base_width * 1.4
         } else {
             base_width
         };
-
-        let offset = 60.0 * self.viewport.zoom;
-        let (cp1, cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
 
         if is_selected {
             let glow = egui::epaint::CubicBezierShape::from_points_stroke(

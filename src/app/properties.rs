@@ -316,6 +316,18 @@ impl FlowchartApp {
             ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
+            ui.add_space(12.0);
+
+            // Position
+            Self::draw_section_header(ui, "POSITION");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("X").size(11.0).color(TEXT_DIM));
+                ui.add(egui::DragValue::new(&mut node.position[0]).speed(1.0).suffix(" px"));
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Y").size(11.0).color(TEXT_DIM));
+                ui.add(egui::DragValue::new(&mut node.position[1]).speed(1.0).suffix(" px"));
+            });
         }
 
         // Layer order controls (need node_id outside the borrow)

@@ -134,7 +134,8 @@ impl FlowchartApp {
                 })
                 .unwrap_or(false);
             if src_visible || tgt_visible {
-                self.draw_edge(edge, &painter, &node_idx);
+                let hover_canvas = hover_pos.map(|p| self.viewport.screen_to_canvas(p));
+                self.draw_edge(edge, &painter, &node_idx, hover_canvas);
             }
         }
 
@@ -167,6 +168,7 @@ impl FlowchartApp {
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
+        self.draw_search_overlay(ui, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
 
         // Minimap click-to-pan
@@ -768,6 +770,80 @@ impl FlowchartApp {
     }
 
     // --- Minimap ---
+
+    fn draw_search_overlay(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        if !self.show_search { return; }
+
+        let w = 320.0_f32;
+        let overlay_rect = Rect::from_center_size(
+            Pos2::new(canvas_rect.center().x, canvas_rect.min.y + 60.0),
+            Vec2::new(w, 36.0),
+        );
+
+        // Draw background first (painter doesn't alias with child ui since it's a clone)
+        {
+            let painter = ui.painter().clone();
+            painter.rect_filled(overlay_rect.expand(4.0), CornerRadius::same(8), TOOLTIP_BG);
+            painter.rect_stroke(overlay_rect.expand(4.0), CornerRadius::same(8),
+                Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
+        }
+
+        // Search text edit
+        let mut ui2 = ui.new_child(
+            egui::UiBuilder::new().max_rect(overlay_rect).layout(egui::Layout::left_to_right(egui::Align::Center))
+        );
+        let resp = ui2.add(
+            egui::TextEdit::singleline(&mut self.search_query)
+                .hint_text("Search nodes…")
+                .desired_width(w)
+                .font(egui::FontId::proportional(14.0))
+                .frame(false),
+        );
+        resp.request_focus();
+
+        let ctx = ui2.ctx().clone();
+
+        // Close on Escape
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_search = false;
+            return;
+        }
+
+        // Select matching nodes on Enter
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let q = self.search_query.to_lowercase();
+            self.selection.clear();
+            for node in &self.document.nodes {
+                if let crate::model::NodeKind::Shape { label, .. } = &node.kind {
+                    if label.to_lowercase().contains(&q) {
+                        self.selection.node_ids.insert(node.id);
+                    }
+                }
+            }
+            if !self.selection.is_empty() {
+                self.zoom_to_selection();
+            }
+            self.show_search = false;
+            return;
+        }
+
+        // Live "N found" hint
+        if !self.search_query.is_empty() {
+            let q = self.search_query.to_lowercase();
+            let count = self.document.nodes.iter().filter(|n| {
+                if let crate::model::NodeKind::Shape { label, .. } = &n.kind {
+                    label.to_lowercase().contains(&q)
+                } else { false }
+            }).count();
+            ui2.painter().text(
+                Pos2::new(overlay_rect.max.x - 4.0, overlay_rect.center().y),
+                Align2::RIGHT_CENTER,
+                format!("{count}"),
+                FontId::proportional(11.0),
+                TEXT_DIM,
+            );
+        }
+    }
 
     fn handle_minimap_click(&mut self, click_pos: Pos2, canvas_rect: Rect) {
         if self.document.nodes.is_empty() { return; }
