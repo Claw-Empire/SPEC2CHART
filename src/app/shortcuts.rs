@@ -531,6 +531,71 @@ impl FlowchartApp {
             }
         }
 
+        // Shift+L = force-directed auto-layout (spread overlapping nodes apart)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.shift && !i.modifiers.command) {
+            let target_ids: Vec<NodeId> = if self.selection.node_ids.len() >= 2 {
+                self.selection.node_ids.iter().copied().collect()
+            } else {
+                self.document.nodes.iter().filter(|n| !n.locked && !n.is_frame).map(|n| n.id).collect()
+            };
+            // Run ~30 iterations of repulsion + edge attraction
+            for _ in 0..30 {
+                let mut forces: std::collections::HashMap<NodeId, egui::Vec2> =
+                    target_ids.iter().map(|id| (*id, egui::Vec2::ZERO)).collect();
+
+                // Repulsion between all node pairs
+                for i in 0..target_ids.len() {
+                    for j in (i + 1)..target_ids.len() {
+                        let ai = target_ids[i];
+                        let aj = target_ids[j];
+                        let (pi, si) = self.document.find_node(&ai).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
+                        let (pj, sj) = self.document.find_node(&aj).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
+                        let ri = egui::Rect::from_min_size(pi, si).expand(20.0);
+                        let rj = egui::Rect::from_min_size(pj, sj).expand(20.0);
+                        let ci = ri.center();
+                        let cj = rj.center();
+                        let diff = ci - cj;
+                        let dist = diff.length().max(0.01);
+                        let ideal = (ri.width() + rj.width()) * 0.55 + (ri.height() + rj.height()) * 0.25;
+                        if dist < ideal {
+                            let force = diff.normalized() * (ideal - dist) * 0.5;
+                            *forces.entry(ai).or_insert(egui::Vec2::ZERO) += force;
+                            *forces.entry(aj).or_insert(egui::Vec2::ZERO) -= force;
+                        }
+                    }
+                }
+
+                // Edge attraction: pull connected nodes toward ideal spacing
+                for edge in &self.document.edges {
+                    let src_id = edge.source.node_id;
+                    let tgt_id = edge.target.node_id;
+                    if !forces.contains_key(&src_id) || !forces.contains_key(&tgt_id) { continue; }
+                    let (ps, ss) = self.document.find_node(&src_id).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
+                    let (pt, st) = self.document.find_node(&tgt_id).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
+                    let ideal_edge = (ss.x + st.x) * 0.5 + 80.0;
+                    let diff = pt - ps;
+                    let dist = diff.length().max(0.01);
+                    let attract = diff.normalized() * (dist - ideal_edge) * 0.1;
+                    *forces.entry(src_id).or_insert(egui::Vec2::ZERO) += attract;
+                    *forces.entry(tgt_id).or_insert(egui::Vec2::ZERO) -= attract;
+                }
+
+                // Apply forces
+                for id in &target_ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        if node.pinned || node.locked { continue; }
+                        if let Some(f) = forces.get(id) {
+                            let clamped = egui::Vec2::new(f.x.clamp(-40.0, 40.0), f.y.clamp(-40.0, 40.0));
+                            node.position[0] += clamped.x;
+                            node.position[1] += clamped.y;
+                        }
+                    }
+                }
+            }
+            self.history.push(&self.document);
+            self.status_message = Some(("Auto-layout applied".to_string(), std::time::Instant::now()));
+        }
+
         // Shift+H = distribute selected nodes horizontally with equal gaps
         // Shift+V = distribute selected nodes vertically with equal gaps
         if !any_text_focused && self.selection.node_ids.len() >= 3 {
