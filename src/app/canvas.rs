@@ -250,6 +250,7 @@ impl FlowchartApp {
         }
 
         // --- Previews ---
+        self.draw_alignment_guides(&painter, canvas_rect);
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
@@ -395,7 +396,9 @@ impl FlowchartApp {
                         new_pos = self.snap_pos(new_pos);
                     }
                     if let Some(node) = self.document.find_node_mut(id) {
-                        node.set_pos(new_pos);
+                        if !node.pinned {
+                            node.set_pos(new_pos);
+                        }
                     }
                 }
             }
@@ -566,6 +569,61 @@ impl FlowchartApp {
     }
 
     // --- Preview drawing ---
+
+    fn draw_alignment_guides(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        // Only show during node drag
+        let DragState::DraggingNode { .. } = &self.drag else { return };
+        if self.selection.node_ids.is_empty() { return; }
+
+        let threshold = 4.0 / self.viewport.zoom; // world-space tolerance
+        let guide_color = egui::Color32::from_rgba_premultiplied(100, 180, 255, 160);
+        let guide_stroke = Stroke::new(1.0, guide_color);
+
+        // Collect dragged node rects
+        let drag_rects: Vec<Rect> = self.selection.node_ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .map(|n| n.rect())
+            .collect();
+
+        // Collect reference node rects (not dragged)
+        let ref_rects: Vec<Rect> = self.document.nodes.iter()
+            .filter(|n| !self.selection.node_ids.contains(&n.id))
+            .map(|n| n.rect())
+            .collect();
+
+        for drag_rect in &drag_rects {
+            let d_vals = [drag_rect.min.x, drag_rect.center().x, drag_rect.max.x,
+                          drag_rect.min.y, drag_rect.center().y, drag_rect.max.y];
+            for ref_rect in &ref_rects {
+                let r_vals = [ref_rect.min.x, ref_rect.center().x, ref_rect.max.x,
+                              ref_rect.min.y, ref_rect.center().y, ref_rect.max.y];
+                // Vertical guides (X alignment)
+                for dv in &d_vals[0..3] {
+                    for rv in &r_vals[0..3] {
+                        if (dv - rv).abs() < threshold {
+                            let sx = self.viewport.canvas_to_screen(Pos2::new(*rv, 0.0)).x;
+                            painter.line_segment(
+                                [Pos2::new(sx, canvas_rect.min.y), Pos2::new(sx, canvas_rect.max.y)],
+                                guide_stroke,
+                            );
+                        }
+                    }
+                }
+                // Horizontal guides (Y alignment)
+                for dv in &d_vals[3..6] {
+                    for rv in &r_vals[3..6] {
+                        if (dv - rv).abs() < threshold {
+                            let sy = self.viewport.canvas_to_screen(Pos2::new(0.0, *rv)).y;
+                            painter.line_segment(
+                                [Pos2::new(canvas_rect.min.x, sy), Pos2::new(canvas_rect.max.x, sy)],
+                                guide_stroke,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fn draw_box_select_preview(&self, painter: &egui::Painter, pointer_pos: Option<Pos2>) {
         if let DragState::BoxSelect { start_canvas } = &self.drag {
@@ -821,7 +879,14 @@ impl FlowchartApp {
             let mut parts = Vec::new();
             if n_sel_n > 0 { parts.push(format!("{}N", n_sel_n)); }
             if n_sel_e > 0 { parts.push(format!("{}E", n_sel_e)); }
-            format!("{} sel  ·  {}N {}E", parts.join("+"), n_nodes, n_edges)
+            // Compute selection bounding box
+            let bb = self.selection.node_ids.iter()
+                .filter_map(|id| self.document.find_node(id))
+                .fold(Option::<egui::Rect>::None, |acc, n| {
+                    Some(acc.map_or(n.rect(), |r| r.union(n.rect())))
+                });
+            let size_str = bb.map(|r| format!("  {:.0}×{:.0}", r.width(), r.height())).unwrap_or_default();
+            format!("{} sel{}  ·  {}N {}E", parts.join("+"), size_str, n_nodes, n_edges)
         } else {
             format!("{}N  {}E", n_nodes, n_edges)
         };

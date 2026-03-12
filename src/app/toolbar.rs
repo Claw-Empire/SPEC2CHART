@@ -28,7 +28,30 @@ impl FlowchartApp {
                             .color(TEXT_PRIMARY),
                     );
                 });
-                ui.add_space(16.0);
+                ui.add_space(8.0);
+
+                // Undo / Redo buttons
+                ui.horizontal(|ui| {
+                    let can_undo = self.history.can_undo();
+                    let can_redo = self.history.can_redo();
+                    let u = self.history.undo_steps();
+                    let r = self.history.redo_steps();
+                    let undo_btn = egui::Button::new(egui::RichText::new(format!("↩ {u}")).size(12.0));
+                    let redo_btn = egui::Button::new(egui::RichText::new(format!("{r} ↪")).size(12.0));
+                    if ui.add_enabled(can_undo, undo_btn).on_hover_text("Undo (⌘Z)").clicked() {
+                        if let Some(doc) = self.history.undo() {
+                            self.document = doc.clone();
+                            self.selection.clear();
+                        }
+                    }
+                    if ui.add_enabled(can_redo, redo_btn).on_hover_text("Redo (⌘⇧Z)").clicked() {
+                        if let Some(doc) = self.history.redo() {
+                            self.document = doc.clone();
+                            self.selection.clear();
+                        }
+                    }
+                });
+                ui.add_space(8.0);
 
                 // File actions
                 Self::draw_divider(ui);
@@ -448,6 +471,7 @@ impl FlowchartApp {
                     ui.checkbox(&mut self.snap_to_grid, "");
                     ui.label(egui::RichText::new("Snap").size(12.0).color(TEXT_SECONDARY));
                 });
+                ui.add(egui::Slider::new(&mut self.grid_size, 10.0_f32..=80.0).text("Grid px").integer());
                 ui.add_space(8.0);
 
                 // Zoom

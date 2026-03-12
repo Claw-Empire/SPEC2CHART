@@ -168,6 +168,7 @@ pub struct NodeStyle {
     pub text_color: [u8; 4],
     pub font_size: f32,
     pub corner_radius: f32,
+    pub border_dashed: bool,
 }
 
 impl Default for NodeStyle {
@@ -179,6 +180,7 @@ impl Default for NodeStyle {
             text_color: [205, 214, 244, 255],
             font_size: 13.0,
             corner_radius: 8.0,
+            border_dashed: false,
         }
     }
 }
@@ -202,6 +204,8 @@ pub struct Node {
     pub size: [f32; 2],
     pub z_offset: f32,
     pub style: NodeStyle,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl Node {
@@ -222,7 +226,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0,
+            z_offset: 0.0, pinned: false,
             style: NodeStyle::default(),
         }
     }
@@ -236,14 +240,14 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0,
+            z_offset: 0.0, pinned: false,
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
                 border_width: 0.0,
                 text_color: color.text_rgba(),
                 font_size: 14.0,
-                corner_radius: 8.0,
+                corner_radius: 8.0, border_dashed: false,
             },
         }
     }
@@ -257,14 +261,14 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0,
+            z_offset: 0.0, pinned: false,
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
                 border_width: 1.5,
                 text_color: [205, 214, 244, 255],
                 font_size: 12.0,
-                corner_radius: 4.0,
+                corner_radius: 4.0, border_dashed: false,
             },
         }
     }
@@ -277,14 +281,14 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0,
+            z_offset: 0.0, pinned: false,
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
                 border_width: 0.0,
                 text_color: [205, 214, 244, 255],
                 font_size: 16.0,
-                corner_radius: 0.0,
+                corner_radius: 0.0, border_dashed: false,
             },
         }
     }

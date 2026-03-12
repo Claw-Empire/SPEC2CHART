@@ -276,6 +276,16 @@ impl eframe::App for FlowchartApp {
             ctx.request_repaint();
         }
 
+        // Dynamic window title: show node/edge count
+        let n = self.document.nodes.len();
+        let e = self.document.edges.len();
+        let title = if n == 0 {
+            "Light Figma".to_string()
+        } else {
+            format!("Light Figma — {n}N {e}E")
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+
         // Keyboard shortcuts panel
         if self.show_shortcuts_panel {
             let mut open = self.show_shortcuts_panel;

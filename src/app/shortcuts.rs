@@ -95,6 +95,23 @@ impl FlowchartApp {
             self.tool = super::Tool::Connect;
         }
 
+        // Cmd+Shift+A = select connected nodes
+        let cmd_shift = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.matches_exact(cmd_shift)) {
+            let selected: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            for node_id in &selected {
+                for edge in &self.document.edges {
+                    if edge.source.node_id == *node_id {
+                        self.selection.node_ids.insert(edge.target.node_id);
+                    } else if edge.target.node_id == *node_id {
+                        self.selection.node_ids.insert(edge.source.node_id);
+                    }
+                }
+            }
+            let cnt = self.selection.node_ids.len();
+            self.status_message = Some((format!("{cnt} nodes"), std::time::Instant::now()));
+        }
+
         // Cmd+A = select all
         if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.matches_exact(cmd)) {
             self.selection.clear();

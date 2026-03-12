@@ -41,6 +41,27 @@ impl FlowchartApp {
             }
         }
 
+        // Edge connection count badge (shown when hovered)
+        if is_hovered && self.viewport.zoom > 0.5 {
+            let conn_count = self.document.edges.iter()
+                .filter(|e| e.source.node_id == node.id || e.target.node_id == node.id)
+                .count();
+            if conn_count > 0 {
+                let badge_pos = Pos2::new(screen_rect.max.x - 4.0, screen_rect.min.y - 4.0);
+                let badge_text = conn_count.to_string();
+                let badge_r = 8.0_f32 * self.viewport.zoom.sqrt();
+                painter.circle_filled(badge_pos, badge_r, ACCENT);
+                painter.text(badge_pos, Align2::CENTER_CENTER, &badge_text,
+                    FontId::proportional(badge_r * 1.2), Color32::BLACK);
+            }
+        }
+
+        // Pin indicator
+        if node.pinned && self.viewport.zoom > 0.4 {
+            let pin_pos = Pos2::new(screen_rect.min.x + 4.0, screen_rect.min.y - 2.0);
+            painter.text(pin_pos, Align2::LEFT_BOTTOM, "📌", FontId::proportional(10.0 * self.viewport.zoom.sqrt()), Color32::WHITE);
+        }
+
         // Ports
         let show_ports = self.tool == super::Tool::Connect || {
             if let Some(hover) = hover_pos {
@@ -102,20 +123,57 @@ impl FlowchartApp {
 
         let cr_user = (style.corner_radius * self.viewport.zoom.sqrt()) as u8;
 
+        // Dashed border helper: draw dashed rect outline
+        let draw_dashed_rect = |painter: &egui::Painter, r: Rect, stroke: Stroke| {
+            let dash = 8.0_f32;
+            let gap = 5.0_f32;
+            let perimeter: Vec<Pos2> = vec![
+                r.min, Pos2::new(r.max.x, r.min.y),
+                r.max, Pos2::new(r.min.x, r.max.y), r.min,
+            ];
+            let mut progress = 0.0_f32;
+            let mut drawing = true;
+            for w in perimeter.windows(2) {
+                let seg_len = (w[1] - w[0]).length();
+                let mut remain = seg_len;
+                let mut cur = w[0];
+                while remain > 0.0 {
+                    let to_flip = if drawing { dash - progress } else { gap - progress };
+                    let seg_start = cur;
+                    if remain >= to_flip {
+                        let t = to_flip / seg_len;
+                        let end = cur + (w[1] - w[0]) * (to_flip / remain.max(0.001));
+                        if drawing { painter.line_segment([seg_start, end], stroke); }
+                        cur = end; remain -= to_flip; progress = 0.0; drawing = !drawing;
+                    } else {
+                        progress += remain; remain = 0.0;
+                    }
+                }
+            }
+        };
+
         match shape {
             NodeShape::Rectangle => {
                 painter.rect_filled(screen_rect, CornerRadius::same(cr_user), fill);
-                painter.rect_stroke(screen_rect, CornerRadius::same(cr_user), stroke, StrokeKind::Outside);
+                if style.border_dashed {
+                    draw_dashed_rect(painter, screen_rect, stroke);
+                } else {
+                    painter.rect_stroke(screen_rect, CornerRadius::same(cr_user), stroke, StrokeKind::Outside);
+                }
             }
             NodeShape::RoundedRect => {
                 let r = (10.0 * self.viewport.zoom).max(style.corner_radius * self.viewport.zoom.sqrt()) as u8;
                 painter.rect_filled(screen_rect, CornerRadius::same(r), fill);
-                painter.rect_stroke(
-                    screen_rect,
-                    CornerRadius::same(r),
-                    stroke,
-                    StrokeKind::Outside,
-                );
+                if style.border_dashed {
+                    draw_dashed_rect(painter, screen_rect, stroke);
+                } else {
+                    painter.rect_stroke(
+                        screen_rect,
+                        CornerRadius::same(r),
+                        stroke,
+                        StrokeKind::Outside,
+                    );
+                }
             }
             NodeShape::Diamond => {
                 let center = screen_rect.center();

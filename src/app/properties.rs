@@ -321,9 +321,11 @@ impl FlowchartApp {
                 }
             });
             ui.add_space(8.0);
-            ui.add(
-                egui::Slider::new(&mut node.style.border_width, 0.0..=10.0).text("Border"),
-            );
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut node.style.border_width, 0.0..=10.0).text("Border"));
+                ui.add_space(8.0);
+                ui.checkbox(&mut node.style.border_dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
+            });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
             ui.add_space(4.0);
@@ -337,6 +339,15 @@ impl FlowchartApp {
 
             // Dimensions
             Self::draw_section_header(ui, "DIMENSIONS");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                for (label, w, h) in [("S", 80.0_f32, 50.0_f32), ("M", 150.0, 80.0), ("L", 240.0, 120.0)] {
+                    if ui.small_button(label).on_hover_text(format!("{}×{}", w as i32, h as i32)).clicked() {
+                        node.size[0] = w;
+                        node.size[1] = h;
+                    }
+                }
+            });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
             ui.add_space(4.0);
@@ -361,6 +372,14 @@ impl FlowchartApp {
             if let Some(node) = self.document.find_node_mut(&node_id) {
                 node.style = crate::model::NodeStyle::default();
                 self.history.push(&self.document);
+            }
+        }
+
+        // Pin toggle
+        if let Some(node) = self.document.find_node_mut(&node_id) {
+            let pin_label = if node.pinned { "📌 Pinned — click to unpin" } else { "📍 Pin node" };
+            if ui.button(pin_label).clicked() {
+                node.pinned = !node.pinned;
             }
         }
 
