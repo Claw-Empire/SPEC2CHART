@@ -344,7 +344,7 @@ impl FlowchartApp {
                     let to_flip = if drawing { dash - progress } else { gap - progress };
                     let seg_start = cur;
                     if remain >= to_flip {
-                        let t = to_flip / seg_len;
+                        let _t = to_flip / seg_len;
                         let end = cur + (w[1] - w[0]) * (to_flip / remain.max(0.001));
                         if drawing { painter.line_segment([seg_start, end], stroke); }
                         cur = end; remain -= to_flip; progress = 0.0; drawing = !drawing;
@@ -861,7 +861,7 @@ impl FlowchartApp {
                 while remaining > 0.0 {
                     let to_flip = if drawing { dash - progress } else { gap - progress };
                     if remaining >= to_flip {
-                        let t = to_flip / seg_len;
+                        let _t = to_flip / seg_len;
                         let end = cur + (pts[i] - pts[i - 1]) * (to_flip / remaining.max(0.001));
                         if drawing {
                             painter.line_segment([seg_start, end], Stroke::new(width, edge_color));

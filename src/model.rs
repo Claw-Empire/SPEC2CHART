@@ -41,6 +41,7 @@ pub enum StickyColor {
     Purple,
 }
 
+#[allow(dead_code)]
 impl StickyColor {
     pub const ALL: [StickyColor; 5] = [
         StickyColor::Yellow,
@@ -84,6 +85,7 @@ pub enum Cardinality {
     ZeroOrMany,
 }
 
+#[allow(dead_code)]
 impl Cardinality {
     pub const ALL: [Cardinality; 5] = [
         Cardinality::None,

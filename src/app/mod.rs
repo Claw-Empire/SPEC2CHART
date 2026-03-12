@@ -378,7 +378,7 @@ impl eframe::App for FlowchartApp {
         // Find & Replace dialog (Cmd+H)
         if self.show_find_replace {
             let mut open = self.show_find_replace;
-            let mut do_replace = false;
+            let _do_replace = false;
             let mut do_replace_all = false;
             egui::Window::new("Find & Replace")
                 .open(&mut open)
@@ -485,7 +485,7 @@ impl eframe::App for FlowchartApp {
                         }
                     }
                     if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) { close = true; }
-                    if ui.ctx().pointer_latest_pos().map_or(false, |p| {
+                    if ui.ctx().pointer_latest_pos().map_or(false, |_p| {
                         !ui.ctx().is_pointer_over_area()
                     }) { close = true; }
                 });
@@ -493,7 +493,7 @@ impl eframe::App for FlowchartApp {
                 let w = 120.0_f32;
                 let h = 70.0_f32;
                 let pos = egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0);
-                let mut node = crate::model::Node {
+                let node = crate::model::Node {
                     id: NodeId::new(),
                     kind,
                     position: [pos.x, pos.y],

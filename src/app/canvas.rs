@@ -1283,7 +1283,7 @@ impl FlowchartApp {
                         let mut d = dist_offset % period;
                         // align start: skip to first dash
                         if d < gap_len { d += gap_len; } else { d -= gap_len; }
-                        let mut pos = 0.0_f32;
+                        let pos = 0.0_f32;
                         // Draw or skip based on phase
                         let mut drawing = d < dash_len;
                         let mut cursor = -(d % period);
@@ -1811,7 +1811,7 @@ impl FlowchartApp {
                     if resp.clicked() { edge_clicked = Some(i); }
                     ex += btn_w + 2.0;
                 }
-                drop(edge); // drop borrow before mutable operations
+                let _ = edge; // end borrow before mutable operations below
 
                 if let Some(action) = edge_clicked {
                     match action {
@@ -2496,8 +2496,8 @@ impl FlowchartApp {
         let major_grid_screen = grid_screen * major_every as f32;
         let major_offset_x = self.viewport.offset[0] % major_grid_screen;
         let major_offset_y = self.viewport.offset[1] % major_grid_screen;
-        let major_start_x = canvas_rect.min.x + major_offset_x;
-        let major_start_y = canvas_rect.min.y + major_offset_y;
+        let _major_start_x = canvas_rect.min.x + major_offset_x;
+        let _major_start_y = canvas_rect.min.y + major_offset_y;
 
         match self.bg_pattern {
             super::BgPattern::None => {}

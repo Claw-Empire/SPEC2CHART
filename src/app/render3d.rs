@@ -155,6 +155,7 @@ impl FlowchartApp {
     }
 
     /// Unproject a screen-space delta to world-space movement on the node's z-plane.
+    #[allow(dead_code)]
     fn unproject_drag_delta(
         &self,
         screen_delta: Vec2,
@@ -287,6 +288,7 @@ impl FlowchartApp {
     }
 
     /// Convert vertical screen drag to Z-axis world movement.
+    #[allow(dead_code)]
     fn unproject_z_delta(
         &self,
         screen_delta_y: f32,
