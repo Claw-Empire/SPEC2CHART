@@ -424,6 +424,42 @@ impl FlowchartApp {
                 node.auto_size_entity();
             }
 
+            // Color theme presets
+            Self::draw_section_header(ui, "COLOR THEMES");
+            ui.add_space(4.0);
+            // Each entry: (name, fill_rgba, border_rgba, text_rgba)
+            let themes: &[(&str, [u8;4], [u8;4], [u8;4])] = &[
+                ("Default",  [49, 50, 68, 255],    [69, 71, 90, 255],     [205, 214, 244, 255]),
+                ("Ocean",    [30, 102, 140, 255],   [87, 189, 220, 255],   [240, 250, 255, 255]),
+                ("Sunset",   [140, 60, 30, 255],    [235, 130, 80, 255],   [255, 240, 225, 255]),
+                ("Forest",   [40, 100, 55, 255],    [100, 190, 110, 255],  [220, 255, 230, 255]),
+                ("Lavender", [90, 60, 130, 255],    [180, 140, 230, 255],  [245, 235, 255, 255]),
+                ("Slate",    [50, 60, 80, 255],     [100, 120, 160, 255],  [210, 220, 240, 255]),
+                ("Rose",     [130, 40, 70, 255],    [220, 100, 140, 255],  [255, 230, 240, 255]),
+                ("Sand",     [120, 100, 60, 255],   [200, 175, 110, 255],  [255, 248, 225, 255]),
+            ];
+            ui.horizontal_wrapped(|ui| {
+                for (name, fill, border, text) in themes {
+                    let preview = egui::Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], fill[3]);
+                    let (resp, painter) = ui.allocate_painter(egui::vec2(52.0, 28.0), egui::Sense::click());
+                    let r = resp.rect;
+                    painter.rect_filled(r, egui::CornerRadius::same(5), preview);
+                    painter.rect_stroke(r, egui::CornerRadius::same(5),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(border[0], border[1], border[2], 180)),
+                        egui::StrokeKind::Inside);
+                    painter.text(r.center(), egui::Align2::CENTER_CENTER, *name,
+                        FontId::proportional(8.5),
+                        egui::Color32::from_rgba_unmultiplied(text[0], text[1], text[2], text[3]));
+                    if resp.clicked() {
+                        node.style.fill_color = *fill;
+                        node.style.border_color = *border;
+                        node.style.text_color = *text;
+                    }
+                    resp.on_hover_text(*name);
+                }
+            });
+            ui.add_space(12.0);
+
             // Style section
             Self::draw_section_header(ui, "STYLE");
             ui.add_space(4.0);
