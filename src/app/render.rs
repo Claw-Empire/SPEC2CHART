@@ -763,19 +763,57 @@ impl FlowchartApp {
             );
         }
 
+        // Folded corner ("dog ear") in bottom-right
+        let fold_size = (14.0 * self.viewport.zoom).clamp(8.0, 18.0);
+        if fold_size >= 5.0 {
+            let br = screen_rect.max;
+            let fold_tl = Pos2::new(br.x - fold_size, br.y - fold_size);
+            // Cover the corner with the base fill (to "cut" it visually)
+            painter.add(egui::Shape::convex_polygon(
+                vec![fold_tl, Pos2::new(br.x, fold_tl.y), br, Pos2::new(fold_tl.x, br.y)],
+                fill,
+                Stroke::NONE,
+            ));
+            // Background corner triangle (matching canvas/shadow color)
+            let bg = Color32::from_rgba_unmultiplied(18, 18, 28, 200);
+            painter.add(egui::Shape::convex_polygon(
+                vec![fold_tl, Pos2::new(br.x, fold_tl.y), br],
+                bg,
+                Stroke::NONE,
+            ));
+            // Fold crease shadow
+            let crease_color = darken(fill, 0.28);
+            painter.add(egui::Shape::convex_polygon(
+                vec![fold_tl, Pos2::new(fold_tl.x, br.y), br],
+                crease_color,
+                Stroke::NONE,
+            ));
+            // Fold crease line
+            painter.line_segment(
+                [fold_tl, Pos2::new(br.x, fold_tl.y)],
+                Stroke::new(0.8, darken(fill, 0.45)),
+            );
+        }
+
         let text_color = to_color32(style.text_color);
         let font_size = style.font_size * self.viewport.zoom;
         if font_size > 4.0 && !text.is_empty() {
             let padding = 10.0 * self.viewport.zoom;
             let text_rect = screen_rect.shrink(padding);
+            // Clip text so it doesn't flow into the dog-ear fold area
+            let fold_size = (14.0 * self.viewport.zoom).clamp(8.0, 18.0);
+            let clipped_painter = painter.with_clip_rect(Rect::from_min_max(
+                text_rect.min,
+                Pos2::new(text_rect.max.x - fold_size * 0.5, text_rect.max.y),
+            ));
             let galley = painter.layout(
                 text.to_string(),
                 FontId::proportional(font_size),
                 text_color,
-                text_rect.width(),
+                text_rect.width() - fold_size * 0.5,
             );
             let text_pos = Pos2::new(text_rect.min.x, text_rect.min.y);
-            painter.galley(text_pos, galley, Color32::TRANSPARENT);
+            clipped_painter.galley(text_pos, galley, Color32::TRANSPARENT);
         }
     }
 
