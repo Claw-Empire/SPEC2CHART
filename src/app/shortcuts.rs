@@ -196,6 +196,35 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+Shift+K = select connected component of selected nodes (flood-fill)
+        let cmd_shift_k = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::K) && i.modifiers.matches_exact(cmd_shift_k)) {
+            let seed_ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            if !seed_ids.is_empty() {
+                let mut visited: std::collections::HashSet<NodeId> = seed_ids.iter().copied().collect();
+                let mut queue = seed_ids;
+                while let Some(nid) = queue.pop() {
+                    for edge in &self.document.edges {
+                        let neighbor = if edge.source.node_id == nid { Some(edge.target.node_id) }
+                            else if edge.target.node_id == nid { Some(edge.source.node_id) }
+                            else { None };
+                        if let Some(nbr) = neighbor {
+                            if visited.insert(nbr) { queue.push(nbr); }
+                        }
+                    }
+                }
+                // Select all visited nodes and their connecting edges
+                for &id in &visited { self.selection.node_ids.insert(id); }
+                for edge in &self.document.edges {
+                    if visited.contains(&edge.source.node_id) && visited.contains(&edge.target.node_id) {
+                        self.selection.edge_ids.insert(edge.id);
+                    }
+                }
+                let n = visited.len();
+                self.status_message = Some((format!("Connected: {} nodes", n), std::time::Instant::now()));
+            }
+        }
+
         // 2 = switch to 2D view (no modifier, skip when editing text)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.is_none()) {
             if self.view_mode != super::ViewMode::TwoD {
@@ -427,6 +456,26 @@ impl FlowchartApp {
                 let screen_center = self.canvas_rect.center();
                 self.viewport.offset[0] = screen_center.x - node_pos.x * self.viewport.zoom;
                 self.viewport.offset[1] = screen_center.y - node_pos.y * self.viewport.zoom;
+            }
+        }
+
+        // Arrow keys on selected edge = adjust curve bend (±5; ±20 with Shift)
+        if !any_text_focused && self.selection.node_ids.is_empty() && self.selection.edge_ids.len() == 1 {
+            let shift = ctx.input(|i| i.modifiers.shift);
+            let step = if shift { 20.0_f32 } else { 5.0_f32 };
+            let mut bend_delta = 0.0_f32;
+            ctx.input(|i| {
+                if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::ArrowUp)   { bend_delta -= step; }
+                if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::ArrowDown) { bend_delta += step; }
+            });
+            if bend_delta != 0.0 {
+                let ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(edge) = self.document.find_edge_mut(id) {
+                        edge.style.curve_bend = (edge.style.curve_bend + bend_delta).clamp(-500.0, 500.0);
+                    }
+                }
+                self.history.push(&self.document);
             }
         }
 

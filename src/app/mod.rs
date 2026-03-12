@@ -132,6 +132,10 @@ pub struct FlowchartApp {
     pub(crate) alignment_guides: Vec<(bool, f32)>,
     /// When true, hide all panels for a clean presentation view (toggle with F)
     pub(crate) presentation_mode: bool,
+    /// Custom canvas background color (overrides default CANVAS_BG)
+    pub(crate) canvas_bg: [u8; 4],
+    /// Optional project title shown as a watermark in the canvas top-left
+    pub(crate) project_title: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +248,8 @@ impl FlowchartApp {
             canvas_locked: false,
             alignment_guides: Vec::new(),
             presentation_mode: false,
+            canvas_bg: [30, 30, 46, 255], // default = CANVAS_BG
+            project_title: String::new(),
         }
     }
 

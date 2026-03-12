@@ -28,6 +28,13 @@ impl FlowchartApp {
                             .color(TEXT_PRIMARY),
                     );
                 });
+                // Project title (shown as canvas watermark)
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.project_title)
+                        .hint_text("Project title…")
+                        .desired_width(f32::INFINITY)
+                        .font(egui::FontId::proportional(11.0)),
+                );
                 ui.add_space(8.0);
 
                 // Undo / Redo buttons
@@ -472,6 +479,31 @@ impl FlowchartApp {
                     ui.label(egui::RichText::new("Snap").size(12.0).color(TEXT_SECONDARY));
                 });
                 ui.add(egui::Slider::new(&mut self.grid_size, 10.0_f32..=80.0).text("Grid px").integer());
+                ui.add_space(4.0);
+                // Canvas background color picker
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Canvas").size(11.0).color(TEXT_DIM));
+                    let mut bg = egui::Color32::from_rgba_unmultiplied(
+                        self.canvas_bg[0], self.canvas_bg[1], self.canvas_bg[2], self.canvas_bg[3],
+                    );
+                    if ui.color_edit_button_srgba(&mut bg).changed() {
+                        self.canvas_bg = bg.to_array();
+                    }
+                    // Preset swatches
+                    let presets: &[([u8; 4], &str)] = &[
+                        ([30, 30, 46, 255], "Dark"),
+                        ([245, 244, 240, 255], "Light"),
+                        ([10, 20, 60, 255], "Blueprint"),
+                        ([8, 8, 8, 255], "Midnight"),
+                    ];
+                    for (color, name) in presets {
+                        let c = egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]);
+                        if ui.add(egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(14.0, 14.0)))
+                            .on_hover_text(*name).clicked() {
+                            self.canvas_bg = *color;
+                        }
+                    }
+                });
                 ui.add_space(8.0);
 
                 // Zoom

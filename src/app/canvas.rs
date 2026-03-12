@@ -12,7 +12,10 @@ impl FlowchartApp {
         let canvas_rect = response.rect;
         self.canvas_rect = canvas_rect;
 
-        painter.rect_filled(canvas_rect, CornerRadius::ZERO, CANVAS_BG);
+        let bg = Color32::from_rgba_unmultiplied(
+            self.canvas_bg[0], self.canvas_bg[1], self.canvas_bg[2], self.canvas_bg[3],
+        );
+        painter.rect_filled(canvas_rect, CornerRadius::ZERO, bg);
 
         if self.show_grid && self.bg_pattern != super::BgPattern::None {
             self.draw_grid(&painter, canvas_rect);
@@ -319,6 +322,7 @@ impl FlowchartApp {
         self.draw_edge_tooltip(&painter, hover_pos, canvas_rect, &node_idx);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect);
+        self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_search_overlay(ui, canvas_rect);
         self.draw_zoom_presets(ui, canvas_rect);
@@ -1195,6 +1199,14 @@ impl FlowchartApp {
     }
 
     // --- Rulers ---
+
+    fn draw_project_title(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        if self.project_title.is_empty() { return; }
+        let font = FontId::proportional(13.0);
+        let color = Color32::from_rgba_premultiplied(180, 180, 200, 100);
+        let pos = Pos2::new(canvas_rect.min.x + 20.0, canvas_rect.min.y + 20.0);
+        painter.text(pos, Align2::LEFT_TOP, &self.project_title, font, color);
+    }
 
     fn draw_rulers(&self, painter: &egui::Painter, canvas_rect: Rect) {
         let zoom = self.viewport.zoom;

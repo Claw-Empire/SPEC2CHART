@@ -434,6 +434,27 @@ impl FlowchartApp {
                         node.size[1] = h;
                     }
                 }
+                // Fit size to content: estimate from label length and font size
+                let fit_label = match &node.kind {
+                    NodeKind::Shape { label, .. } => Some(label.clone()),
+                    NodeKind::StickyNote { text, .. } => Some(text.clone()),
+                    _ => None,
+                };
+                if let Some(text) = fit_label {
+                    let font_px = node.style.font_size;
+                    let ch_w = font_px * 0.6;
+                    let line_h = font_px * 1.4;
+                    let max_w = 200.0_f32;
+                    let chars_per_line = (max_w / ch_w).max(1.0) as usize;
+                    let lines = text.chars().count().div_ceil(chars_per_line).max(1);
+                    let pad = 20.0;
+                    let fit_w = ((text.chars().count().min(chars_per_line) as f32) * ch_w + pad * 2.0).max(80.0).min(max_w);
+                    let fit_h = (lines as f32 * line_h + pad * 2.0).max(40.0);
+                    if ui.small_button("⇲ Fit").on_hover_text("Resize to fit content").clicked() {
+                        node.size[0] = fit_w;
+                        node.size[1] = fit_h;
+                    }
+                }
             });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.size[0], 40.0..=400.0).text("W"));
@@ -825,6 +846,31 @@ impl FlowchartApp {
         }
 
         if sel_nodes < 2 { return; }
+
+        // Batch tag for multi-node selection
+        Self::draw_section_header(ui, "BATCH TAG");
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let tags: &[(Option<NodeTag>, &str)] = &[
+                (None, "⬜ None"),
+                (Some(NodeTag::Critical), "🔴 Crit"),
+                (Some(NodeTag::Warning),  "🟡 Warn"),
+                (Some(NodeTag::Ok),       "🟢 OK"),
+                (Some(NodeTag::Info),     "🔵 Info"),
+            ];
+            for (variant, label) in tags {
+                if ui.small_button(*label).clicked() {
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.tag = *variant;
+                        }
+                    }
+                    self.history.push(&self.document);
+                }
+            }
+        });
+        ui.add_space(8.0);
 
         Self::draw_section_header(ui, "BATCH COLOR");
         ui.add_space(4.0);
