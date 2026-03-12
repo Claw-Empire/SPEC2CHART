@@ -94,6 +94,30 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+B = toggle bold for selected nodes
+        if ctx.input(|i| i.key_pressed(Key::B) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let all_bold = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.style.bold));
+            for id in &ids {
+                if let Some(node) = self.document.find_node_mut(id) {
+                    node.style.bold = !all_bold;
+                }
+            }
+            self.history.push(&self.document);
+        }
+
+        // Cmd+I = toggle italic for selected nodes
+        if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let all_italic = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.style.italic));
+            for id in &ids {
+                if let Some(node) = self.document.find_node_mut(id) {
+                    node.style.italic = !all_italic;
+                }
+            }
+            self.history.push(&self.document);
+        }
+
         // Cmd+L = toggle lock on selected nodes
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();

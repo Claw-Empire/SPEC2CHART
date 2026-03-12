@@ -796,6 +796,7 @@ impl eframe::App for FlowchartApp {
                             ("⌘⇧Z", "Redo"),
                             ("⌘C / ⌘V", "Copy / Paste (nodes + edges)"),
                             ("⌘D", "Duplicate"),
+                            ("⌘B / ⌘I", "Toggle bold / italic"),
                             ("⌘⇧H", "Collapse / expand selected nodes"),
                             ("⌘L", "Auto-layout (hierarchical)"),
                             ("⌘⇧> / ⌘⇧<", "Increase / decrease font size"),
