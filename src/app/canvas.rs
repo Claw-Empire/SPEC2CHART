@@ -343,15 +343,17 @@ impl FlowchartApp {
             std::collections::HashSet::new()
         };
 
-        // Nodes: frame nodes first (they render behind), then regular nodes
-        // This ensures frames appear as translucent containers beneath everything else.
+        // Nodes: frame nodes first (they render behind), then regular nodes sorted by z_offset
+        // This ensures frames appear as translucent containers beneath everything else,
+        // and Cmd+]/[ z-ordering works correctly for regular nodes.
         let node_ids: Vec<NodeId> = {
-            let mut frames: Vec<NodeId> = self.document.nodes.iter()
-                .filter(|n| n.is_frame).map(|n| n.id).collect();
-            let mut rest: Vec<NodeId> = self.document.nodes.iter()
-                .filter(|n| !n.is_frame).map(|n| n.id).collect();
-            frames.append(&mut rest);
-            frames
+            let mut frames: Vec<(NodeId, f32)> = self.document.nodes.iter()
+                .filter(|n| n.is_frame).map(|n| (n.id, n.z_offset)).collect();
+            let mut rest: Vec<(NodeId, f32)> = self.document.nodes.iter()
+                .filter(|n| !n.is_frame).map(|n| (n.id, n.z_offset)).collect();
+            frames.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            rest.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            frames.into_iter().chain(rest).map(|(id, _)| id).collect()
         };
         for node_id in &node_ids {
             let Some(node) = self.document.find_node(node_id) else { continue };

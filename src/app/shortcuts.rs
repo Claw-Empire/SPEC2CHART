@@ -56,6 +56,29 @@ impl FlowchartApp {
             self.history.push(&self.document);
         }
 
+        // Cmd+] = bring forward (increase z_offset), Cmd+[ = send backward
+        // Cmd+Shift+] = bring to front, Cmd+Shift+[ = send to back
+        if !self.selection.node_ids.is_empty() {
+            let fwd  = ctx.input(|i| i.key_pressed(Key::CloseBracket) && i.modifiers.matches_exact(cmd));
+            let back = ctx.input(|i| i.key_pressed(Key::OpenBracket)  && i.modifiers.matches_exact(cmd));
+            let front = ctx.input(|i| i.key_pressed(Key::CloseBracket) && i.modifiers.matches_exact(cmd_shift));
+            let last  = ctx.input(|i| i.key_pressed(Key::OpenBracket)  && i.modifiers.matches_exact(cmd_shift));
+            if fwd || back || front || last {
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                let max_z = self.document.nodes.iter().map(|n| n.z_offset).fold(f32::NEG_INFINITY, f32::max);
+                let min_z = self.document.nodes.iter().map(|n| n.z_offset).fold(f32::INFINITY, f32::min);
+                for id in &ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        if front       { node.z_offset = max_z + 1.0; }
+                        else if last   { node.z_offset = min_z - 1.0; }
+                        else if fwd    { node.z_offset += 1.0; }
+                        else if back   { node.z_offset -= 1.0; }
+                    }
+                }
+                self.history.push(&self.document);
+            }
+        }
+
         // Cmd+L = toggle lock on selected nodes
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
