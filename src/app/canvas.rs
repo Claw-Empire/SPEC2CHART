@@ -758,6 +758,17 @@ impl FlowchartApp {
         }
 
         self.draw_inline_node_editor(ui, canvas_rect);
+        // Quick-connect arrows: show ±4 directional buttons on hovered node
+        let drag_idle = matches!(&self.drag, DragState::None);
+        let not_editing = self.inline_node_edit.is_none();
+        let not_connect = self.tool != Tool::Connect;
+        if drag_idle && not_editing && not_connect {
+            if let Some(hid) = hover_node_id {
+                if self.selection.is_empty() || self.selection.contains_node(&hid) {
+                    self.draw_quick_connect_arrows(ui, hid, canvas_rect);
+                }
+            }
+        }
         self.draw_box_select_preview(&painter, pointer_pos);
         self.draw_edge_creation_preview(&painter, &node_idx);
         self.draw_new_node_preview(&painter, canvas_rect);
@@ -3299,6 +3310,93 @@ impl FlowchartApp {
                 self.inline_node_edit = None;
             }
         });
+    }
+
+    /// Draw 4 directional arrow buttons around a hovered node.
+    /// Clicking one instantly creates and connects a new node in that direction.
+    fn draw_quick_connect_arrows(&mut self, ui: &mut egui::Ui, node_id: NodeId, canvas_rect: Rect) {
+        let (screen_rect, shape, style) = match self.document.find_node(&node_id) {
+            Some(n) => (
+                Rect::from_min_size(
+                    self.viewport.canvas_to_screen(n.pos()),
+                    n.size_vec() * self.viewport.zoom,
+                ),
+                match &n.kind { NodeKind::Shape { shape, .. } => *shape, _ => NodeShape::Rectangle },
+                n.style.clone(),
+            ),
+            None => return,
+        };
+
+        // Arrow button dimensions
+        let btn_size = 20.0_f32;
+        let gap      = 10.0_f32;
+
+        // (label, screen center, port side src, port side tgt, world offset)
+        let directions: &[(&str, Pos2, PortSide, PortSide, [f32; 2])] = &[
+            ("→", Pos2::new(screen_rect.max.x + gap + btn_size/2.0, screen_rect.center().y),
+             PortSide::Right, PortSide::Left,  [1.0,  0.0]),
+            ("←", Pos2::new(screen_rect.min.x - gap - btn_size/2.0, screen_rect.center().y),
+             PortSide::Left,  PortSide::Right, [-1.0, 0.0]),
+            ("↓", Pos2::new(screen_rect.center().x, screen_rect.max.y + gap + btn_size/2.0),
+             PortSide::Bottom, PortSide::Top,  [0.0,  1.0]),
+            ("↑", Pos2::new(screen_rect.center().x, screen_rect.min.y - gap - btn_size/2.0),
+             PortSide::Top,  PortSide::Bottom, [0.0, -1.0]),
+        ];
+
+        for (label, center, src_side, tgt_side, world_dir) in directions {
+            let btn_rect = Rect::from_center_size(*center, Vec2::splat(btn_size));
+            if !canvas_rect.contains(*center) { continue; }
+
+            let hovered = ui.ctx().input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| btn_rect.contains(p))
+            });
+            let clicked = hovered && ui.ctx().input(|i| i.pointer.primary_clicked());
+
+            // Draw button
+            let bg = if hovered {
+                Color32::from_rgba_premultiplied(137, 180, 250, 200)
+            } else {
+                Color32::from_rgba_premultiplied(50, 55, 80, 180)
+            };
+            let painter = ui.painter();
+            painter.circle_filled(*center, btn_size / 2.0, bg);
+            painter.circle_stroke(*center, btn_size / 2.0,
+                Stroke::new(1.5, Color32::from_rgba_premultiplied(137, 180, 250, 160)));
+            painter.text(*center, Align2::CENTER_CENTER, *label,
+                FontId::proportional(11.0),
+                if hovered { Color32::from_rgb(17, 17, 27) } else { Color32::from_rgb(137, 180, 250) });
+
+            if clicked {
+                // Compute new node position in world space
+                let src_node_rect = match self.document.find_node(&node_id) {
+                    Some(n) => n.rect(),
+                    None => return,
+                };
+                let src_size = src_node_rect.size();
+                let gap_world = 60.0_f32;
+                let new_x = src_node_rect.min.x + world_dir[0] * (src_size.x + gap_world);
+                let new_y = src_node_rect.min.y + world_dir[1] * (src_size.y + gap_world);
+
+                let mut new_node = Node::new(shape, Pos2::new(new_x, new_y));
+                new_node.size = [src_size.x, src_size.y];
+                new_node.style = style.clone();
+                let new_id = new_node.id;
+                self.document.nodes.push(new_node);
+
+                let edge = Edge::new(
+                    Port { node_id, side: *src_side },
+                    Port { node_id: new_id, side: *tgt_side },
+                );
+                self.document.edges.push(edge);
+
+                self.selection.clear();
+                self.selection.select_node(new_id);
+                self.inline_node_edit = Some((new_id, String::new()));
+                self.history.push(&self.document);
+                self.status_message = Some(("Quick connect: node added".to_string(), std::time::Instant::now()));
+                break; // only one click per frame
+            }
+        }
     }
 
     /// Draw Figma-style distance rulers from `source_id` to its nearest neighbours.
