@@ -34,6 +34,37 @@ impl FlowchartApp {
         let screen_rect = Rect::from_min_size(top_left, size);
 
         let is_selected = self.selection.contains_node(&node.id);
+
+        // Semantic zoom: at very low zoom, render as compact dot-label (LOD0)
+        if self.viewport.zoom < 0.28 && !node.is_frame {
+            let fill = to_color32(node.style.fill_color);
+            let dot_r = (screen_rect.width().max(screen_rect.height()) * 0.35).clamp(3.0, 10.0);
+            let center = screen_rect.center();
+            // Ring for selection
+            if is_selected {
+                painter.circle_filled(center, dot_r + 3.0, ACCENT_GLOW);
+            }
+            painter.circle_filled(center, dot_r, fill);
+            painter.circle_stroke(center, dot_r, Stroke::new(0.8, to_color32(node.style.border_color)));
+            // Tiny label if there's room (at least 4px radius)
+            if dot_r >= 4.0 {
+                let label_str = match &node.kind {
+                    NodeKind::Shape { label, .. } => label.as_str(),
+                    NodeKind::StickyNote { text, .. } => text.as_str(),
+                    NodeKind::Entity { name, .. } => name.as_str(),
+                    NodeKind::Text { content } => content.as_str(),
+                };
+                let short: String = label_str.chars().take(12).collect();
+                painter.text(
+                    center + Vec2::new(dot_r + 2.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    &short,
+                    FontId::proportional(6.5),
+                    to_color32(node.style.text_color).gamma_multiply(0.8),
+                );
+            }
+            return;
+        }
         let is_hovered = hover_pos.map_or(false, |hp| screen_rect.expand(6.0).contains(hp));
 
         // Selection glow (pulsing animation)
