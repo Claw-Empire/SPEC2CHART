@@ -962,6 +962,36 @@ impl FlowchartApp {
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect, pointer_pos);
         self.draw_canvas_vignette(&painter, canvas_rect);
+
+        // "Back to content" button — shown when user has panned away from all nodes
+        if !self.document.nodes.is_empty() {
+            let any_visible = self.document.nodes.iter().any(|n| {
+                let sr = Rect::from_min_size(
+                    self.viewport.canvas_to_screen(n.pos()),
+                    n.size_vec() * self.viewport.zoom,
+                );
+                sr.expand(40.0).intersects(canvas_rect)
+            });
+            if !any_visible {
+                let btn_center = Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 48.0);
+                let btn_size = Vec2::new(160.0, 30.0);
+                let btn_rect = Rect::from_center_size(btn_center, btn_size);
+                // Background pill
+                painter.rect_filled(btn_rect, CornerRadius::same(15), Color32::from_rgba_premultiplied(35, 35, 55, 220));
+                painter.rect_stroke(btn_rect, CornerRadius::same(15), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)), StrokeKind::Outside);
+                painter.text(btn_center, Align2::CENTER_CENTER, "↩  Back to content",
+                    FontId::proportional(12.5), TEXT_SECONDARY.gamma_multiply(1.2));
+                // Hit test
+                if ui.ctx().input(|i| i.pointer.any_click()) {
+                    if let Some(mp) = ui.ctx().input(|i| i.pointer.latest_pos()) {
+                        if btn_rect.contains(mp) {
+                            self.fit_to_content();
+                        }
+                    }
+                }
+            }
+        }
+
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_search_overlay(ui, canvas_rect);
