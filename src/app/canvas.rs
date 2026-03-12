@@ -1163,6 +1163,21 @@ impl FlowchartApp {
             }
         }
 
+        // Live size readout near cursor during resize
+        if let DragState::ResizingNode { node_id, .. } = &self.drag {
+            if let (Some(node), Some(mouse)) = (self.document.find_node(node_id), pointer_pos) {
+                let [w, h] = node.size;
+                let label = format!("{w:.0} × {h:.0}");
+                let lpos = mouse + Vec2::new(12.0, 12.0);
+                let font = FontId::proportional(11.0);
+                let galley = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE);
+                let bg = Rect::from_min_size(lpos - Vec2::new(4.0, 2.0), galley.size() + Vec2::new(8.0, 4.0));
+                painter.rect_filled(bg, CornerRadius::same(4), Color32::from_rgba_premultiplied(20, 20, 36, 220));
+                painter.rect_stroke(bg, CornerRadius::same(4), Stroke::new(0.5, ACCENT.gamma_multiply(0.5)), StrokeKind::Outside);
+                painter.text(lpos, Align2::LEFT_TOP, &label, font, Color32::from_rgba_unmultiplied(205, 214, 244, 240));
+            }
+        }
+
         // Resize ghost: show original node rect when resizing
         if let DragState::ResizingNode { start_rect, .. } = &self.drag {
             let sr = *start_rect; // [x, y, w, h] in canvas space
