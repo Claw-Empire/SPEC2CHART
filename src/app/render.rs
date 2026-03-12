@@ -4,6 +4,54 @@ use super::FlowchartApp;
 use super::interaction::{control_points_for_side, cubic_bezier_point};
 use super::theme::*;
 
+/// Infer a semantic watermark icon from node label keywords.
+/// Returns a single emoji/symbol that represents the node's conceptual type.
+fn semantic_icon_for_label(label: &str) -> Option<&'static str> {
+    let lc = label.to_lowercase();
+    // Check most-specific patterns first
+    if lc.contains("database") || lc.contains(" db") || lc.starts_with("db ")
+        || lc.contains("postgres") || lc.contains("mysql") || lc.contains("sqlite")
+        || lc.contains("mongo") || lc.contains("redis") || lc.contains("store") { return Some("🗄️"); }
+    if lc.contains("user") || lc.contains("person") || lc.contains("actor")
+        || lc.contains("customer") || lc.contains("client") || lc.contains("member") { return Some("👤"); }
+    if lc.contains("server") || lc.contains("backend") || lc.contains("service")
+        || lc.contains("microservice") || lc.contains("worker") { return Some("⚙️"); }
+    if lc.contains("api") || lc.contains("gateway") || lc.contains("endpoint")
+        || lc.contains("rest") || lc.contains("graphql") { return Some("🔌"); }
+    if lc.contains("web") || lc.contains("browser") || lc.contains("frontend")
+        || lc.contains("ui") || lc.contains("app") || lc.contains("mobile") { return Some("🌐"); }
+    if lc.contains("auth") || lc.contains("login") || lc.contains("oauth")
+        || lc.contains("sso") || lc.contains("jwt") || lc.contains("security") { return Some("🔐"); }
+    if lc.contains("email") || lc.contains("mail") || lc.contains("smtp")
+        || lc.contains("notification") || lc.contains("alert") { return Some("📧"); }
+    if lc.contains("queue") || lc.contains("kafka") || lc.contains("pubsub")
+        || lc.contains("rabbitmq") || lc.contains("event") || lc.contains("message") { return Some("📨"); }
+    if lc.contains("cloud") || lc.contains("aws") || lc.contains("azure")
+        || lc.contains("gcp") || lc.contains("s3") { return Some("☁️"); }
+    if lc.contains("docker") || lc.contains("container") || lc.contains("k8s")
+        || lc.contains("kubernetes") || lc.contains("deploy") { return Some("🐳"); }
+    if lc.contains("search") || lc.contains("query") || lc.contains("index")
+        || lc.contains("elastic") || lc.contains("solr") { return Some("🔍"); }
+    if lc.contains("file") || lc.contains("document") || lc.contains("report")
+        || lc.contains("pdf") || lc.contains("csv") || lc.contains("export") { return Some("📄"); }
+    if lc.contains("payment") || lc.contains("billing") || lc.contains("invoice")
+        || lc.contains("stripe") || lc.contains("wallet") { return Some("💳"); }
+    if lc.contains("log") || lc.contains("monitor") || lc.contains("metric")
+        || lc.contains("telemetry") || lc.contains("analytics") { return Some("📊"); }
+    if lc.contains("cache") || lc.contains("memory") || lc.contains("buffer") { return Some("⚡"); }
+    if lc.contains("start") || lc.contains("begin") || lc.contains("init")
+        || lc.contains("trigger") { return Some("▶"); }
+    if lc.contains("end") || lc.contains("stop") || lc.contains("finish")
+        || lc.contains("terminate") { return Some("⬛"); }
+    if lc.contains("test") || lc.contains("qa") || lc.contains("check")
+        || lc.contains("verify") { return Some("✅"); }
+    if lc.contains("error") || lc.contains("fail") || lc.contains("exception")
+        || lc.contains("catch") { return Some("❌"); }
+    if lc.contains("ci") || lc.contains("cd") || lc.contains("build")
+        || lc.contains("pipeline") { return Some("🔧"); }
+    None
+}
+
 /// Draw a vertical gradient-filled rect using a mesh (top=color_top, bottom=color_bot).
 fn paint_gradient_rect(painter: &egui::Painter, rect: Rect, color_top: Color32, color_bot: Color32) {
     let mut mesh = egui::Mesh::default();
@@ -488,6 +536,22 @@ impl FlowchartApp {
                     border_color,
                     Stroke::NONE,
                 ));
+            }
+        }
+
+        // Semantic watermark icon — drawn behind label text at low opacity
+        // Only visible at moderate zoom and when the node is large enough
+        if self.viewport.zoom > 0.5 && screen_rect.area() > 1200.0 {
+            if let Some(icon) = semantic_icon_for_label(label) {
+                let icon_size = (screen_rect.height() * 0.55).clamp(14.0, 48.0);
+                let icon_alpha = (40.0 * opacity) as u8; // very subtle
+                painter.text(
+                    screen_rect.center() + Vec2::new(screen_rect.width() * 0.28, 0.0),
+                    Align2::CENTER_CENTER,
+                    icon,
+                    FontId::proportional(icon_size),
+                    Color32::from_rgba_unmultiplied(255, 255, 255, icon_alpha),
+                );
             }
         }
 
