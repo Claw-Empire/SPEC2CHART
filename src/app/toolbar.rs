@@ -63,7 +63,7 @@ impl FlowchartApp {
                 // File actions
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "FILE");
+                Self::draw_section_header(ui, "File");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let btn_size = egui::vec2(84.0, 32.0);
@@ -115,7 +115,7 @@ impl FlowchartApp {
                 // Export
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "EXPORT");
+                Self::draw_section_header(ui, "Export");
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     let btn_size = egui::vec2(54.0, 30.0);
@@ -160,7 +160,7 @@ impl FlowchartApp {
                 // SpecGraph import/export (YAML, HRF, Prose)
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "SPEC");
+                Self::draw_section_header(ui, "Spec");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let btn_size = egui::vec2(84.0, 32.0);
@@ -277,7 +277,7 @@ impl FlowchartApp {
                             } else {
                                 "LLM Settings"
                             })
-                            .size(10.0)
+                            .size(11.5)
                             .color(TEXT_DIM),
                         )
                         .fill(Color32::TRANSPARENT),
@@ -291,26 +291,26 @@ impl FlowchartApp {
                     ui.add_space(4.0);
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(egui::RichText::new("Endpoint:").size(10.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("Endpoint:").size(11.5).color(TEXT_DIM));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.llm_config.endpoint)
                                 .desired_width(ui.available_width())
-                                .font(FontId::monospace(10.0)),
+                                .font(FontId::monospace(11.5)),
                         );
                         ui.add_space(2.0);
-                        ui.label(egui::RichText::new("API Key:").size(10.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("API Key:").size(11.5).color(TEXT_DIM));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.llm_config.api_key)
                                 .desired_width(ui.available_width())
                                 .password(true)
-                                .font(FontId::monospace(10.0)),
+                                .font(FontId::monospace(11.5)),
                         );
                         ui.add_space(2.0);
-                        ui.label(egui::RichText::new("Model:").size(10.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("Model:").size(11.5).color(TEXT_DIM));
                         ui.add(
                             egui::TextEdit::singleline(&mut self.llm_config.model)
                                 .desired_width(ui.available_width())
-                                .font(FontId::monospace(10.0)),
+                                .font(FontId::monospace(11.5)),
                         );
                     });
                 }
@@ -319,7 +319,7 @@ impl FlowchartApp {
                 // Tools
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "TOOLS");
+                Self::draw_section_header(ui, "Tools");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let select_text = if self.tool == Tool::Select {
@@ -356,8 +356,8 @@ impl FlowchartApp {
                 });
                 ui.add_space(4.0);
                 ui.label(
-                    egui::RichText::new("V Select  \u{00b7}  E Connect")
-                        .size(9.0)
+                    egui::RichText::new("V  Select   ·   E  Connect")
+                        .size(11.0)
                         .color(TEXT_DIM),
                 );
                 ui.add_space(8.0);
@@ -365,7 +365,7 @@ impl FlowchartApp {
                 // Mode tabs
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "MODE");
+                Self::draw_section_header(ui, "Mode");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let modes = [
@@ -396,7 +396,7 @@ impl FlowchartApp {
                 // Shapes (mode-dependent)
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "SHAPES");
+                Self::draw_section_header(ui, "Shapes");
                 ui.add_space(6.0);
 
                 match self.diagram_mode {
@@ -434,7 +434,7 @@ impl FlowchartApp {
                 // View
                 Self::draw_divider(ui);
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "VIEW");
+                Self::draw_section_header(ui, "View");
                 ui.add_space(4.0);
 
                 // 2D/3D toggle
@@ -524,10 +524,10 @@ impl FlowchartApp {
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     if self.canvas_locked {
-                        ui.label(egui::RichText::new("🔒 Locked").size(10.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("🔒 Locked").size(11.5).color(TEXT_DIM));
                     }
                     if self.focus_mode {
-                        ui.label(egui::RichText::new("🎯 Focus").size(10.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("🎯 Focus").size(11.5).color(TEXT_DIM));
                     }
                 });
 

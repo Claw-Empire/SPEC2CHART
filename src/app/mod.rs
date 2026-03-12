@@ -281,7 +281,7 @@ impl FlowchartApp {
     }
 
     pub(crate) fn draw_section_header(ui: &mut egui::Ui, label: &str) {
-        ui.label(egui::RichText::new(label).size(10.0).color(TEXT_DIM).strong());
+        ui.label(egui::RichText::new(label).size(11.0).color(TEXT_SECONDARY).strong());
     }
 
     pub(crate) fn draw_divider(ui: &mut egui::Ui) {
