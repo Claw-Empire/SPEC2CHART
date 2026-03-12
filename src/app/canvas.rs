@@ -1661,6 +1661,143 @@ impl FlowchartApp {
                 _ => {}
             }
         }
+
+        // Multi-select alignment bar (only when 2+ nodes selected)
+        if self.selection.node_ids.len() >= 2 {
+            let align_actions: &[(&str, &str)] = &[
+                ("⬛", "Align left edges"),
+                ("⬛", "Align centers H"),
+                ("⬛", "Align right edges"),
+                ("▬", "Align top edges"),
+                ("▬", "Align middles V"),
+                ("▬", "Align bottom edges"),
+                ("↔", "Distribute H"),
+                ("↕", "Distribute V"),
+            ];
+            // Actually use distinct icons
+            let align_icons: &[(&str, &str)] = &[
+                ("◧", "Align left edges"),
+                ("◫", "Align centers H"),
+                ("◨", "Align right edges"),
+                ("⬒", "Align top edges"),
+                ("⬓", "Align middles V"),
+                ("⬗", "Align bottom edges"),
+                ("↔", "Distribute H (⇧H)"),
+                ("↕", "Distribute V (⇧V)"),
+            ];
+            let _ = align_actions;
+            let abtn_w = 24.0_f32;
+            let abar_h = 24.0_f32;
+            let abar_w = align_icons.len() as f32 * abtn_w + (align_icons.len() - 1) as f32 * 2.0 + 8.0;
+            let abar_y = bar_rect.max.y + 4.0;
+            let abar_rect = Rect::from_center_size(
+                egui::Pos2::new(bar_center_x, abar_y + abar_h / 2.0),
+                egui::Vec2::new(abar_w, abar_h),
+            );
+
+            let painter2 = ui.painter();
+            painter2.rect_filled(abar_rect, CornerRadius::same(6), TOOLTIP_BG);
+            painter2.rect_stroke(abar_rect, CornerRadius::same(6), Stroke::new(1.0, ACCENT.gamma_multiply(0.5)), StrokeKind::Outside);
+
+            let mut ax = abar_rect.min.x + 4.0;
+            let mut align_clicked: Option<usize> = None;
+            for (i, (icon, tip)) in align_icons.iter().enumerate() {
+                let btn_r = Rect::from_min_size(
+                    egui::Pos2::new(ax, abar_rect.min.y + 2.0),
+                    egui::Vec2::new(abtn_w, abar_h - 4.0),
+                );
+                let resp = ui.put(btn_r, egui::Button::new(
+                    egui::RichText::new(*icon).size(11.0)
+                ).frame(false)).on_hover_text(*tip);
+                if resp.clicked() { align_clicked = Some(i); }
+                ax += abtn_w + 2.0;
+            }
+
+            if let Some(idx) = align_clicked {
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                let positions: Vec<(NodeId, Pos2, Vec2)> = ids.iter()
+                    .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.pos(), n.size_vec())))
+                    .collect();
+
+                match idx {
+                    0 => { // Align left
+                        let min_x = positions.iter().map(|(_,p,_)| p.x).fold(f32::MAX, f32::min);
+                        for (id, pos, _) in &positions {
+                            if let Some(n) = self.document.find_node_mut(id) { n.set_pos(Pos2::new(min_x, pos.y)); }
+                        }
+                    }
+                    1 => { // Align center H
+                        let avg_cx = positions.iter().map(|(_,p,s)| p.x + s.x/2.0).sum::<f32>() / positions.len() as f32;
+                        for (id, _, s) in &positions {
+                            let new_x = avg_cx - s.x/2.0;
+                            if let Some(n) = self.document.find_node_mut(id) { let y = n.pos().y; n.set_pos(Pos2::new(new_x, y)); }
+                        }
+                    }
+                    2 => { // Align right
+                        let max_right = positions.iter().map(|(_,p,s)| p.x + s.x).fold(f32::MIN, f32::max);
+                        for (id, _, s) in &positions {
+                            let new_x = max_right - s.x;
+                            if let Some(n) = self.document.find_node_mut(id) { let y = n.pos().y; n.set_pos(Pos2::new(new_x, y)); }
+                        }
+                    }
+                    3 => { // Align top
+                        let min_y = positions.iter().map(|(_,p,_)| p.y).fold(f32::MAX, f32::min);
+                        for (id, pos, _) in &positions {
+                            if let Some(n) = self.document.find_node_mut(id) { n.set_pos(Pos2::new(pos.x, min_y)); }
+                        }
+                    }
+                    4 => { // Align middle V
+                        let avg_cy = positions.iter().map(|(_,p,s)| p.y + s.y/2.0).sum::<f32>() / positions.len() as f32;
+                        for (id, _, s) in &positions {
+                            let new_y = avg_cy - s.y/2.0;
+                            if let Some(n) = self.document.find_node_mut(id) { let x = n.pos().x; n.set_pos(Pos2::new(x, new_y)); }
+                        }
+                    }
+                    5 => { // Align bottom
+                        let max_bottom = positions.iter().map(|(_,p,s)| p.y + s.y).fold(f32::MIN, f32::max);
+                        for (id, _, s) in &positions {
+                            let new_y = max_bottom - s.y;
+                            if let Some(n) = self.document.find_node_mut(id) { let x = n.pos().x; n.set_pos(Pos2::new(x, new_y)); }
+                        }
+                    }
+                    6 => { // Distribute H
+                        let mut sorted: Vec<_> = positions.iter().collect();
+                        sorted.sort_by(|a,b| a.1.x.partial_cmp(&b.1.x).unwrap_or(std::cmp::Ordering::Equal));
+                        if sorted.len() >= 2 {
+                            let left = sorted[0].1.x;
+                            let right = sorted[sorted.len()-1].1.x + sorted[sorted.len()-1].2.x;
+                            let total_w: f32 = sorted.iter().map(|(_,_,s)| s.x).sum();
+                            let gap = (right - left - total_w) / (sorted.len() - 1) as f32;
+                            let mut cx = left;
+                            for (id, _, s) in &sorted {
+                                if let Some(n) = self.document.find_node_mut(id) { let y = n.pos().y; n.set_pos(Pos2::new(cx, y)); }
+                                cx += s.x + gap;
+                            }
+                        }
+                    }
+                    7 => { // Distribute V
+                        let mut sorted: Vec<_> = positions.iter().collect();
+                        sorted.sort_by(|a,b| a.1.y.partial_cmp(&b.1.y).unwrap_or(std::cmp::Ordering::Equal));
+                        if sorted.len() >= 2 {
+                            let top = sorted[0].1.y;
+                            let bottom = sorted[sorted.len()-1].1.y + sorted[sorted.len()-1].2.y;
+                            let total_h: f32 = sorted.iter().map(|(_,_,s)| s.y).sum();
+                            let gap = (bottom - top - total_h) / (sorted.len() - 1) as f32;
+                            let mut cy = top;
+                            for (id, _, s) in &sorted {
+                                if let Some(n) = self.document.find_node_mut(id) { let x = n.pos().x; n.set_pos(Pos2::new(x, cy)); }
+                                cy += s.y + gap;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                if align_clicked.is_some() {
+                    self.history.push(&self.document);
+                    self.status_message = Some((align_icons[idx].1.to_string(), std::time::Instant::now()));
+                }
+            }
+        }
     }
 
     fn draw_project_title(&self, painter: &egui::Painter, canvas_rect: Rect) {
