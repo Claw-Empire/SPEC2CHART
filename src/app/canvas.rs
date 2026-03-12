@@ -499,7 +499,7 @@ impl FlowchartApp {
         self.draw_node_tooltip(&painter, hover_pos, canvas_rect);
         self.draw_edge_tooltip(&painter, hover_pos, canvas_rect, &node_idx);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
-        self.draw_canvas_hud(&painter, canvas_rect);
+        self.draw_canvas_hud(&painter, canvas_rect, pointer_pos);
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_search_overlay(ui, canvas_rect);
@@ -1412,7 +1412,7 @@ impl FlowchartApp {
         }
     }
 
-    fn draw_canvas_hud(&self, painter: &egui::Painter, canvas_rect: Rect) {
+    fn draw_canvas_hud(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {
         let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
         let n_nodes = self.document.nodes.len();
         let n_edges = self.document.edges.len();
@@ -1455,9 +1455,23 @@ impl FlowchartApp {
             parts.join(" · ")
         };
 
+        // Cursor world coordinates (shown while dragging or when Shift held)
+        let cursor_line: Option<String> = pointer_pos.and_then(|sp| {
+            let is_dragging = !matches!(self.drag, DragState::None);
+            // Only show cursor coords while dragging or during edge creation
+            if is_dragging {
+                let cp = self.viewport.screen_to_canvas(sp);
+                Some(format!("x:{:.0}  y:{:.0}", cp.x, cp.y))
+            } else {
+                None
+            }
+        });
+
+        let hud_lines = 2 + (!line3.is_empty() as usize) + (cursor_line.is_some() as usize);
+        let line_h = 12.0;
         let pad = 8.0;
         let x = canvas_rect.min.x + pad;
-        let y = canvas_rect.max.y - 48.0;
+        let y = canvas_rect.max.y - (hud_lines as f32) * line_h - 12.0;
 
         let font_big = egui::FontId::proportional(15.0);
         let font_sm  = egui::FontId::proportional(10.5);
@@ -1465,8 +1479,15 @@ impl FlowchartApp {
 
         painter.text(Pos2::new(x, y), egui::Align2::LEFT_TOP, &line1, font_big, TEXT_SECONDARY);
         painter.text(Pos2::new(x, y + 17.0), egui::Align2::LEFT_TOP, &line2, font_sm, TEXT_DIM);
+        let mut next_y = y + 29.0;
         if !line3.is_empty() {
-            painter.text(Pos2::new(x, y + 29.0), egui::Align2::LEFT_TOP, &line3, font_xs, TEXT_DIM);
+            painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, &line3, font_xs, TEXT_DIM);
+            next_y += 11.0;
+        }
+        if let Some(ref cl) = cursor_line {
+            painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, cl,
+                egui::FontId::proportional(9.5),
+                Color32::from_rgba_unmultiplied(137, 220, 235, 160)); // cyan tint
         }
     }
 
