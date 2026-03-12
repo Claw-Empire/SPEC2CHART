@@ -5,6 +5,7 @@ mod properties;
 mod canvas;
 mod render;
 mod render3d;
+mod statusbar;
 pub(crate) mod camera;
 pub(crate) mod interaction;
 
@@ -384,6 +385,7 @@ impl eframe::App for FlowchartApp {
             }
         }
 
+        self.draw_status_bar(ctx);
         if !self.presentation_mode {
             self.draw_toolbar(ctx);
             // Properties panel works in both 2D and 3D (selection is shared)
