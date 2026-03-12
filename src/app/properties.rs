@@ -355,6 +355,15 @@ impl FlowchartApp {
             });
         }
 
+        // Reset style
+        ui.add_space(8.0);
+        if ui.button("↺ Reset style").on_hover_text("Restore default colours, border, font size").clicked() {
+            if let Some(node) = self.document.find_node_mut(&node_id) {
+                node.style = crate::model::NodeStyle::default();
+                self.history.push(&self.document);
+            }
+        }
+
         // Layer order controls (need node_id outside the borrow)
         ui.add_space(12.0);
         Self::draw_section_header(ui, "LAYER ORDER");
@@ -535,6 +544,34 @@ impl FlowchartApp {
         ui.add_space(16.0);
 
         if sel_nodes < 2 { return; }
+
+        Self::draw_section_header(ui, "BATCH COLOR");
+        ui.add_space(4.0);
+        let palette: &[([u8;4], &str)] = &[
+            ([137, 180, 250, 220], "Blue"),
+            ([166, 227, 161, 220], "Green"),
+            ([243, 139, 168, 220], "Red"),
+            ([249, 226, 175, 220], "Yellow"),
+            ([203, 166, 247, 220], "Purple"),
+            ([148, 226, 213, 220], "Teal"),
+            ([49,  50,  68, 255], "Default"),
+        ];
+        ui.horizontal_wrapped(|ui| {
+            for (color, name) in palette {
+                let c = to_color32(*color);
+                let btn = egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(22.0, 22.0));
+                if ui.add(btn).on_hover_text(*name).clicked() {
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.style.fill_color = *color;
+                        }
+                    }
+                    self.history.push(&self.document);
+                }
+            }
+        });
+        ui.add_space(12.0);
 
         Self::draw_section_header(ui, "ALIGN");
         ui.add_space(6.0);

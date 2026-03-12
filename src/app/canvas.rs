@@ -261,9 +261,13 @@ impl FlowchartApp {
         self.draw_zoom_presets(ui, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
 
-        // Minimap click-to-pan
+        // Minimap click-to-pan and drag-to-pan
         if let Some(click_pos) = pointer_pos {
-            if ui.ctx().input(|i| i.pointer.primary_clicked()) {
+            let (clicked, dragging) = ui.ctx().input(|i| (
+                i.pointer.primary_clicked(),
+                i.pointer.primary_down() && i.pointer.is_moving(),
+            ));
+            if clicked || dragging {
                 self.handle_minimap_click(click_pos, canvas_rect);
             }
         }
@@ -577,6 +581,22 @@ impl FlowchartApp {
                     Stroke::new(1.0, BOX_SELECT_STROKE),
                     StrokeKind::Outside,
                 );
+
+                // Count nodes within box-select rect and show badge
+                let start_canvas_local = *start_canvas;
+                let end_canvas = self.viewport.screen_to_canvas(mouse);
+                let canvas_sel_rect = Rect::from_two_pos(start_canvas_local, end_canvas);
+                let count = self.document.nodes.iter().filter(|n| canvas_sel_rect.contains(n.rect().center())).count();
+                if count > 0 {
+                    let badge_pos = Pos2::new(sel_rect.max.x + 4.0, sel_rect.min.y);
+                    let badge_text = format!("{count}");
+                    painter.rect_filled(
+                        Rect::from_min_size(badge_pos, Vec2::new(22.0, 16.0)),
+                        CornerRadius::same(4), ACCENT,
+                    );
+                    painter.text(badge_pos + Vec2::new(11.0, 8.0), Align2::CENTER_CENTER,
+                        &badge_text, FontId::proportional(10.0), Color32::BLACK);
+                }
             }
         }
     }
@@ -806,10 +826,15 @@ impl FlowchartApp {
             format!("{}N  {}E", n_nodes, n_edges)
         };
         let line3 = {
-            let mut flags = Vec::new();
-            if self.show_grid { flags.push("grid"); }
-            if self.snap_to_grid { flags.push("snap"); }
-            flags.join("·")
+            let mut parts = Vec::new();
+            if self.show_grid { parts.push("grid".to_string()); }
+            if self.snap_to_grid { parts.push("snap".to_string()); }
+            let u = self.history.undo_steps();
+            let r = self.history.redo_steps();
+            if u > 0 || r > 0 {
+                parts.push(format!("↩{u}↪{r}"));
+            }
+            parts.join(" · ")
         };
 
         let pad = 8.0;

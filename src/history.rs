@@ -52,4 +52,12 @@ impl UndoStack {
     pub fn can_redo(&self) -> bool {
         self.current < self.states.len()
     }
+
+    pub fn undo_steps(&self) -> usize {
+        self.current.saturating_sub(1)
+    }
+
+    pub fn redo_steps(&self) -> usize {
+        self.states.len().saturating_sub(self.current)
+    }
 }
