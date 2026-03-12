@@ -742,6 +742,37 @@ impl FlowchartApp {
                 }
             }
         });
+
+        // Node statistics footer
+        ui.add_space(16.0);
+        Self::draw_divider(ui);
+        ui.add_space(8.0);
+        Self::draw_section_header(ui, "NODE INFO");
+        ui.add_space(4.0);
+        if let Some(node) = self.document.find_node(&node_id) {
+            let in_deg = self.document.edges.iter().filter(|e| e.target.node_id == node_id).count();
+            let out_deg = self.document.edges.iter().filter(|e| e.source.node_id == node_id).count();
+            let z_idx = self.document.nodes.iter().position(|n| n.id == node_id).unwrap_or(0);
+            let stats: &[(&str, String)] = &[
+                ("X", format!("{:.0}", node.position[0])),
+                ("Y", format!("{:.0}", node.position[1])),
+                ("W", format!("{:.0}", node.size[0])),
+                ("H", format!("{:.0}", node.size[1])),
+                ("In", in_deg.to_string()),
+                ("Out", out_deg.to_string()),
+                ("Layer", z_idx.to_string()),
+            ];
+            egui::Grid::new("node_stats_grid")
+                .num_columns(4)
+                .spacing([4.0, 2.0])
+                .show(ui, |ui| {
+                    for (i, (label, val)) in stats.iter().enumerate() {
+                        ui.label(egui::RichText::new(*label).size(9.5).color(TEXT_DIM));
+                        ui.label(egui::RichText::new(val).size(10.0).strong().color(TEXT_SECONDARY));
+                        if (i + 1) % 2 == 0 { ui.end_row(); }
+                    }
+                });
+        }
     }
 
     fn draw_edge_properties(&mut self, ui: &mut egui::Ui) {
