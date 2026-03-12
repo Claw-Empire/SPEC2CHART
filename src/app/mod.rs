@@ -196,6 +196,10 @@ pub struct FlowchartApp {
     pub(crate) properties_collapsed: bool,
     /// Show canvas coordinate rulers (toggle with Shift+R)
     pub(crate) show_rulers: bool,
+    /// Zoom level just before this frame (for change detection)
+    pub(crate) last_zoom: f32,
+    /// When zoom changed: birth time for fade-out indicator (egui time)
+    pub(crate) zoom_indicator_time: Option<f64>,
     /// Command palette open/closed
     pub(crate) show_command_palette: bool,
     /// Command palette search text
@@ -344,6 +348,8 @@ impl FlowchartApp {
             toolbar_collapsed: false,
             properties_collapsed: false,
             show_rulers: false,
+            last_zoom: 1.0,
+            zoom_indicator_time: None,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_cursor: 0,
@@ -400,6 +406,51 @@ impl eframe::App for FlowchartApp {
 
         self.draw_status_bar(ctx);
         self.draw_command_palette(ctx);
+
+        // Zoom change indicator: show a floating pill for 1.5s after zoom changes
+        {
+            let current_zoom = self.viewport.zoom;
+            let now = ctx.input(|i| i.time);
+            if (current_zoom - self.last_zoom).abs() > 0.001 {
+                self.zoom_indicator_time = Some(now);
+                self.last_zoom = current_zoom;
+            }
+            if let Some(birth) = self.zoom_indicator_time {
+                let age = (now - birth) as f32;
+                let lifetime = 1.5_f32;
+                if age < lifetime {
+                    ctx.request_repaint();
+                    let alpha = ((1.0 - (age / lifetime).powi(2)) * 255.0) as u8;
+                    let zoom_pct = (current_zoom * 100.0).round() as i32;
+                    let text = format!("{zoom_pct}%");
+                    egui::Area::new(egui::Id::new("zoom_indicator"))
+                        .anchor(egui::Align2::CENTER_TOP, [0.0, 52.0])
+                        .order(egui::Order::Foreground)
+                        .interactable(false)
+                        .show(ctx, |ui| {
+                            let galley = ui.fonts(|f| f.layout_no_wrap(
+                                text.clone(),
+                                egui::FontId::proportional(18.0),
+                                Color32::from_rgba_premultiplied(205, 214, 244, alpha),
+                            ));
+                            let size = galley.size() + Vec2::new(20.0, 10.0);
+                            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                            let bg_col = Color32::from_rgba_premultiplied(30, 30, 46, alpha.saturating_sub(30));
+                            ui.painter().rect_filled(rect, egui::CornerRadius::same(8), bg_col);
+                            ui.painter().rect_stroke(rect, egui::CornerRadius::same(8),
+                                egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(137, 180, 250, alpha / 2)),
+                                egui::StrokeKind::Outside);
+                            ui.painter().galley(
+                                Pos2::new(rect.min.x + 10.0, rect.center().y - galley.size().y / 2.0),
+                                galley, Color32::WHITE,
+                            );
+                        });
+                } else {
+                    self.zoom_indicator_time = None;
+                }
+            }
+        }
+
         if !self.presentation_mode {
             self.draw_toolbar(ctx);
             // Properties panel works in both 2D and 3D (selection is shared)
