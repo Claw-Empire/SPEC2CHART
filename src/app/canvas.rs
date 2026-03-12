@@ -1417,6 +1417,17 @@ impl FlowchartApp {
                         }
                     }
                 }
+                DragState::Panning { .. } => {
+                    // Transfer drag velocity to pan_velocity for mouse-drag inertia
+                    let vel = _ui.ctx().input(|i| i.pointer.velocity());
+                    let speed = vel.length();
+                    if speed > 50.0 {
+                        // Scale down and cap so fast flicks feel natural, not runaway
+                        let scale = (speed / 800.0).min(1.0) * 0.5;
+                        self.pan_velocity[0] += vel.x * scale;
+                        self.pan_velocity[1] += vel.y * scale;
+                    }
+                }
                 DragState::DraggingNewNode {
                     kind,
                     current_screen,
