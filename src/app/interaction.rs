@@ -241,8 +241,11 @@ impl FlowchartApp {
     pub(crate) fn step_zoom(&mut self, factor: f32) {
         let center = self.canvas_rect.center();
         let old_zoom = self.viewport.zoom;
-        self.viewport.zoom = (old_zoom * factor).clamp(0.1, 10.0);
-        let ratio = self.viewport.zoom / old_zoom;
+        // Set zoom_target for smooth interpolation; immediately update offset for pivot stability
+        let new_zoom = (old_zoom * factor).clamp(0.1, 10.0);
+        self.zoom_target = new_zoom;
+        // Pan offset so that the canvas center stays in place
+        let ratio = new_zoom / old_zoom;
         self.viewport.offset[0] = center.x - ratio * (center.x - self.viewport.offset[0]);
         self.viewport.offset[1] = center.y - ratio * (center.y - self.viewport.offset[1]);
     }

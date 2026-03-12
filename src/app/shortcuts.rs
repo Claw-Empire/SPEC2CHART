@@ -350,9 +350,9 @@ impl FlowchartApp {
             self.step_zoom(0.8);
         }
 
-        // Cmd+0 = reset zoom
+        // Cmd+0 = reset zoom (smooth)
         if ctx.input(|i| i.key_pressed(Key::Num0) && i.modifiers.matches_exact(cmd)) {
-            self.viewport.zoom = 1.0;
+            self.zoom_target = 1.0;
             self.viewport.offset = [0.0, 0.0];
         }
 

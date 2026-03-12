@@ -54,10 +54,36 @@ impl FlowchartApp {
             }
         }
 
-        // Regular scroll => pan canvas
+        // Regular scroll => pan canvas (with inertia accumulation)
+        let dt = ui.ctx().input(|i| i.stable_dt).clamp(0.001, 0.1);
         if !cmd_held && scroll.length() > 0.0 {
+            // Add scroll to velocity (weighted by frame time for consistent feel)
+            self.pan_velocity[0] += scroll.x * 0.6;
+            self.pan_velocity[1] += scroll.y * 0.6;
             self.viewport.offset[0] += scroll.x;
             self.viewport.offset[1] += scroll.y;
+        }
+
+        // Apply pan inertia (decay velocity each frame)
+        let friction = 0.82_f32;
+        if self.pan_velocity[0].abs() > 0.3 || self.pan_velocity[1].abs() > 0.3 {
+            self.pan_velocity[0] *= friction;
+            self.pan_velocity[1] *= friction;
+            self.viewport.offset[0] += self.pan_velocity[0];
+            self.viewport.offset[1] += self.pan_velocity[1];
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        } else {
+            self.pan_velocity = [0.0, 0.0];
+        }
+
+        // Smooth zoom interpolation toward zoom_target
+        let zoom_diff = self.zoom_target - self.viewport.zoom;
+        if zoom_diff.abs() > 0.001 {
+            let lerp_speed = 1.0 - 0.85_f32.powf(dt * 60.0);
+            self.viewport.zoom += zoom_diff * lerp_speed;
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        } else {
+            self.zoom_target = self.viewport.zoom;
         }
 
         self.handle_drag_start(&response, ui, pointer_pos);

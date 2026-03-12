@@ -144,6 +144,10 @@ pub struct FlowchartApp {
     pub(crate) project_title: String,
     /// When true, overlay connectivity heatmap on nodes (toggle with H)
     pub(crate) show_heatmap: bool,
+    /// Accumulated pan velocity for inertial scroll (pixels/frame)
+    pub(crate) pan_velocity: [f32; 2],
+    /// Target zoom for smooth keyboard zoom interpolation
+    pub(crate) zoom_target: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +266,8 @@ impl FlowchartApp {
             canvas_bg: [30, 30, 46, 255], // default = CANVAS_BG
             project_title: String::new(),
             show_heatmap: false,
+            pan_velocity: [0.0, 0.0],
+            zoom_target: 1.0,
         }
     }
 
