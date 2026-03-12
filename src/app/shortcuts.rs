@@ -454,18 +454,21 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+L = auto-layout (hierarchical)
+        // Cmd+L = auto-layout (hierarchical, animated)
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) {
-            // Reset all non-pinned node positions so the layout runs on all of them
-            for node in self.document.nodes.iter_mut() {
-                if !node.pinned {
-                    node.position = [0.0, 0.0];
-                }
+            // Compute hierarchical layout on a document clone, then animate toward results
+            let mut doc_clone = self.document.clone();
+            for node in doc_clone.nodes.iter_mut() {
+                if !node.pinned { node.position = [0.0, 0.0]; }
             }
-            crate::specgraph::layout::hierarchical_layout(&mut self.document);
-            self.history.push(&self.document);
+            crate::specgraph::layout::hierarchical_layout(&mut doc_clone);
+            // Store final positions as animation targets without touching the live document
+            self.layout_targets.clear();
+            for node in &doc_clone.nodes {
+                self.layout_targets.insert(node.id, node.position);
+            }
             self.pending_fit = true;
-            self.status_message = Some(("Auto-layout applied".to_string(), std::time::Instant::now()));
+            self.status_message = Some(("Layout animating…".to_string(), std::time::Instant::now()));
         }
 
         // Tab / Shift+Tab = cycle through nodes
@@ -670,69 +673,9 @@ impl FlowchartApp {
             }
         }
 
-        // Shift+L = force-directed auto-layout (spread overlapping nodes apart)
+        // Shift+L = force-directed auto-layout (animated transition)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.shift && !i.modifiers.command) {
-            let target_ids: Vec<NodeId> = if self.selection.node_ids.len() >= 2 {
-                self.selection.node_ids.iter().copied().collect()
-            } else {
-                self.document.nodes.iter().filter(|n| !n.locked && !n.is_frame).map(|n| n.id).collect()
-            };
-            // Run ~30 iterations of repulsion + edge attraction
-            for _ in 0..30 {
-                let mut forces: std::collections::HashMap<NodeId, egui::Vec2> =
-                    target_ids.iter().map(|id| (*id, egui::Vec2::ZERO)).collect();
-
-                // Repulsion between all node pairs
-                for i in 0..target_ids.len() {
-                    for j in (i + 1)..target_ids.len() {
-                        let ai = target_ids[i];
-                        let aj = target_ids[j];
-                        let (pi, si) = self.document.find_node(&ai).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
-                        let (pj, sj) = self.document.find_node(&aj).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
-                        let ri = egui::Rect::from_min_size(pi, si).expand(20.0);
-                        let rj = egui::Rect::from_min_size(pj, sj).expand(20.0);
-                        let ci = ri.center();
-                        let cj = rj.center();
-                        let diff = ci - cj;
-                        let dist = diff.length().max(0.01);
-                        let ideal = (ri.width() + rj.width()) * 0.55 + (ri.height() + rj.height()) * 0.25;
-                        if dist < ideal {
-                            let force = diff.normalized() * (ideal - dist) * 0.5;
-                            *forces.entry(ai).or_insert(egui::Vec2::ZERO) += force;
-                            *forces.entry(aj).or_insert(egui::Vec2::ZERO) -= force;
-                        }
-                    }
-                }
-
-                // Edge attraction: pull connected nodes toward ideal spacing
-                for edge in &self.document.edges {
-                    let src_id = edge.source.node_id;
-                    let tgt_id = edge.target.node_id;
-                    if !forces.contains_key(&src_id) || !forces.contains_key(&tgt_id) { continue; }
-                    let (ps, ss) = self.document.find_node(&src_id).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
-                    let (pt, st) = self.document.find_node(&tgt_id).map(|n| (n.pos(), n.size_vec())).unwrap_or_default();
-                    let ideal_edge = (ss.x + st.x) * 0.5 + 80.0;
-                    let diff = pt - ps;
-                    let dist = diff.length().max(0.01);
-                    let attract = diff.normalized() * (dist - ideal_edge) * 0.1;
-                    *forces.entry(src_id).or_insert(egui::Vec2::ZERO) += attract;
-                    *forces.entry(tgt_id).or_insert(egui::Vec2::ZERO) -= attract;
-                }
-
-                // Apply forces
-                for id in &target_ids {
-                    if let Some(node) = self.document.find_node_mut(id) {
-                        if node.pinned || node.locked { continue; }
-                        if let Some(f) = forces.get(id) {
-                            let clamped = egui::Vec2::new(f.x.clamp(-40.0, 40.0), f.y.clamp(-40.0, 40.0));
-                            node.position[0] += clamped.x;
-                            node.position[1] += clamped.y;
-                        }
-                    }
-                }
-            }
-            self.history.push(&self.document);
-            self.status_message = Some(("Auto-layout applied".to_string(), std::time::Instant::now()));
+            self.run_animated_force_layout();
         }
 
         // Shift+H = distribute selected nodes horizontally with equal gaps
@@ -824,6 +767,116 @@ impl FlowchartApp {
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
             let shift = ctx.input(|i| i.modifiers.shift);
             self.chain_create_node(shift);
+        }
+    }
+
+    /// Compute force-directed layout targets and kick off animated transition.
+    pub(crate) fn run_animated_force_layout(&mut self) {
+        let target_ids: Vec<NodeId> = if self.selection.node_ids.len() >= 2 {
+            self.selection.node_ids.iter().copied().collect()
+        } else {
+            self.document.nodes.iter().filter(|n| !n.locked && !n.is_frame).map(|n| n.id).collect()
+        };
+
+        // Work on a scratch position map so we don't mutate the document yet
+        let mut positions: std::collections::HashMap<NodeId, egui::Pos2> = target_ids.iter()
+            .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.pos())))
+            .collect();
+
+        let sizes: std::collections::HashMap<NodeId, egui::Vec2> = target_ids.iter()
+            .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.size_vec())))
+            .collect();
+
+        // 40 iterations of repulsion + edge attraction on scratch positions
+        for _ in 0..40 {
+            let mut forces: std::collections::HashMap<NodeId, egui::Vec2> =
+                target_ids.iter().map(|id| (*id, egui::Vec2::ZERO)).collect();
+
+            for i in 0..target_ids.len() {
+                for j in (i + 1)..target_ids.len() {
+                    let ai = target_ids[i];
+                    let aj = target_ids[j];
+                    let pi = positions[&ai];
+                    let pj = positions[&aj];
+                    let si = sizes.get(&ai).copied().unwrap_or(egui::Vec2::new(100.0, 60.0));
+                    let sj = sizes.get(&aj).copied().unwrap_or(egui::Vec2::new(100.0, 60.0));
+                    let ri = egui::Rect::from_min_size(pi, si).expand(20.0);
+                    let rj = egui::Rect::from_min_size(pj, sj).expand(20.0);
+                    let diff = ri.center() - rj.center();
+                    let dist = diff.length().max(0.01);
+                    let ideal = (ri.width() + rj.width()) * 0.55 + (ri.height() + rj.height()) * 0.25;
+                    if dist < ideal {
+                        let force = diff.normalized() * (ideal - dist) * 0.5;
+                        *forces.entry(ai).or_default() += force;
+                        *forces.entry(aj).or_default() -= force;
+                    }
+                }
+            }
+
+            for edge in &self.document.edges {
+                let (sid, tid) = (edge.source.node_id, edge.target.node_id);
+                if !forces.contains_key(&sid) || !forces.contains_key(&tid) { continue; }
+                let ps = positions[&sid];
+                let pt = positions[&tid];
+                let ss = sizes.get(&sid).copied().unwrap_or(egui::Vec2::new(100.0, 60.0));
+                let st = sizes.get(&tid).copied().unwrap_or(egui::Vec2::new(100.0, 60.0));
+                let ideal_edge = (ss.x + st.x) * 0.5 + 80.0;
+                let diff = pt - ps;
+                let dist = diff.length().max(0.01);
+                let attract = diff.normalized() * (dist - ideal_edge) * 0.1;
+                *forces.entry(sid).or_default() += attract;
+                *forces.entry(tid).or_default() -= attract;
+            }
+
+            for id in &target_ids {
+                if let Some(p) = positions.get_mut(id) {
+                    if let Some(f) = forces.get(id) {
+                        let clamped = egui::Vec2::new(f.x.clamp(-40.0, 40.0), f.y.clamp(-40.0, 40.0));
+                        *p += clamped;
+                    }
+                }
+            }
+        }
+
+        // Store final positions as animation targets
+        self.layout_targets.clear();
+        for (id, pos) in positions {
+            self.layout_targets.insert(id, [pos.x, pos.y]);
+        }
+        self.status_message = Some(("Layout animating…".to_string(), std::time::Instant::now()));
+    }
+
+    /// Advance the animated layout one frame; call each frame while layout_targets is non-empty.
+    pub(crate) fn step_layout_animation(&mut self, dt: f32, ctx: &egui::Context) {
+        if self.layout_targets.is_empty() { return; }
+
+        let lerp = 1.0 - 0.75_f32.powf(dt * 60.0); // ~60% per frame at 60fps
+        let mut settled = true;
+
+        let ids: Vec<NodeId> = self.layout_targets.keys().copied().collect();
+        for id in &ids {
+            let target = match self.layout_targets.get(id) { Some(t) => *t, None => continue };
+            if let Some(node) = self.document.find_node_mut(id) {
+                if node.pinned || node.locked { continue; }
+                let dx = target[0] - node.position[0];
+                let dy = target[1] - node.position[1];
+                if dx.abs() > 0.5 || dy.abs() > 0.5 {
+                    node.position[0] += dx * lerp;
+                    node.position[1] += dy * lerp;
+                    settled = false;
+                } else {
+                    node.position[0] = target[0];
+                    node.position[1] = target[1];
+                }
+            }
+        }
+
+        if settled {
+            self.layout_targets.clear();
+            self.history.push(&self.document);
+            self.status_message = Some(("Layout complete".to_string(), std::time::Instant::now()));
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
 

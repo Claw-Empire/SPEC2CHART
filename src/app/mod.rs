@@ -158,6 +158,8 @@ pub struct FlowchartApp {
     pub(crate) paste_count: usize,
     /// When true, animate data-flow dots along edges (toggle with Shift+A)
     pub(crate) show_flow_animation: bool,
+    /// Target positions for animated layout transitions: node_id → [target_x, target_y]
+    pub(crate) layout_targets: std::collections::HashMap<NodeId, [f32; 2]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,6 +285,7 @@ impl FlowchartApp {
             quick_notes_text: String::new(),
             paste_count: 0,
             show_flow_animation: false,
+            layout_targets: std::collections::HashMap::new(),
         }
     }
 

@@ -54,8 +54,14 @@ impl FlowchartApp {
             }
         }
 
-        // Regular scroll => pan canvas (with inertia accumulation)
+        // Advance animated layout transition each frame
         let dt = ui.ctx().input(|i| i.stable_dt).clamp(0.001, 0.1);
+        if !self.layout_targets.is_empty() {
+            let ctx_clone = ui.ctx().clone();
+            self.step_layout_animation(dt, &ctx_clone);
+        }
+
+        // Regular scroll => pan canvas (with inertia accumulation)
         if !cmd_held && scroll.length() > 0.0 {
             // User is scrolling — cancel any in-progress fly-to animation
             self.pan_target = None;
