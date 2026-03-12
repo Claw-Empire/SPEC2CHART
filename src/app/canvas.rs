@@ -758,6 +758,8 @@ impl FlowchartApp {
         }
 
         self.draw_inline_node_editor(ui, canvas_rect);
+        // Floating edge style bar: quick-toggle edge styles on selected edge
+        self.draw_floating_edge_bar(ui, canvas_rect);
         // Quick-connect arrows: show ±4 directional buttons on hovered node
         let drag_idle = matches!(&self.drag, DragState::None);
         let not_editing = self.inline_node_edit.is_none();
@@ -3537,5 +3539,139 @@ impl FlowchartApp {
         );
         painter.rect_stroke(src_screen, CornerRadius::ZERO,
             Stroke::new(1.0, ruler_color.gamma_multiply(0.6)), StrokeKind::Outside);
+    }
+
+    /// Floating edge style bar: appears above a single selected edge.
+    /// Shows quick-toggle buttons for common edge styles.
+    fn draw_floating_edge_bar(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        use super::interaction::{control_points_for_side, cubic_bezier_point};
+        use super::theme::*;
+
+        // Only show when exactly one edge is selected and we're not editing its label
+        if self.selection.edge_ids.len() != 1 || self.inline_edge_edit.is_some() {
+            return;
+        }
+        let edge_id = *self.selection.edge_ids.iter().next().unwrap();
+
+        // Snapshot edge style values (avoids holding borrow across painting)
+        let (is_orthogonal, is_dashed, has_glow, is_animated, has_label, mid_screen) = {
+            let edge = match self.document.find_edge(&edge_id) { Some(e) => e, None => return };
+            let src_node = self.document.find_node(&edge.source.node_id);
+            let tgt_node = self.document.find_node(&edge.target.node_id);
+            let mid = match (src_node, tgt_node) {
+                (Some(sn), Some(tn)) => {
+                    let src = self.viewport.canvas_to_screen(sn.port_position(edge.source.side));
+                    let tgt = self.viewport.canvas_to_screen(tn.port_position(edge.target.side));
+                    let offset = 60.0 * self.viewport.zoom;
+                    let (cp1, cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+                    let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
+                    let perp = Vec2::new(-dir.y, dir.x);
+                    let bend = edge.style.curve_bend * self.viewport.zoom;
+                    cubic_bezier_point(src + perp * bend, cp1 + perp * bend, cp2 + perp * bend, tgt + perp * bend, 0.5)
+                }
+                _ => return,
+            };
+            (edge.style.orthogonal, edge.style.dashed, edge.style.glow, edge.style.animated, !edge.label.is_empty(), mid)
+        };
+
+        if !canvas_rect.expand(20.0).contains(mid_screen) { return; }
+
+        let bar_h = 28.0_f32;
+        let btn_w = 30.0_f32;
+        // (glyph, tooltip, is_active_index: which field it toggles)
+        let items: [(&str, &str, bool); 6] = [
+            ("╮", "Orthogonal", is_orthogonal),
+            ("⌒", "Curved bend",   edge_id.0.as_u128() > 0 && false), // always inactive for bend
+            ("╌", "Dashed",        is_dashed),
+            ("✦", "Glow",          has_glow),
+            ("⟳", "Animated",      is_animated),
+            ("✎", "Edit label",    has_label),
+        ];
+        let bar_w = btn_w * items.len() as f32 + 6.0;
+
+        let bar_pos = Pos2::new(
+            (mid_screen.x - bar_w / 2.0).clamp(canvas_rect.min.x + 4.0, canvas_rect.max.x - bar_w - 4.0),
+            (mid_screen.y - bar_h - 14.0).clamp(canvas_rect.min.y + 4.0, canvas_rect.max.y - bar_h - 4.0),
+        );
+
+        // Collect click events via egui temp storage to avoid borrow-of-self issues inside closure
+        let click_key = egui::Id::new("feb_clicks").with(edge_id.0);
+
+        egui::Area::new(egui::Id::new("floating_edge_bar"))
+            .fixed_pos(bar_pos)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                let bar_rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(bar_w, bar_h));
+                ui.set_min_size(bar_rect.size());
+
+                // --- Phase 1: allocate all interactive regions (mutable borrows of ui) ---
+                let mut resps = Vec::with_capacity(items.len());
+                for (i, _) in items.iter().enumerate() {
+                    let bx = 3.0 + i as f32 * btn_w;
+                    let btn_rect = Rect::from_min_size(Pos2::new(bx, 2.0), Vec2::new(btn_w - 2.0, bar_h - 4.0));
+                    resps.push((btn_rect, ui.allocate_rect(btn_rect, egui::Sense::click())));
+                }
+
+                // --- Phase 2: draw (immutable painter borrow, no more ui mutations) ---
+                let painter = ui.painter();
+                painter.rect_filled(bar_rect, CornerRadius::same(14), SURFACE1);
+                painter.rect_stroke(bar_rect, CornerRadius::same(14),
+                    Stroke::new(1.0, MINIMAP_BORDER), StrokeKind::Outside);
+                // Connector stem to edge midpoint
+                let dot = Pos2::new(bar_rect.center().x, bar_rect.max.y);
+                painter.line_segment(
+                    [dot, mid_screen - bar_pos.to_vec2()],
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(100, 100, 130, 100)),
+                );
+
+                let mut clicks: [bool; 6] = [false; 6];
+                for (i, ((btn_rect, resp), (glyph, _tip, is_active))) in
+                    resps.iter().zip(items.iter()).enumerate()
+                {
+                    let hov = resp.hovered();
+                    let clicked = resp.clicked();
+                    let bg = if *is_active {
+                        ACCENT.gamma_multiply(0.30)
+                    } else if hov {
+                        Color32::from_rgba_unmultiplied(137, 180, 250, 22)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    painter.rect_filled(*btn_rect, CornerRadius::same(10), bg);
+                    painter.text(
+                        btn_rect.center(),
+                        Align2::CENTER_CENTER,
+                        *glyph,
+                        FontId::proportional(13.0),
+                        if *is_active { ACCENT } else { TEXT_SECONDARY },
+                    );
+                    if clicked { clicks[i] = true; }
+                }
+
+                // Store clicks so we can act on them after the closure
+                ui.ctx().data_mut(|d| d.insert_temp(click_key, clicks));
+            });
+
+        // Read and clear clicks
+        let clicks: [bool; 6] = ui.ctx().data_mut(|d| {
+            let v = d.get_temp::<[bool; 6]>(click_key).unwrap_or([false; 6]);
+            d.remove::<[bool; 6]>(click_key);
+            v
+        });
+
+        // Apply style mutations
+        if clicks[5] {
+            self.inline_edge_edit = Some((edge_id, mid_screen));
+            return;
+        }
+        let mut changed = false;
+        if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+            if clicks[0] { edge.style.orthogonal = !edge.style.orthogonal; changed = true; }
+            if clicks[1] { edge.style.curve_bend = if edge.style.curve_bend.abs() < 5.0 { 40.0 } else { 0.0 }; changed = true; }
+            if clicks[2] { edge.style.dashed = !edge.style.dashed; changed = true; }
+            if clicks[3] { edge.style.glow = !edge.style.glow; changed = true; }
+            if clicks[4] { edge.style.animated = !edge.style.animated; changed = true; }
+        }
+        if changed { self.history.push(&self.document); }
     }
 }
