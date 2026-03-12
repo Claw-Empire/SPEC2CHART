@@ -1,4 +1,4 @@
-use egui::{Color32, FontId, Pos2, Rect, SidePanel, Stroke};
+use egui::{Color32, CornerRadius, FontId, Pos2, Rect, SidePanel, Stroke};
 use crate::model::*;
 use super::FlowchartApp;
 use super::theme::*;
@@ -139,6 +139,37 @@ impl FlowchartApp {
                     });
                 }
             }
+            ui.add_space(8.0);
+        }
+
+        // History summary
+        let undo_count = self.history.undo_steps();
+        let redo_count = self.history.redo_steps();
+        if undo_count > 0 || redo_count > 0 {
+            Self::draw_section_header(ui, "HISTORY");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(format!("↩ {} undo", undo_count)).size(11.0).color(
+                    if undo_count > 0 { TEXT_SECONDARY } else { TEXT_DIM }
+                ));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(format!("{} ↪ redo", redo_count)).size(11.0).color(
+                        if redo_count > 0 { TEXT_SECONDARY } else { TEXT_DIM }
+                    ));
+                });
+            });
+            // Visual bar: undo steps on left (filled), redo on right (dim)
+            let total = (undo_count + redo_count).max(1);
+            let undo_frac = undo_count as f32 / total as f32;
+            let bar_response = ui.allocate_exact_size(egui::Vec2::new(ui.available_width(), 6.0), egui::Sense::hover());
+            let bar = bar_response.0;
+            let painter = ui.painter();
+            painter.rect_filled(bar, CornerRadius::same(3), SURFACE0);
+            painter.rect_filled(
+                Rect::from_min_size(bar.min, egui::Vec2::new(bar.width() * undo_frac, bar.height())),
+                CornerRadius::same(3),
+                ACCENT.gamma_multiply(0.7),
+            );
             ui.add_space(8.0);
         }
 

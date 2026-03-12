@@ -107,6 +107,8 @@ pub struct FlowchartApp {
     pub(crate) canvas_rect: Rect,
     pub(crate) status_message: Option<(String, std::time::Instant)>,
     pub(crate) focus_label_edit: bool,
+    /// When Some, show a floating inline edge label editor at this screen position
+    pub(crate) inline_edge_edit: Option<(EdgeId, Pos2)>,
     pub(crate) view_mode: ViewMode,
     pub(crate) camera3d: camera::Camera3D,
     pub(crate) view_transition: f32,
@@ -227,6 +229,7 @@ impl FlowchartApp {
             canvas_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0)),
             status_message: None,
             focus_label_edit: false,
+            inline_edge_edit: None,
             view_mode: ViewMode::TwoD,
             camera3d: camera::Camera3D::default(),
             view_transition: 0.0,
@@ -487,6 +490,45 @@ impl eframe::App for FlowchartApp {
                 self.status_message = Some(("Node inserted".to_string(), std::time::Instant::now()));
             }
             if close { self.shape_picker = None; }
+        }
+
+        // Inline edge label editor (opens when double-clicking an edge)
+        if let Some((edge_id, pos)) = self.inline_edge_edit {
+            let mut close_editor = false;
+            egui::Window::new("##edge_label_editor")
+                .title_bar(false)
+                .resizable(false)
+                .collapsible(false)
+                .fixed_pos(pos)
+                .frame(egui::Frame {
+                    fill: SURFACE0,
+                    inner_margin: egui::Margin::same(6),
+                    stroke: egui::Stroke::new(1.0, ACCENT),
+                    corner_radius: egui::CornerRadius::same(6),
+                    ..Default::default()
+                })
+                .show(ctx, |ui| {
+                    ui.label(egui::RichText::new("Edge label").size(10.0).color(TEXT_DIM));
+                    if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut edge.label)
+                                .desired_width(160.0)
+                                .font(egui::FontId::proportional(13.0)),
+                        );
+                        resp.request_focus();
+                        if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)) {
+                            close_editor = true;
+                            self.history.push(&self.document);
+                        }
+                    } else {
+                        close_editor = true;
+                    }
+                    if ui.button("✓ Done").clicked() {
+                        close_editor = true;
+                        self.history.push(&self.document);
+                    }
+                });
+            if close_editor { self.inline_edge_edit = None; }
         }
 
         // Keyboard shortcuts panel

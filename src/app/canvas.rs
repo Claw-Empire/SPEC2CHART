@@ -243,10 +243,9 @@ impl FlowchartApp {
                     self.selection.select_node(node_id);
                     self.focus_label_edit = true;
                 } else if let Some(edge_id) = self.hit_test_edge(canvas_pos) {
-                    // Double-click edge => select it and focus label in properties
+                    // Double-click edge => open inline label editor near click position
                     self.selection.select_edge(edge_id);
-                    self.focus_label_edit = true;
-                    self.status_message = Some(("Edge selected — edit label in properties".to_string(), std::time::Instant::now()));
+                    self.inline_edge_edit = Some((edge_id, mouse));
                 } else if self.tool == Tool::Select {
                     // Create a new default shape node centered on the click
                     let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
@@ -380,6 +379,9 @@ impl FlowchartApp {
                 self.draw_resize_handles(&painter, screen_rect);
             }
         }
+
+        // Floating quick-action bar above selected node(s)
+        self.draw_floating_action_bar(ui, canvas_rect);
 
         // --- Rulers ---
         if self.show_grid {
@@ -1272,6 +1274,93 @@ impl FlowchartApp {
     }
 
     // --- Rulers ---
+
+    fn draw_floating_action_bar(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        if self.selection.node_ids.is_empty() { return; }
+        // Compute bounding box of selected nodes in screen space
+        let bb = self.selection.node_ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .fold(Option::<Rect>::None, |acc, n| {
+                let sr = Rect::from_min_size(self.viewport.canvas_to_screen(n.pos()), n.size_vec() * self.viewport.zoom);
+                Some(acc.map_or(sr, |r| r.union(sr)))
+            });
+        let Some(bb) = bb else { return };
+
+        let bar_h = 28.0;
+        let bar_margin = 8.0;
+        let bar_y = (bb.min.y - bar_h - bar_margin).max(canvas_rect.min.y + 4.0);
+        let bar_center_x = bb.center().x.clamp(canvas_rect.min.x + 80.0, canvas_rect.max.x - 80.0);
+
+        // Build the bar as a horizontal layout
+        let actions: &[(&str, &str)] = &[
+            ("✏", "Edit label"),
+            ("⎘", "Duplicate (⌘D)"),
+            ("📋", "Copy style (⌘⇧C)"),
+            ("🗑", "Delete"),
+        ];
+        let btn_w = 28.0;
+        let bar_w = actions.len() as f32 * btn_w + (actions.len() - 1) as f32 * 2.0 + 8.0;
+        let bar_rect = Rect::from_center_size(
+            egui::Pos2::new(bar_center_x, bar_y + bar_h / 2.0),
+            egui::Vec2::new(bar_w, bar_h),
+        );
+
+        // Draw bar background via painter
+        let painter = ui.painter();
+        painter.rect_filled(bar_rect, CornerRadius::same(6), TOOLTIP_BG);
+        painter.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
+
+        // Draw buttons using ui.put()
+        let pad = 4.0;
+        let mut x = bar_rect.min.x + pad;
+        let mut clicked_action: Option<usize> = None;
+        for (i, (icon, tooltip)) in actions.iter().enumerate() {
+            let btn_rect = Rect::from_min_size(
+                egui::Pos2::new(x, bar_rect.min.y + 2.0),
+                egui::Vec2::new(btn_w, bar_h - 4.0),
+            );
+            let resp = ui.put(btn_rect, egui::Button::new(
+                egui::RichText::new(*icon).size(13.0)
+            ).frame(false)).on_hover_text(*tooltip);
+            if resp.clicked() { clicked_action = Some(i); }
+            x += btn_w + 2.0;
+        }
+
+        // Handle clicked actions
+        if let Some(action) = clicked_action {
+            match action {
+                0 => { self.focus_label_edit = true; }
+                1 => { // Duplicate
+                    let offset = egui::Vec2::new(24.0, 24.0);
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    let originals: Vec<crate::model::Node> = ids.iter().filter_map(|id| self.document.find_node(id).cloned()).collect();
+                    self.selection.clear();
+                    for mut node in originals {
+                        node.id = NodeId::new();
+                        node.set_pos(node.pos() + offset);
+                        self.selection.node_ids.insert(node.id);
+                        self.document.nodes.push(node);
+                    }
+                    self.history.push(&self.document);
+                }
+                2 => { // Copy style
+                    if let Some(id) = self.selection.node_ids.iter().next() {
+                        if let Some(node) = self.document.find_node(id) {
+                            self.style_clipboard = Some(node.style.clone());
+                            self.status_message = Some(("Style copied".to_string(), std::time::Instant::now()));
+                        }
+                    }
+                }
+                3 => { // Delete
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids { self.document.remove_node(id); }
+                    self.selection.clear();
+                    self.history.push(&self.document);
+                }
+                _ => {}
+            }
+        }
+    }
 
     fn draw_project_title(&self, painter: &egui::Painter, canvas_rect: Rect) {
         if self.project_title.is_empty() { return; }
