@@ -1331,7 +1331,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn distribute_nodes_h(&mut self) {
+    pub(crate) fn distribute_nodes_h(&mut self) {
         let ids = self.selected_node_ids();
         if ids.len() < 3 { return; }
         let mut nodes: Vec<(NodeId, f32, f32)> = ids.iter()
@@ -1349,7 +1349,7 @@ impl FlowchartApp {
         self.history.push(&self.document);
     }
 
-    fn distribute_nodes_v(&mut self) {
+    pub(crate) fn distribute_nodes_v(&mut self) {
         let ids = self.selected_node_ids();
         if ids.len() < 3 { return; }
         let mut nodes: Vec<(NodeId, f32, f32)> = ids.iter()

@@ -634,6 +634,24 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // Shift+H = distribute selected nodes horizontally (equal spacing on X)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.shift_only())
+            && self.selection.node_ids.len() >= 3
+        {
+            self.distribute_nodes_h();
+            self.history.push(&self.document);
+            self.status_message = Some(("Distributed H".to_string(), std::time::Instant::now()));
+        }
+
+        // Shift+V = distribute selected nodes vertically (equal spacing on Y)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.shift_only())
+            && self.selection.node_ids.len() >= 3
+        {
+            self.distribute_nodes_v();
+            self.history.push(&self.document);
+            self.status_message = Some(("Distributed V".to_string(), std::time::Instant::now()));
+        }
+
         // Shift+A = toggle data-flow animation
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.shift_only()) {
             self.show_flow_animation = !self.show_flow_animation;
