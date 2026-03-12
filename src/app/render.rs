@@ -714,10 +714,12 @@ impl FlowchartApp {
                 crate::model::TextAlign::Left   => screen_rect.min.x + pad,
                 crate::model::TextAlign::Right  => screen_rect.max.x - pad - galley.size().x,
             };
-            let text_pos = Pos2::new(
-                text_x,
-                screen_rect.center().y - galley.size().y / 2.0,
-            );
+            let text_y = match style.text_valign {
+                crate::model::TextVAlign::Top    => screen_rect.min.y + pad,
+                crate::model::TextVAlign::Middle => screen_rect.center().y - galley.size().y / 2.0,
+                crate::model::TextVAlign::Bottom => screen_rect.max.y - pad - galley.size().y,
+            };
+            let text_pos = Pos2::new(text_x, text_y);
             // Clip text to node interior so it never overflows the shape
             let clip_rect = screen_rect.shrink(pad * 0.5);
             let clipped_painter = painter.with_clip_rect(clip_rect);

@@ -704,6 +704,21 @@ impl FlowchartApp {
                         node.style.text_align = align;
                     }
                 }
+                ui.add_space(4.0);
+                // Vertical text alignment
+                for (valign, icon, tip) in [
+                    (crate::model::TextVAlign::Top,    "⬆", "Top"),
+                    (crate::model::TextVAlign::Middle, "⊟", "Middle"),
+                    (crate::model::TextVAlign::Bottom, "⬇", "Bottom"),
+                ] {
+                    let active = node.style.text_valign == valign;
+                    let btn = egui::Button::new(
+                        egui::RichText::new(icon).size(12.0).color(if active { ACCENT } else { TEXT_DIM })
+                    ).fill(if active { SURFACE1 } else { Color32::TRANSPARENT });
+                    if ui.add(btn).on_hover_text(tip).clicked() {
+                        node.style.text_valign = valign;
+                    }
+                }
             });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.corner_radius, 0.0..=40.0).text("Radius"));
