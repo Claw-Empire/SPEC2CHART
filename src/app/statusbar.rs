@@ -96,6 +96,20 @@ impl FlowchartApp {
                                 let bh = (bb_max.y - bb_min.y).round() as i32;
                                 label(ui, &format!("bbox {}×{}", bw, bh), TEXT_DIM);
                             }
+                            // Distance between exactly 2 selected nodes
+                            if sel_count == 2 {
+                                let ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                                if let (Some(n1), Some(n2)) = (
+                                    self.document.find_node(&ids[0]),
+                                    self.document.find_node(&ids[1]),
+                                ) {
+                                    let c1 = n1.rect().center();
+                                    let c2 = n2.rect().center();
+                                    let dist = ((c2.x - c1.x).powi(2) + (c2.y - c1.y).powi(2)).sqrt();
+                                    ui.add_space(6.0);
+                                    label(ui, &format!("↔ {:.0}", dist), ACCENT.gamma_multiply(0.8));
+                                }
+                            }
                         }
                     }
 

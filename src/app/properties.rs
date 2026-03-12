@@ -1147,7 +1147,19 @@ impl FlowchartApp {
                 ui.checkbox(&mut edge.style.animated, egui::RichText::new("Flow ▶").size(11.0).color(TEXT_DIM))
                     .on_hover_text("Animate dashes to show data flow direction");
             });
-            ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
+                // Visual thickness preview line
+                let w = 40.0_f32;
+                let h = 20.0_f32;
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+                let mid_y = rect.center().y;
+                let edge_col = to_color32(edge.style.color);
+                ui.painter().line_segment(
+                    [egui::pos2(rect.min.x + 4.0, mid_y), egui::pos2(rect.max.x - 4.0, mid_y)],
+                    egui::Stroke::new(edge.style.width.clamp(1.0, 8.0), edge_col),
+                );
+            });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add(egui::Slider::new(&mut edge.style.curve_bend, -200.0..=200.0).text("Bend"));

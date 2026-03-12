@@ -522,6 +522,16 @@ impl FlowchartApp {
             if self.show_search { self.search_query.clear(); }
         }
 
+        // Cmd+Shift+F = zoom to fit selected nodes (or all if nothing selected)
+        let cmd_shift = egui::Modifiers { command: true, shift: true, ..Default::default() };
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd_shift)) {
+            if self.selection.node_ids.is_empty() {
+                self.fit_to_content();
+            } else {
+                self.zoom_to_selection();
+            }
+        }
+
         // Cmd+H = find & replace
         if ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.matches_exact(cmd)) {
             self.show_find_replace = !self.show_find_replace;
