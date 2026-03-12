@@ -469,6 +469,15 @@ impl FlowchartApp {
             }
         }
 
+        // Connected-edge glow pass: highlight edges touching the hovered node
+        if let Some(hid) = hover_node_id {
+            if self.selection.is_empty() {
+                let t_pulse = painter.ctx().input(|i| i.time) as f32;
+                self.draw_hover_edge_glow(&painter, &node_idx, hid, t_pulse, canvas_rect);
+                painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+            }
+        }
+
         // Data-flow animation: dots traveling along edges
         if self.show_flow_animation && !self.document.edges.is_empty() {
             let time = painter.ctx().input(|i| i.time) as f32;
@@ -1731,6 +1740,102 @@ impl FlowchartApp {
             painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, cl,
                 egui::FontId::proportional(9.5),
                 Color32::from_rgba_unmultiplied(137, 220, 235, 160)); // cyan tint
+        }
+    }
+
+    /// Draw pulsing glow overlays on all edges connected to `hovered_node`.
+    /// Also draws a small in/out degree badge above the node.
+    fn draw_hover_edge_glow(
+        &self,
+        painter: &egui::Painter,
+        node_idx: &std::collections::HashMap<NodeId, usize>,
+        hovered_node: NodeId,
+        time: f32,
+        canvas_rect: Rect,
+    ) {
+        // Pulse: glow width breathes between 0.6–1.0 strength
+        let pulse = 0.8 + 0.2 * (time * 3.0).sin();
+
+        let mut in_deg = 0usize;
+        let mut out_deg = 0usize;
+
+        for edge in &self.document.edges {
+            let is_out = edge.source.node_id == hovered_node;
+            let is_in  = edge.target.node_id == hovered_node;
+            if !is_out && !is_in { continue; }
+
+            if is_out { out_deg += 1; }
+            if is_in  { in_deg  += 1; }
+
+            let src_node = node_idx.get(&edge.source.node_id).and_then(|&i| self.document.nodes.get(i));
+            let tgt_node = node_idx.get(&edge.target.node_id).and_then(|&i| self.document.nodes.get(i));
+            let (sn, tn) = match (src_node, tgt_node) { (Some(s), Some(t)) => (s, t), _ => continue };
+
+            let src = self.viewport.canvas_to_screen(sn.port_position(edge.source.side));
+            let tgt = self.viewport.canvas_to_screen(tn.port_position(edge.target.side));
+            let offset = 60.0 * self.viewport.zoom;
+            let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+            if edge.style.curve_bend.abs() > 0.1 {
+                let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
+                let perp = Vec2::new(-dir.y, dir.x);
+                cp1 = cp1 + perp * edge.style.curve_bend * self.viewport.zoom;
+                cp2 = cp2 + perp * edge.style.curve_bend * self.viewport.zoom;
+            }
+
+            // Direction-coded color: outgoing = blue accent, incoming = green
+            let glow_color = if is_out {
+                Color32::from_rgba_premultiplied(137, 180, 250, (80.0 * pulse) as u8)
+            } else {
+                Color32::from_rgba_premultiplied(166, 227, 161, (80.0 * pulse) as u8)
+            };
+            let core_color = if is_out {
+                Color32::from_rgba_premultiplied(137, 180, 250, (200.0 * pulse) as u8)
+            } else {
+                Color32::from_rgba_premultiplied(166, 227, 161, (200.0 * pulse) as u8)
+            };
+
+            // Outer glow
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt], false, Color32::TRANSPARENT,
+                Stroke::new(10.0 * self.viewport.zoom.sqrt(), glow_color),
+            ));
+            // Inner bright line
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt], false, Color32::TRANSPARENT,
+                Stroke::new(2.5, core_color),
+            ));
+        }
+
+        // Draw in/out degree badge near the hovered node
+        if let Some(&idx) = node_idx.get(&hovered_node) {
+            if let Some(node) = self.document.nodes.get(idx) {
+                let node_screen = self.viewport.canvas_to_screen(node.pos());
+                let node_size_s = node.size_vec() * self.viewport.zoom;
+                let badge_pos = Pos2::new(
+                    node_screen.x + node_size_s.x / 2.0,
+                    node_screen.y - 22.0,
+                );
+                if canvas_rect.contains(badge_pos) {
+                    let text = format!("↑{out_deg}  ↓{in_deg}");
+                    let font = egui::FontId::proportional(10.5);
+                    let text_size = painter.ctx().fonts(|f| f.layout_no_wrap(
+                        text.clone(), font.clone(), Color32::WHITE,
+                    ).size());
+                    let bg_rect = Rect::from_center_size(
+                        badge_pos,
+                        egui::vec2(text_size.x + 12.0, text_size.y + 6.0),
+                    );
+                    painter.rect_filled(bg_rect, CornerRadius::same(4), Color32::from_rgba_premultiplied(20, 20, 35, 210));
+                    painter.rect_stroke(bg_rect, CornerRadius::same(4), Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
+                    painter.text(
+                        badge_pos,
+                        egui::Align2::CENTER_CENTER,
+                        &text,
+                        font,
+                        Color32::from_rgb(205, 214, 244),
+                    );
+                }
+            }
         }
     }
 
