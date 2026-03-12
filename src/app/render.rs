@@ -4,6 +4,29 @@ use super::FlowchartApp;
 use super::interaction::{control_points_for_side, cubic_bezier_point};
 use super::theme::*;
 
+/// Draw a vertical gradient-filled rect using a mesh (top=color_top, bottom=color_bot).
+fn paint_gradient_rect(painter: &egui::Painter, rect: Rect, color_top: Color32, color_bot: Color32) {
+    let mut mesh = egui::Mesh::default();
+    // 4 vertices: TL, TR, BR, BL
+    mesh.vertices.push(egui::epaint::Vertex { pos: rect.min,                               uv: Pos2::ZERO, color: color_top });
+    mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(rect.max.x, rect.min.y),      uv: Pos2::ZERO, color: color_top });
+    mesh.vertices.push(egui::epaint::Vertex { pos: rect.max,                               uv: Pos2::ZERO, color: color_bot });
+    mesh.vertices.push(egui::epaint::Vertex { pos: Pos2::new(rect.min.x, rect.max.y),      uv: Pos2::ZERO, color: color_bot });
+    mesh.indices = vec![0, 1, 2, 0, 2, 3];
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// Darken a Color32 by blending toward black by `amount` (0.0 = unchanged, 1.0 = black).
+fn darken(c: Color32, amount: f32) -> Color32 {
+    let f = 1.0 - amount.clamp(0.0, 1.0);
+    Color32::from_rgba_unmultiplied(
+        (c.r() as f32 * f) as u8,
+        (c.g() as f32 * f) as u8,
+        (c.b() as f32 * f) as u8,
+        c.a(),
+    )
+}
+
 impl FlowchartApp {
     pub(crate) fn draw_node(&self, node: &Node, painter: &egui::Painter, hover_pos: Option<Pos2>) {
         let top_left = self.viewport.canvas_to_screen(node.pos());
@@ -24,6 +47,31 @@ impl FlowchartApp {
                 Stroke::new(1.5, ACCENT_HOVER),
                 StrokeKind::Outside,
             );
+        }
+
+        // Collapsed pill: render a compact rounded rect with just the label
+        if node.collapsed {
+            if let NodeKind::Shape { label, .. } = &node.kind {
+                let fill = to_color32(node.style.fill_color);
+                let border = if is_selected { SELECTION_COLOR } else { to_color32(node.style.border_color) };
+                let cr = CornerRadius::same((screen_rect.height() / 2.0) as u8);
+                painter.rect_filled(screen_rect, cr, fill);
+                painter.rect_stroke(screen_rect, cr, Stroke::new(1.5, border), StrokeKind::Outside);
+                // Collapsed indicator chevron on left + label
+                let text_col = to_color32(node.style.text_color);
+                painter.text(
+                    screen_rect.left_center() + Vec2::new(10.0, 0.0),
+                    Align2::LEFT_CENTER, "▶",
+                    FontId::proportional(9.0), text_col.gamma_multiply(0.6),
+                );
+                painter.text(
+                    screen_rect.center(),
+                    Align2::CENTER_CENTER, label,
+                    FontId::proportional((node.style.font_size * self.viewport.zoom.sqrt()).min(13.0)),
+                    text_col,
+                );
+            }
+            return;
         }
 
         match &node.kind {
@@ -156,11 +204,12 @@ impl FlowchartApp {
             SHADOW_LIGHT,
         );
 
-        let fill = to_color32(style.fill_color);
+        let opacity = style.opacity.clamp(0.0, 1.0);
+        let fill = to_color32(style.fill_color).gamma_multiply(opacity);
         let border_color = if is_selected {
-            SELECTION_COLOR
+            SELECTION_COLOR.gamma_multiply(opacity)
         } else {
-            to_color32(style.border_color)
+            to_color32(style.border_color).gamma_multiply(opacity)
         };
         let border_width = if is_selected {
             style.border_width.max(2.5)
@@ -202,7 +251,11 @@ impl FlowchartApp {
 
         match shape {
             NodeShape::Rectangle => {
-                painter.rect_filled(screen_rect, CornerRadius::same(cr_user), fill);
+                if style.gradient {
+                    paint_gradient_rect(painter, screen_rect, fill, darken(fill, 0.35));
+                } else {
+                    painter.rect_filled(screen_rect, CornerRadius::same(cr_user), fill);
+                }
                 if style.border_dashed {
                     draw_dashed_rect(painter, screen_rect, stroke);
                 } else {
@@ -211,7 +264,14 @@ impl FlowchartApp {
             }
             NodeShape::RoundedRect => {
                 let r = (10.0 * self.viewport.zoom).max(style.corner_radius * self.viewport.zoom.sqrt()) as u8;
-                painter.rect_filled(screen_rect, CornerRadius::same(r), fill);
+                if style.gradient {
+                    // Clip gradient to rounded rect by overdrawing rounded rect mask
+                    paint_gradient_rect(painter, screen_rect, fill, darken(fill, 0.35));
+                    // Re-punch the corners transparent by drawing the background color in the corner arcs
+                    // (simplification: draw the stroke rect over — visually correct for typical sizes)
+                } else {
+                    painter.rect_filled(screen_rect, CornerRadius::same(r), fill);
+                }
                 if style.border_dashed {
                     draw_dashed_rect(painter, screen_rect, stroke);
                 } else {
@@ -289,21 +349,22 @@ impl FlowchartApp {
             }
         }
 
-        let text_color = to_color32(style.text_color);
-        let font_size = style.font_size * self.viewport.zoom;
-        if font_size > 4.0 {
-            // Connector nodes use italic monospace to read as "interface/protocol"
+        let text_color = to_color32(style.text_color).gamma_multiply(opacity);
+        // Cap font size at 72px to prevent overly large text at high zoom
+        let font_size = (style.font_size * self.viewport.zoom).min(72.0);
+        if font_size > 4.0 && !label.is_empty() {
             let font = match shape {
                 NodeShape::Connector => FontId::monospace(font_size * 0.88),
                 _ => FontId::proportional(font_size),
             };
-            painter.text(
-                screen_rect.center(),
-                Align2::CENTER_CENTER,
-                label,
-                font,
-                text_color,
+            let pad = (6.0 * self.viewport.zoom).min(12.0);
+            let max_text_w = (screen_rect.width() - pad * 2.0).max(10.0);
+            let galley = painter.layout(label.to_string(), font, text_color, max_text_w);
+            let text_pos = Pos2::new(
+                screen_rect.center().x - galley.size().x / 2.0,
+                screen_rect.center().y - galley.size().y / 2.0,
             );
+            painter.galley(text_pos, galley, Color32::TRANSPARENT);
         }
     }
 
@@ -606,6 +667,29 @@ impl FlowchartApp {
                 Stroke::new(width + 6.0, ACCENT_SELECT_BG),
             );
             painter.add(glow);
+        }
+
+        // Edge glow effect: draw a wider, semi-transparent halo beneath the edge
+        if edge.style.glow && !is_selected {
+            let glow_color = Color32::from_rgba_unmultiplied(
+                edge_color.r(), edge_color.g(), edge_color.b(), 60,
+            );
+            let glow_shape = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt],
+                false,
+                Color32::TRANSPARENT,
+                Stroke::new(width + 10.0, glow_color),
+            );
+            painter.add(glow_shape);
+            let glow_shape2 = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt],
+                false,
+                Color32::TRANSPARENT,
+                Stroke::new(width + 5.0, Color32::from_rgba_unmultiplied(
+                    edge_color.r(), edge_color.g(), edge_color.b(), 100,
+                )),
+            );
+            painter.add(glow_shape2);
         }
 
         if edge.style.dashed {

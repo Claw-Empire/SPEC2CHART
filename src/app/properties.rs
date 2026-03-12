@@ -406,6 +406,8 @@ impl FlowchartApp {
                 ui.add(egui::Slider::new(&mut node.style.border_width, 0.0..=10.0).text("Border"));
                 ui.add_space(8.0);
                 ui.checkbox(&mut node.style.border_dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
+                ui.add_space(8.0);
+                ui.checkbox(&mut node.style.gradient, egui::RichText::new("Gradient").size(11.0).color(TEXT_DIM));
             });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
@@ -413,8 +415,12 @@ impl FlowchartApp {
             ui.add(egui::Slider::new(&mut node.style.corner_radius, 0.0..=40.0).text("Radius"));
             ui.add_space(4.0);
             let mut opacity = node.style.fill_color[3] as f32 / 255.0 * 100.0;
-            if ui.add(egui::Slider::new(&mut opacity, 0.0..=100.0).text("Opacity").suffix("%")).changed() {
+            if ui.add(egui::Slider::new(&mut opacity, 0.0..=100.0).text("Fill alpha").suffix("%")).changed() {
                 node.style.fill_color[3] = (opacity / 100.0 * 255.0).round() as u8;
+            }
+            let mut node_opacity = node.style.opacity * 100.0;
+            if ui.add(egui::Slider::new(&mut node_opacity, 0.0..=100.0).text("Node opacity").suffix("%")).changed() {
+                node.style.opacity = (node_opacity / 100.0).clamp(0.0, 1.0);
             }
             ui.add_space(16.0);
 
@@ -487,12 +493,27 @@ impl FlowchartApp {
             });
         }
 
-        // Pin toggle
+        // Pin toggle + collapse toggle
+        let mut do_collapse = false;
         if let Some(node) = self.document.find_node_mut(&node_id) {
             ui.add_space(4.0);
-            let pin_label = if node.pinned { "📌 Pinned — click to unpin" } else { "📍 Pin node" };
-            if ui.button(pin_label).clicked() {
-                node.pinned = !node.pinned;
+            ui.horizontal(|ui| {
+                let pin_label = if node.pinned { "📌 Pinned" } else { "📍 Pin" };
+                if ui.small_button(pin_label).clicked() {
+                    node.pinned = !node.pinned;
+                }
+                if matches!(node.kind, NodeKind::Shape { .. }) {
+                    let col_label = if node.collapsed { "▶ Expand" } else { "▼ Collapse" };
+                    if ui.small_button(col_label).clicked() {
+                        do_collapse = true;
+                    }
+                }
+            });
+        }
+        if do_collapse {
+            if let Some(node) = self.document.find_node_mut(&node_id) {
+                node.toggle_collapsed();
+                self.history.push(&self.document);
             }
         }
 
@@ -662,6 +683,8 @@ impl FlowchartApp {
                 ui.checkbox(&mut edge.style.dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
                 ui.add_space(8.0);
                 ui.checkbox(&mut edge.style.orthogonal, egui::RichText::new("Orthogonal").size(11.0).color(TEXT_DIM));
+                ui.add_space(8.0);
+                ui.checkbox(&mut edge.style.glow, egui::RichText::new("Glow").size(11.0).color(TEXT_DIM));
             });
             ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
             ui.add_space(4.0);
@@ -703,7 +726,53 @@ impl FlowchartApp {
                 .size(13.0)
                 .color(TEXT_SECONDARY),
         );
-        ui.add_space(12.0);
+        ui.add_space(8.0);
+
+        // Path inspection + quick connect: when exactly 2 nodes selected
+        if sel_nodes == 2 && sel_edges == 0 {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let (src, tgt) = (ids[0], ids[1]);
+            let path_len = self.bfs_path_length(src, tgt);
+            Self::draw_section_header(ui, "PATH ANALYSIS");
+            ui.add_space(4.0);
+            if let Some(hops) = path_len {
+                ui.label(egui::RichText::new(format!("Shortest path: {} hop(s)", hops)).size(11.0).color(TEXT_SECONDARY));
+            } else {
+                ui.label(egui::RichText::new("No path between nodes").size(11.0).color(TEXT_DIM));
+            }
+            ui.add_space(6.0);
+            // Quick connect button
+            let already_connected = self.document.edges.iter().any(|e| {
+                (e.source.node_id == src && e.target.node_id == tgt) ||
+                (e.source.node_id == tgt && e.target.node_id == src)
+            });
+            ui.horizontal(|ui| {
+                let btn = ui.add_enabled(
+                    !already_connected,
+                    egui::Button::new(egui::RichText::new("→ Connect").size(11.0)),
+                );
+                if btn.clicked() {
+                    let edge = Edge {
+                        id: EdgeId::new(),
+                        source: Port { node_id: src, side: crate::model::PortSide::Right },
+                        target: Port { node_id: tgt, side: crate::model::PortSide::Left },
+                        label: String::new(),
+                        source_label: String::new(),
+                        target_label: String::new(),
+                        source_cardinality: crate::model::Cardinality::None,
+                        target_cardinality: crate::model::Cardinality::None,
+                        style: EdgeStyle::default(),
+                    };
+                    self.document.edges.push(edge);
+                    self.history.push(&self.document);
+                }
+                if already_connected {
+                    ui.label(egui::RichText::new("(already connected)").size(10.0).color(TEXT_DIM));
+                }
+            });
+            ui.add_space(8.0);
+        }
+        ui.add_space(4.0);
 
         // Batch edge style when edges are selected
         if sel_edges >= 1 {

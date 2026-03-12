@@ -123,6 +123,15 @@ pub struct FlowchartApp {
     pub(crate) shape_picker: Option<Pos2>,
     /// Saved viewport for overview mode toggle
     pub(crate) saved_viewport: Option<Viewport>,
+    pub(crate) show_find_replace: bool,
+    pub(crate) find_query: String,
+    pub(crate) replace_query: String,
+    pub(crate) focus_mode: bool,
+    pub(crate) canvas_locked: bool,
+    /// Alignment guide lines computed during node drag: (is_horizontal, canvas_coord)
+    pub(crate) alignment_guides: Vec<(bool, f32)>,
+    /// When true, hide all panels for a clean presentation view (toggle with F)
+    pub(crate) presentation_mode: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,6 +237,13 @@ impl FlowchartApp {
             bg_pattern: BgPattern::Dots,
             shape_picker: None,
             saved_viewport: None,
+            show_find_replace: false,
+            find_query: String::new(),
+            replace_query: String::new(),
+            focus_mode: false,
+            canvas_locked: false,
+            alignment_guides: Vec::new(),
+            presentation_mode: false,
         }
     }
 
@@ -279,10 +295,11 @@ impl eframe::App for FlowchartApp {
             }
         }
 
-        self.draw_toolbar(ctx);
-
-        // Properties panel works in both 2D and 3D (selection is shared)
-        self.draw_properties_panel(ctx);
+        if !self.presentation_mode {
+            self.draw_toolbar(ctx);
+            // Properties panel works in both 2D and 3D (selection is shared)
+            self.draw_properties_panel(ctx);
+        }
 
         CentralPanel::default()
             .frame(egui::Frame::NONE.fill(CANVAS_BG))
@@ -290,6 +307,22 @@ impl eframe::App for FlowchartApp {
                 match self.view_mode {
                     ViewMode::TwoD => self.draw_canvas(ui),
                     ViewMode::ThreeD => self.draw_canvas_3d(ui),
+                }
+                // Presentation mode badge
+                if self.presentation_mode {
+                    let painter = ui.painter();
+                    let screen_rect = ui.max_rect();
+                    let label = "Presentation  [F to exit]";
+                    let font = egui::FontId::proportional(11.0);
+                    let text_color = Color32::from_rgba_premultiplied(200, 200, 220, 180);
+                    let galley = ui.fonts(|f| f.layout_no_wrap(label.to_string(), font, text_color));
+                    let pos = Pos2::new(
+                        screen_rect.center().x - galley.size().x / 2.0,
+                        screen_rect.max.y - galley.size().y - 12.0,
+                    );
+                    let bg_rect = Rect::from_min_size(pos - Vec2::new(8.0, 4.0), galley.size() + Vec2::new(16.0, 8.0));
+                    painter.rect_filled(bg_rect, egui::CornerRadius::same(4), Color32::from_rgba_premultiplied(30, 30, 46, 200));
+                    painter.galley(pos, galley, text_color);
                 }
             });
 
@@ -308,6 +341,77 @@ impl eframe::App for FlowchartApp {
             format!("Light Figma — {n}N {e}E")
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+
+        // Find & Replace dialog (Cmd+H)
+        if self.show_find_replace {
+            let mut open = self.show_find_replace;
+            let mut do_replace = false;
+            let mut do_replace_all = false;
+            egui::Window::new("Find & Replace")
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Find:");
+                        ui.text_edit_singleline(&mut self.find_query);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Replace:");
+                        ui.text_edit_singleline(&mut self.replace_query);
+                    });
+                    ui.add_space(4.0);
+                    // Match count
+                    let count = self.document.nodes.iter().filter(|n| {
+                        !self.find_query.is_empty()
+                            && n.display_label().to_lowercase().contains(&self.find_query.to_lowercase())
+                    }).count();
+                    if !self.find_query.is_empty() {
+                        ui.label(egui::RichText::new(format!("{count} match(es)")).size(10.5).color(TEXT_DIM));
+                    }
+                    ui.add_space(4.0);
+                    if ui.button("Replace All").clicked() { do_replace_all = true; }
+                });
+            if do_replace_all && !self.find_query.is_empty() {
+                let find = self.find_query.to_lowercase();
+                let replace = self.replace_query.clone();
+                let mut changed = 0usize;
+                for node in self.document.nodes.iter_mut() {
+                    match &mut node.kind {
+                        NodeKind::Shape { label, .. } => {
+                            if label.to_lowercase().contains(&find) {
+                                *label = label.to_lowercase().replace(&find, &replace);
+                                changed += 1;
+                            }
+                        }
+                        NodeKind::StickyNote { text, .. } => {
+                            if text.to_lowercase().contains(&find) {
+                                *text = text.to_lowercase().replace(&find, &replace);
+                                changed += 1;
+                            }
+                        }
+                        NodeKind::Entity { name, .. } => {
+                            if name.to_lowercase().contains(&find) {
+                                *name = name.to_lowercase().replace(&find, &replace);
+                                changed += 1;
+                            }
+                        }
+                        NodeKind::Text { content } => {
+                            if content.to_lowercase().contains(&find) {
+                                *content = content.to_lowercase().replace(&find, &replace);
+                                changed += 1;
+                            }
+                        }
+                    }
+                }
+                if changed > 0 {
+                    self.history.push(&self.document);
+                    self.status_message = Some((format!("Replaced {changed} node(s)"), std::time::Instant::now()));
+                }
+            }
+            self.show_find_replace = open;
+        }
 
         // Shape picker floating palette (N key)
         if let Some(picker_pos) = self.shape_picker {
@@ -365,6 +469,8 @@ impl eframe::App for FlowchartApp {
                     style: crate::model::NodeStyle::default(),
                     pinned: false,
                     tag: None,
+                    collapsed: false,
+                    uncollapsed_size: None,
                 };
                 let id = node.id;
                 self.document.nodes.push(node);

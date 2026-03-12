@@ -193,6 +193,11 @@ impl FlowchartApp {
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                     self.selection.select_node(node_id);
                     self.focus_label_edit = true;
+                } else if let Some(edge_id) = self.hit_test_edge(canvas_pos) {
+                    // Double-click edge => select it and focus label in properties
+                    self.selection.select_edge(edge_id);
+                    self.focus_label_edit = true;
+                    self.status_message = Some(("Edge selected — edit label in properties".to_string(), std::time::Instant::now()));
                 } else if self.tool == Tool::Select {
                     // Create a new default shape node centered on the click
                     let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
@@ -216,6 +221,16 @@ impl FlowchartApp {
         // --- Drawing ---
         let node_idx = self.document.node_index();
         let hover_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+
+        // Compute highlighted path edges (when 2 nodes selected)
+        let path_edge_ids: std::collections::HashSet<EdgeId> = {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            if ids.len() == 2 && self.selection.edge_ids.is_empty() {
+                self.bfs_path_edges(ids[0], ids[1]).into_iter().collect()
+            } else {
+                std::collections::HashSet::new()
+            }
+        };
 
         // Edges (visible only)
         for edge in &self.document.edges {
@@ -244,6 +259,28 @@ impl FlowchartApp {
             if src_visible || tgt_visible {
                 let hover_canvas = hover_pos.map(|p| self.viewport.screen_to_canvas(p));
                 self.draw_edge(edge, &painter, &node_idx, hover_canvas);
+                // Draw path highlight overlay
+                if path_edge_ids.contains(&edge.id) {
+                    self.draw_path_highlight(edge, &painter, &node_idx);
+                }
+            }
+        }
+
+        // Focus mode overlay: draw dim rect over all non-selected nodes
+        if self.focus_mode && !self.selection.is_empty() {
+            for node in &self.document.nodes {
+                if !self.selection.contains_node(&node.id) {
+                    let screen_pos = self.viewport.canvas_to_screen(node.pos());
+                    let screen_size = node.size_vec() * self.viewport.zoom;
+                    let screen_rect = Rect::from_min_size(screen_pos, screen_size);
+                    if screen_rect.intersects(canvas_rect) {
+                        painter.rect_filled(
+                            screen_rect,
+                            CornerRadius::same(4),
+                            Color32::from_rgba_premultiplied(30, 30, 46, 160),
+                        );
+                    }
+                }
             }
         }
 
@@ -356,17 +393,20 @@ impl FlowchartApp {
                 } else if !self.selection.contains_node(&node_id) {
                     self.selection.select_node(node_id);
                 }
-                let start_positions: Vec<(NodeId, Pos2)> = self
-                    .selection
-                    .node_ids
-                    .iter()
-                    .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.pos())))
-                    .collect();
-                self.drag = DragState::DraggingNode {
-                    start_positions,
-                    start_z_offsets: vec![],
-                    start_mouse: canvas_pos,
-                };
+                // Don't initiate node drag when canvas is locked
+                if !self.canvas_locked {
+                    let start_positions: Vec<(NodeId, Pos2)> = self
+                        .selection
+                        .node_ids
+                        .iter()
+                        .filter_map(|id| self.document.find_node(id).map(|n| (*id, n.pos())))
+                        .collect();
+                    self.drag = DragState::DraggingNode {
+                        start_positions,
+                        start_z_offsets: vec![],
+                        start_mouse: canvas_pos,
+                    };
+                }
             } else if let Some(edge_id) = self.hit_test_bend_handle(mouse) {
                 // Drag the curve bend handle of a selected edge
                 let bend = self.document.find_edge(&edge_id)
@@ -425,14 +465,33 @@ impl FlowchartApp {
                 let canvas_mouse = self.viewport.screen_to_canvas(mouse);
                 let delta = canvas_mouse - *start_mouse;
                 let positions = start_positions.clone();
-                for (id, start_pos) in &positions {
-                    let mut new_pos = *start_pos + delta;
+                let alt_held = _ui.ctx().input(|i| i.modifiers.alt);
+                self.alignment_guides.clear();
+
+                // Alignment snap: only for single-node drags (unless alt suppresses)
+                if !alt_held && positions.len() == 1 {
+                    let (id, start_pos) = positions[0];
+                    let mut new_pos = start_pos + delta;
                     if self.snap_to_grid {
                         new_pos = self.snap_pos(new_pos);
                     }
-                    if let Some(node) = self.document.find_node_mut(id) {
+                    let (snapped, guides) = self.compute_alignment_snap(id, new_pos, 8.0 / self.viewport.zoom);
+                    self.alignment_guides = guides;
+                    if let Some(node) = self.document.find_node_mut(&id) {
                         if !node.pinned {
-                            node.set_pos(new_pos);
+                            node.set_pos(snapped);
+                        }
+                    }
+                } else {
+                    for (id, start_pos) in &positions {
+                        let mut new_pos = *start_pos + delta;
+                        if self.snap_to_grid {
+                            new_pos = self.snap_pos(new_pos);
+                        }
+                        if let Some(node) = self.document.find_node_mut(id) {
+                            if !node.pinned {
+                                node.set_pos(new_pos);
+                            }
                         }
                     }
                 }
@@ -684,6 +743,71 @@ impl FlowchartApp {
                 }
             }
         }
+    }
+
+    /// Computes snap-to-alignment for a dragged node.
+    /// Returns (snapped_pos, guide_specs) where guide_specs are (is_horizontal, canvas_coord).
+    fn compute_alignment_snap(
+        &self,
+        drag_id: NodeId,
+        proposed: Pos2,
+        threshold: f32,
+    ) -> (Pos2, Vec<(bool, f32)>) {
+        let drag_node = match self.document.find_node(&drag_id) {
+            Some(n) => n,
+            None => return (proposed, vec![]),
+        };
+        let dw = drag_node.size[0];
+        let dh = drag_node.size[1];
+        let mut snapped = proposed;
+        let mut guides: Vec<(bool, f32)> = Vec::new();
+        let mut x_snapped = false;
+        let mut y_snapped = false;
+
+        for other in &self.document.nodes {
+            if other.id == drag_id || self.selection.node_ids.contains(&other.id) {
+                continue;
+            }
+            let nx = other.position[0];
+            let ny = other.position[1];
+            let nw = other.size[0];
+            let nh = other.size[1];
+
+            if !x_snapped {
+                let candidates = [nx, nx + nw / 2.0, nx + nw];
+                let drag_refs = [(snapped.x, 0.0f32), (snapped.x + dw / 2.0, -dw / 2.0), (snapped.x + dw, -dw)];
+                'x_outer: for &cand in &candidates {
+                    for &(ref_x, offset) in &drag_refs {
+                        if (ref_x - cand).abs() < threshold {
+                            snapped.x = cand + offset;
+                            guides.push((false, cand));
+                            x_snapped = true;
+                            break 'x_outer;
+                        }
+                    }
+                }
+            }
+
+            if !y_snapped {
+                let candidates = [ny, ny + nh / 2.0, ny + nh];
+                let drag_refs = [(snapped.y, 0.0f32), (snapped.y + dh / 2.0, -dh / 2.0), (snapped.y + dh, -dh)];
+                'y_outer: for &cand in &candidates {
+                    for &(ref_y, offset) in &drag_refs {
+                        if (ref_y - cand).abs() < threshold {
+                            snapped.y = cand + offset;
+                            guides.push((true, cand));
+                            y_snapped = true;
+                            break 'y_outer;
+                        }
+                    }
+                }
+            }
+
+            if x_snapped && y_snapped {
+                break;
+            }
+        }
+        (snapped, guides)
     }
 
     fn draw_box_select_preview(&self, painter: &egui::Painter, pointer_pos: Option<Pos2>) {
@@ -1008,6 +1132,8 @@ impl FlowchartApp {
             let mut parts = Vec::new();
             if self.show_grid { parts.push("grid".to_string()); }
             if self.snap_to_grid { parts.push("snap".to_string()); }
+            if self.canvas_locked { parts.push("🔒".to_string()); }
+            if self.focus_mode { parts.push("focus".to_string()); }
             let u = self.history.undo_steps();
             let r = self.history.redo_steps();
             if u > 0 || r > 0 {
@@ -1029,6 +1155,43 @@ impl FlowchartApp {
         if !line3.is_empty() {
             painter.text(Pos2::new(x, y + 29.0), egui::Align2::LEFT_TOP, &line3, font_xs, TEXT_DIM);
         }
+    }
+
+    fn draw_path_highlight(
+        &self,
+        edge: &Edge,
+        painter: &egui::Painter,
+        node_idx: &std::collections::HashMap<NodeId, usize>,
+    ) {
+        let src_node = node_idx.get(&edge.source.node_id).and_then(|&i| self.document.nodes.get(i));
+        let tgt_node = node_idx.get(&edge.target.node_id).and_then(|&i| self.document.nodes.get(i));
+        let (sn, tn) = match (src_node, tgt_node) { (Some(s), Some(t)) => (s, t), _ => return };
+        let src = self.viewport.canvas_to_screen(sn.port_position(edge.source.side));
+        let tgt = self.viewport.canvas_to_screen(tn.port_position(edge.target.side));
+        let offset = 60.0 * self.viewport.zoom;
+        let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+        if edge.style.curve_bend.abs() > 0.1 {
+            let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
+            let perp = Vec2::new(-dir.y, dir.x);
+            let bend_screen = edge.style.curve_bend * self.viewport.zoom;
+            cp1 = cp1 + perp * bend_screen;
+            cp2 = cp2 + perp * bend_screen;
+        }
+        let highlight_color = Color32::from_rgba_premultiplied(250, 179, 135, 200);
+        let glow = egui::epaint::CubicBezierShape::from_points_stroke(
+            [src, cp1, cp2, tgt],
+            false,
+            Color32::TRANSPARENT,
+            Stroke::new(8.0 * self.viewport.zoom.sqrt(), highlight_color.gamma_multiply(0.3)),
+        );
+        painter.add(glow);
+        let path_line = egui::epaint::CubicBezierShape::from_points_stroke(
+            [src, cp1, cp2, tgt],
+            false,
+            Color32::TRANSPARENT,
+            Stroke::new(2.5 * self.viewport.zoom.sqrt(), highlight_color),
+        );
+        painter.add(path_line);
     }
 
     // --- Rulers ---

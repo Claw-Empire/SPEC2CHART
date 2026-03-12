@@ -488,6 +488,17 @@ impl FlowchartApp {
                     }
                 });
 
+                // Canvas state indicators
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    if self.canvas_locked {
+                        ui.label(egui::RichText::new("🔒 Locked").size(10.0).color(TEXT_DIM));
+                    }
+                    if self.focus_mode {
+                        ui.label(egui::RichText::new("🎯 Focus").size(10.0).color(TEXT_DIM));
+                    }
+                });
+
                 // Bottom spacer + node count
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(4.0);
@@ -500,6 +511,13 @@ impl FlowchartApp {
                         .size(11.0)
                         .color(TEXT_DIM),
                     );
+                    // Quick actions
+                    ui.add_space(4.0);
+                    if ui.small_button("Select All").clicked() {
+                        self.selection.clear();
+                        for n in &self.document.nodes { self.selection.node_ids.insert(n.id); }
+                        for e in &self.document.edges { self.selection.edge_ids.insert(e.id); }
+                    }
                 });
             });
     }

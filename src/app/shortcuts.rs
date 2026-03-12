@@ -285,9 +285,23 @@ impl FlowchartApp {
             if self.show_search { self.search_query.clear(); }
         }
 
+        // Cmd+H = find & replace
+        if ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.matches_exact(cmd)) {
+            self.show_find_replace = !self.show_find_replace;
+            if self.show_find_replace { self.find_query.clear(); self.replace_query.clear(); }
+        }
+
         // ? = toggle shortcuts panel
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F1) || (i.key_pressed(Key::Slash) && i.modifiers.shift)) {
             self.show_shortcuts_panel = !self.show_shortcuts_panel;
+        }
+
+        // Cmd+Shift+L = toggle canvas lock (prevent node moves)
+        let cmd_shift_l = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd_shift_l)) {
+            self.canvas_locked = !self.canvas_locked;
+            let msg = if self.canvas_locked { "🔒 Canvas locked" } else { "🔓 Canvas unlocked" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
         // O = toggle overview (bird's eye) mode
@@ -365,6 +379,20 @@ impl FlowchartApp {
             self.status_message = Some((name.to_string(), std::time::Instant::now()));
         }
 
+        // W = toggle focus mode (dim non-selected)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.is_none()) {
+            self.focus_mode = !self.focus_mode;
+            let msg = if self.focus_mode { "Focus Mode On" } else { "Focus Mode Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
+        // F = toggle presentation mode (hide all panels for clean view)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.is_none()) {
+            self.presentation_mode = !self.presentation_mode;
+            let msg = if self.presentation_mode { "Presentation Mode On" } else { "Presentation Mode Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
         // G = toggle grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;
@@ -377,6 +405,29 @@ impl FlowchartApp {
             self.snap_to_grid = !self.snap_to_grid;
             let msg = if self.snap_to_grid { "Snap On" } else { "Snap Off" };
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
+        // Tab / Shift+Tab = cycle selection through nodes
+        let tab_pressed = ctx.input(|i| i.key_pressed(Key::Tab));
+        if !any_text_focused && tab_pressed {
+            let shift_held = ctx.input(|i| i.modifiers.shift);
+            let n = self.document.nodes.len();
+            if n > 0 {
+                let current_idx = self.selection.node_ids.iter().next()
+                    .and_then(|id| self.document.nodes.iter().position(|n| n.id == *id));
+                let next_idx = match current_idx {
+                    None => 0,
+                    Some(i) if shift_held => (i + n - 1) % n,
+                    Some(i) => (i + 1) % n,
+                };
+                let next_id = self.document.nodes[next_idx].id;
+                self.selection.select_node(next_id);
+                // Pan viewport to show the selected node
+                let node_pos = self.document.nodes[next_idx].pos();
+                let screen_center = self.canvas_rect.center();
+                self.viewport.offset[0] = screen_center.x - node_pos.x * self.viewport.zoom;
+                self.viewport.offset[1] = screen_center.y - node_pos.y * self.viewport.zoom;
+            }
         }
 
         // Arrow keys = nudge selected nodes (1px; 10px with Shift)

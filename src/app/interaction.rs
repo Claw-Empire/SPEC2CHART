@@ -247,6 +247,75 @@ impl FlowchartApp {
         self.viewport.offset[1] = center.y - ratio * (center.y - self.viewport.offset[1]);
     }
 
+    /// BFS shortest path edges between two nodes (undirected). Returns edge IDs on path or empty if unreachable.
+    pub(crate) fn bfs_path_edges(&self, from: NodeId, to: NodeId) -> Vec<EdgeId> {
+        if from == to { return vec![]; }
+        use std::collections::{HashMap, HashSet, VecDeque};
+        let mut visited: HashSet<NodeId> = HashSet::new();
+        // (current_node, parent_node, edge_id_used)
+        let mut queue: VecDeque<NodeId> = VecDeque::new();
+        let mut prev: HashMap<NodeId, (NodeId, EdgeId)> = HashMap::new();
+        queue.push_back(from);
+        visited.insert(from);
+        let mut found = false;
+        'outer: while let Some(curr) = queue.pop_front() {
+            for edge in &self.document.edges {
+                let neighbor_and_eid = if edge.source.node_id == curr {
+                    Some((edge.target.node_id, edge.id))
+                } else if edge.target.node_id == curr {
+                    Some((edge.source.node_id, edge.id))
+                } else { None };
+                if let Some((nb, eid)) = neighbor_and_eid {
+                    if !visited.contains(&nb) {
+                        visited.insert(nb);
+                        prev.insert(nb, (curr, eid));
+                        if nb == to { found = true; break 'outer; }
+                        queue.push_back(nb);
+                    }
+                }
+            }
+        }
+        if !found { return vec![]; }
+        let mut path = Vec::new();
+        let mut cur = to;
+        while cur != from {
+            let (p, eid) = prev[&cur];
+            path.push(eid);
+            cur = p;
+        }
+        path
+    }
+
+    /// BFS shortest path in hops between two nodes (undirected). Returns None if unreachable.
+    pub(crate) fn bfs_path_length(&self, from: NodeId, to: NodeId) -> Option<usize> {
+        if from == to { return Some(0); }
+        use std::collections::{HashSet, VecDeque};
+        let mut visited: HashSet<NodeId> = HashSet::new();
+        let mut queue: VecDeque<(NodeId, usize)> = VecDeque::new();
+        queue.push_back((from, 0));
+        visited.insert(from);
+        while let Some((curr, dist)) = queue.pop_front() {
+            // Find all neighbors via edges (undirected)
+            for edge in &self.document.edges {
+                let neighbor = if edge.source.node_id == curr {
+                    Some(edge.target.node_id)
+                } else if edge.target.node_id == curr {
+                    Some(edge.source.node_id)
+                } else {
+                    None
+                };
+                if let Some(nb) = neighbor {
+                    if nb == to { return Some(dist + 1); }
+                    if !visited.contains(&nb) {
+                        visited.insert(nb);
+                        queue.push_back((nb, dist + 1));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn snap_pos(&self, pos: Pos2) -> Pos2 {
         Pos2::new(
             (pos.x / self.grid_size).round() * self.grid_size,

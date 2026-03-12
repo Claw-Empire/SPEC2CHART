@@ -169,7 +169,15 @@ pub struct NodeStyle {
     pub font_size: f32,
     pub corner_radius: f32,
     pub border_dashed: bool,
+    /// When true, render a top-to-bottom gradient from fill_color (top) to a darker shade (bottom)
+    #[serde(default)]
+    pub gradient: bool,
+    /// Overall node opacity: 0.0 = invisible, 1.0 = fully opaque (default)
+    #[serde(default = "default_opacity")]
+    pub opacity: f32,
 }
+
+fn default_opacity() -> f32 { 1.0 }
 
 impl Default for NodeStyle {
     fn default() -> Self {
@@ -181,6 +189,8 @@ impl Default for NodeStyle {
             font_size: 13.0,
             corner_radius: 8.0,
             border_dashed: false,
+            gradient: false,
+            opacity: 1.0,
         }
     }
 }
@@ -235,6 +245,12 @@ pub struct Node {
     pub pinned: bool,
     #[serde(default)]
     pub tag: Option<NodeTag>,
+    /// When collapsed, the node renders as a compact 28px-tall pill showing only the label
+    #[serde(default)]
+    pub collapsed: bool,
+    /// Saved full size before collapse, so expand restores original dimensions
+    #[serde(default)]
+    pub uncollapsed_size: Option<[f32; 2]>,
 }
 
 impl Node {
@@ -255,7 +271,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
             style: NodeStyle::default(),
         }
     }
@@ -269,14 +285,14 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
                 border_width: 0.0,
                 text_color: color.text_rgba(),
                 font_size: 14.0,
-                corner_radius: 8.0, border_dashed: false,
+                corner_radius: 8.0, border_dashed: false, gradient: false, opacity: 1.0,
             },
         }
     }
@@ -290,14 +306,14 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
                 border_width: 1.5,
                 text_color: [205, 214, 244, 255],
                 font_size: 12.0,
-                corner_radius: 4.0, border_dashed: false,
+                corner_radius: 4.0, border_dashed: false, gradient: false, opacity: 1.0,
             },
         }
     }
@@ -310,14 +326,14 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None,
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
                 border_width: 0.0,
                 text_color: [205, 214, 244, 255],
                 font_size: 16.0,
-                corner_radius: 0.0, border_dashed: false,
+                corner_radius: 0.0, border_dashed: false, gradient: false, opacity: 1.0,
             },
         }
     }
@@ -376,6 +392,23 @@ impl Node {
             PortSide::Right => rect.right_center(),
         }
     }
+
+    /// Toggle collapsed state: shrinks node to a compact 28-px pill, saves/restores size.
+    pub fn toggle_collapsed(&mut self) {
+        if self.collapsed {
+            // Expand: restore saved size
+            if let Some(sz) = self.uncollapsed_size.take() {
+                self.size = sz;
+            }
+            self.collapsed = false;
+        } else {
+            // Collapse: save current size, shrink to pill
+            self.uncollapsed_size = Some(self.size);
+            let w = self.size[0].max(60.0);
+            self.size = [w, 28.0];
+            self.collapsed = true;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -406,6 +439,9 @@ pub struct EdgeStyle {
     pub arrow_head: ArrowHead,
     #[serde(default)]
     pub curve_bend: f32,
+    /// When true, draw a wider, semi-transparent stroke beneath the edge for a neon glow
+    #[serde(default)]
+    pub glow: bool,
 }
 
 impl Default for EdgeStyle {
@@ -417,6 +453,7 @@ impl Default for EdgeStyle {
             orthogonal: false,
             arrow_head: ArrowHead::Filled,
             curve_bend: 0.0,
+            glow: false,
         }
     }
 }
