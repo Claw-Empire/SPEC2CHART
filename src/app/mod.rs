@@ -6,6 +6,7 @@ mod canvas;
 mod render;
 mod render3d;
 mod statusbar;
+mod command_palette;
 pub(crate) mod camera;
 pub(crate) mod interaction;
 
@@ -193,6 +194,12 @@ pub struct FlowchartApp {
     pub(crate) toolbar_collapsed: bool,
     /// Properties panel (right panel) collapse state
     pub(crate) properties_collapsed: bool,
+    /// Command palette open/closed
+    pub(crate) show_command_palette: bool,
+    /// Command palette search text
+    pub(crate) command_palette_query: String,
+    /// Command palette selected row
+    pub(crate) command_palette_cursor: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +341,9 @@ impl FlowchartApp {
             deletion_ghosts: Vec::new(),
             toolbar_collapsed: false,
             properties_collapsed: false,
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_cursor: 0,
         }
     }
 
@@ -386,6 +396,7 @@ impl eframe::App for FlowchartApp {
         }
 
         self.draw_status_bar(ctx);
+        self.draw_command_palette(ctx);
         if !self.presentation_mode {
             self.draw_toolbar(ctx);
             // Properties panel works in both 2D and 3D (selection is shared)
@@ -753,6 +764,7 @@ impl eframe::App for FlowchartApp {
                         ]),
                         ("Help", &[
                             ("F1 / ?", "This shortcuts panel"),
+                            ("⌘K", "Command palette"),
                             ("[", "Collapse / expand left toolbar"),
                             ("]", "Collapse / expand right panel"),
                         ]),
