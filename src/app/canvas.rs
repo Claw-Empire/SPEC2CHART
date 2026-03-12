@@ -549,6 +549,44 @@ impl FlowchartApp {
             std::collections::HashSet::new()
         };
 
+        // Detect newly created nodes → spawn creation ripples
+        {
+            let now = ui.ctx().input(|i| i.time);
+            let current_ids: std::collections::HashSet<NodeId> =
+                self.document.nodes.iter().map(|n| n.id).collect();
+            for node in &self.document.nodes {
+                if !self.prev_node_ids.contains(&node.id) {
+                    let center = node.rect().center();
+                    self.creation_ripples.push(([center.x, center.y], now));
+                }
+            }
+            self.prev_node_ids = current_ids;
+
+            // Draw and cull ripples (duration = 0.55s)
+            let ripple_duration = 0.55_f64;
+            self.creation_ripples.retain(|&(_, birth)| now - birth < ripple_duration);
+            for &(world_center, birth) in &self.creation_ripples {
+                let t = ((now - birth) / ripple_duration) as f32; // 0 → 1
+                let center = self.viewport.canvas_to_screen(
+                    egui::Pos2::new(world_center[0], world_center[1])
+                );
+                // Spring: expand fast, ease out; max radius ~80 screen px
+                let radius = t.powf(0.45) * 80.0;
+                // Alpha: full at t=0, fades by t=1
+                let alpha = ((1.0 - t) * 200.0) as u8;
+                // Two-ring ripple: outer faint, inner brighter
+                painter.circle_stroke(
+                    center, radius,
+                    Stroke::new(2.0, Color32::from_rgba_premultiplied(137, 180, 250, alpha / 2)),
+                );
+                painter.circle_stroke(
+                    center, radius * 0.55,
+                    Stroke::new(1.5, Color32::from_rgba_premultiplied(166, 227, 161, alpha)),
+                );
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+            }
+        }
+
         // Nodes: frame nodes first (they render behind), then regular nodes sorted by z_offset
         // This ensures frames appear as translucent containers beneath everything else,
         // and Cmd+]/[ z-ordering works correctly for regular nodes.

@@ -160,6 +160,10 @@ pub struct FlowchartApp {
     pub(crate) show_flow_animation: bool,
     /// Target positions for animated layout transitions: node_id → [target_x, target_y]
     pub(crate) layout_targets: std::collections::HashMap<NodeId, [f32; 2]>,
+    /// Node IDs seen on the previous frame — used to detect newly created nodes
+    pub(crate) prev_node_ids: std::collections::HashSet<NodeId>,
+    /// Active creation ripples: (world_center, birth_time_secs)
+    pub(crate) creation_ripples: Vec<([f32; 2], f64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,6 +290,8 @@ impl FlowchartApp {
             paste_count: 0,
             show_flow_animation: false,
             layout_targets: std::collections::HashMap::new(),
+            prev_node_ids: std::collections::HashSet::new(),
+            creation_ripples: Vec::new(),
         }
     }
 
