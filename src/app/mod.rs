@@ -184,6 +184,8 @@ pub struct FlowchartApp {
     pub(crate) bookmarks: [Option<crate::model::Viewport>; 5],
     /// Node freshness: (node_id → birth_time_secs) for "just created" ring animation
     pub(crate) node_birth_times: std::collections::HashMap<NodeId, f64>,
+    /// Active tag filter: when set, non-matching nodes are dimmed
+    pub(crate) tag_filter: Option<crate::model::NodeTag>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,6 +323,7 @@ impl FlowchartApp {
             prev_edge_ids: std::collections::HashSet::new(),
             bookmarks: [None, None, None, None, None],
             node_birth_times: std::collections::HashMap::new(),
+            tag_filter: None,
         }
     }
 

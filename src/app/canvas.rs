@@ -643,6 +643,22 @@ impl FlowchartApp {
             }
         }
 
+        // Tag filter overlay: dim nodes that don't match the active tag filter
+        if let Some(filter_tag) = self.tag_filter {
+            for node in &self.document.nodes {
+                if node.tag == Some(filter_tag) { continue; }
+                let screen_pos = self.viewport.canvas_to_screen(node.pos());
+                let screen_size = node.size_vec() * self.viewport.zoom;
+                let screen_rect = Rect::from_min_size(screen_pos, screen_size);
+                if !screen_rect.intersects(canvas_rect) { continue; }
+                painter.rect_filled(
+                    screen_rect,
+                    CornerRadius::same(4),
+                    Color32::from_rgba_premultiplied(12, 12, 22, 175),
+                );
+            }
+        }
+
         // Multi-selection bounding box with dimension labels (shown when ≥2 nodes selected)
         if self.selection.node_ids.len() >= 2 {
             let sel_nodes: Vec<&Node> = self.document.nodes.iter()
@@ -988,6 +1004,66 @@ impl FlowchartApp {
                             self.fit_to_content();
                         }
                     }
+                }
+            }
+        }
+
+        // Tag filter pills — show at top-right when any tagged nodes exist
+        {
+            use crate::model::NodeTag;
+            let mut tags_used: Vec<NodeTag> = self.document.nodes.iter()
+                .filter_map(|n| n.tag)
+                .collect();
+            tags_used.dedup();
+            if !tags_used.is_empty() {
+                let all_tags = [NodeTag::Critical, NodeTag::Warning, NodeTag::Ok, NodeTag::Info];
+                let pill_h = 20.0_f32;
+                let pad = 8.0_f32;
+                let gap = 4.0_f32;
+                // Only show tags that are used in the document
+                let visible: Vec<NodeTag> = all_tags.iter().copied()
+                    .filter(|t| tags_used.iter().any(|u| u == t))
+                    .collect();
+                let total_w: f32 = visible.iter().map(|t| {
+                    t.label().len() as f32 * 6.5 + pad * 2.0
+                }).sum::<f32>() + gap * (visible.len().saturating_sub(1)) as f32 + 24.0;
+                let origin = Pos2::new(canvas_rect.max.x - total_w - 8.0, canvas_rect.min.y + 8.0);
+                let mut x = origin.x;
+                // "Filter:" label
+                painter.text(
+                    Pos2::new(x, origin.y + pill_h / 2.0),
+                    Align2::LEFT_CENTER,
+                    "Filter:",
+                    FontId::proportional(10.0),
+                    TEXT_DIM,
+                );
+                x += 38.0;
+                let click_pos = ui.ctx().input(|i| {
+                    if i.pointer.any_click() { i.pointer.latest_pos() } else { None }
+                });
+                for tag in &visible {
+                    let tag_c = tag.color();
+                    let fill_c = Color32::from_rgba_unmultiplied(tag_c[0], tag_c[1], tag_c[2], tag_c[3]);
+                    let label = tag.label();
+                    let pw = label.len() as f32 * 6.5 + pad * 2.0;
+                    let pill = Rect::from_min_size(Pos2::new(x, origin.y), Vec2::new(pw, pill_h));
+                    let is_active = self.tag_filter == Some(*tag);
+                    let bg_alpha = if is_active { 240u8 } else { 80u8 };
+                    let bg = Color32::from_rgba_unmultiplied(fill_c.r(), fill_c.g(), fill_c.b(), bg_alpha);
+                    painter.rect_filled(pill, CornerRadius::same(10), bg);
+                    if is_active {
+                        painter.rect_stroke(pill, CornerRadius::same(10),
+                            Stroke::new(1.5, fill_c), StrokeKind::Outside);
+                    }
+                    let txt_col = if is_active { Color32::from_rgb(20, 20, 30) } else { fill_c };
+                    painter.text(pill.center(), Align2::CENTER_CENTER, label,
+                        FontId::proportional(10.5), txt_col);
+                    if let Some(cp) = click_pos {
+                        if pill.expand(2.0).contains(cp) {
+                            self.tag_filter = if is_active { None } else { Some(*tag) };
+                        }
+                    }
+                    x += pw + gap;
                 }
             }
         }
@@ -2100,6 +2176,7 @@ impl FlowchartApp {
             if self.snap_to_grid { parts.push("snap".to_string()); }
             if self.canvas_locked { parts.push("🔒".to_string()); }
             if self.focus_mode { parts.push("focus".to_string()); }
+            if let Some(tf) = self.tag_filter { parts.push(format!("filter:{}", tf.label())); }
             let u = self.history.undo_steps();
             let r = self.history.redo_steps();
             if u > 0 || r > 0 {
