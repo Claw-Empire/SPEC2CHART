@@ -2777,6 +2777,20 @@ impl FlowchartApp {
             let cr_val = (mini_rect.width().min(mini_rect.height()) * 0.2) as u8;
             if mini_rect.area() > 2.0 {
                 painter.rect_filled(mini_rect, egui::CornerRadius::same(cr_val), node_color);
+                // Show abbreviated label if rect is large enough
+                if mini_rect.width() > 18.0 && mini_rect.height() > 7.0 {
+                    let label = node.display_label();
+                    let short: String = label.chars().take(8).collect();
+                    let font_size = (mini_rect.height() * 0.55).clamp(5.0, 8.0);
+                    let text_color = Color32::from_rgba_unmultiplied(220, 220, 240, 160);
+                    painter.text(
+                        mini_rect.center(),
+                        Align2::CENTER_CENTER,
+                        &short,
+                        FontId::proportional(font_size),
+                        text_color,
+                    );
+                }
             } else {
                 let center = mini_rect.center();
                 if minimap_rect.contains(center) {
