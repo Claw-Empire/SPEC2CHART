@@ -414,6 +414,25 @@ impl FlowchartApp {
             self.pan_target = Some([0.0, 0.0]);
         }
 
+        // Cmd+Shift+> = increase font size for selected nodes
+        // Cmd+Shift+< = decrease font size for selected nodes
+        let cmd_shift = Modifiers { shift: true, ..cmd };
+        let font_up   = ctx.input(|i| i.key_pressed(Key::Period) && i.modifiers.matches_exact(cmd_shift));
+        let font_down = ctx.input(|i| i.key_pressed(Key::Comma)  && i.modifiers.matches_exact(cmd_shift));
+        if (font_up || font_down) && !self.selection.node_ids.is_empty() {
+            let delta: f32 = if font_up { 1.0 } else { -1.0 };
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            for id in &ids {
+                if let Some(node) = self.document.find_node_mut(id) {
+                    node.style.font_size = (node.style.font_size + delta).clamp(6.0, 72.0);
+                }
+            }
+            self.history.push(&self.document);
+            let new_size = self.document.find_node(ids.first().unwrap())
+                .map(|n| n.style.font_size as i32).unwrap_or(13);
+            self.status_message = Some((format!("Font size: {new_size}pt"), std::time::Instant::now()));
+        }
+
         // F = fit selection (or all if nothing selected)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.is_none()) {
             if !self.selection.is_empty() {

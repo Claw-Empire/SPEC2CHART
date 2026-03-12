@@ -746,6 +746,7 @@ impl eframe::App for FlowchartApp {
                             ("⌘D", "Duplicate"),
                             ("⌘⇧H", "Collapse / expand selected nodes"),
                             ("⌘L", "Auto-layout (hierarchical)"),
+                            ("⌘⇧> / ⌘⇧<", "Increase / decrease font size"),
                         ]),
                         ("View", &[
                             ("⌘1", "Fit all to view"),
