@@ -538,7 +538,18 @@ impl FlowchartApp {
                     .on_hover_text("Render a soft drop shadow beneath the node");
             });
             ui.add_space(4.0);
-            ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
+                ui.add_space(6.0);
+                let b_col = if node.style.bold { ACCENT } else { TEXT_DIM };
+                let i_col = if node.style.italic { ACCENT } else { TEXT_DIM };
+                if ui.button(egui::RichText::new("B").strong().color(b_col)).on_hover_text("Bold").clicked() {
+                    node.style.bold = !node.style.bold;
+                }
+                if ui.button(egui::RichText::new("I").italics().color(i_col)).on_hover_text("Italic").clicked() {
+                    node.style.italic = !node.style.italic;
+                }
+            });
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.corner_radius, 0.0..=40.0).text("Radius"));
             ui.add_space(4.0);

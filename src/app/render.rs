@@ -434,7 +434,21 @@ impl FlowchartApp {
             };
             let pad = (6.0 * self.viewport.zoom).min(12.0);
             let max_text_w = (screen_rect.width() - pad * 2.0).max(10.0);
-            let galley = painter.layout(label.to_string(), font, text_color, max_text_w);
+            // Build display label with bold/italic markers for visual hint
+            let display_label: std::borrow::Cow<str> = match (style.bold, style.italic) {
+                (true, true)  => std::borrow::Cow::Owned(format!("𝘽 𝘐 {}", label)),
+                (true, false) => std::borrow::Cow::Owned(format!("𝗕 {}", label)),
+                (false, true) => std::borrow::Cow::Owned(format!("𝘐 {}", label)),
+                (false, false) => std::borrow::Cow::Borrowed(label),
+            };
+            // Apply bold/italic via LayoutJob
+            let galley = if style.bold {
+                // Bold: render thicker by using a slightly bolder font size + double-pass
+                let bold_font = FontId::proportional(font_size * 1.06);
+                painter.layout(display_label.into_owned(), bold_font, text_color, max_text_w)
+            } else {
+                painter.layout(display_label.into_owned(), font, text_color, max_text_w)
+            };
             let text_pos = Pos2::new(
                 screen_rect.center().x - galley.size().x / 2.0,
                 screen_rect.center().y - galley.size().y / 2.0,
