@@ -229,6 +229,7 @@ impl FlowchartApp {
 
     fn draw_node_properties(&mut self, ui: &mut egui::Ui) {
         let node_id = *self.selection.node_ids.iter().next().unwrap();
+        let mut applied_quick_style: Option<&'static str> = None;
         if let Some(node) = self.document.find_node_mut(&node_id) {
             let kind_name = match &node.kind {
                 NodeKind::Shape { shape, .. } => match shape {
@@ -490,6 +491,46 @@ impl FlowchartApp {
             if needs_entity_resize {
                 node.auto_size_entity();
             }
+
+            // Quick style presets — complete style preset in one click
+            Self::draw_section_header(ui, "QUICK STYLES");
+            ui.add_space(4.0);
+            // (label, fill, border, text, shadow, bold)
+            let quick_styles: &[(&str, [u8;4], [u8;4], [u8;4], bool, bool)] = &[
+                ("Primary",   [137, 180, 250, 255], [100, 150, 220, 255], [30, 30, 46, 255],  true,  true),
+                ("Success",   [166, 227, 161, 255], [120, 190, 115, 255], [30, 30, 46, 255],  false, false),
+                ("Warning",   [249, 226, 175, 255], [210, 180, 100, 255], [30, 30, 46, 255],  false, true),
+                ("Danger",    [243, 139, 168, 255], [200, 100, 130, 255], [30, 30, 46, 255],  true,  false),
+                ("Ghost",     [30, 30, 46, 40],     [100, 100, 130, 120], [200, 200, 220, 255], false, false),
+                ("Dark",      [17, 17, 27, 255],    [50, 50, 70, 255],   [205, 214, 244, 255], true,  false),
+            ];
+            let mut qs_pick: Option<usize> = None;
+            ui.horizontal_wrapped(|ui| {
+                for (i, (label, fill, border, text, _, _)) in quick_styles.iter().enumerate() {
+                    let c = Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], fill[3]);
+                    let (resp, painter) = ui.allocate_painter(egui::vec2(52.0, 24.0), egui::Sense::click());
+                    let r = resp.rect;
+                    painter.rect_filled(r, egui::CornerRadius::same(4), c);
+                    painter.rect_stroke(r, egui::CornerRadius::same(4),
+                        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(border[0], border[1], border[2], 200)),
+                        egui::StrokeKind::Inside);
+                    painter.text(r.center(), egui::Align2::CENTER_CENTER, *label,
+                        FontId::proportional(8.0),
+                        Color32::from_rgba_unmultiplied(text[0], text[1], text[2], text[3]));
+                    if resp.clicked() { qs_pick = Some(i); }
+                    resp.on_hover_text(format!("Apply {} style", label));
+                }
+            });
+            if let Some(idx) = qs_pick {
+                let (name, fill, border, text, shadow, bold) = quick_styles[idx];
+                node.style.fill_color = fill;
+                node.style.border_color = border;
+                node.style.text_color = text;
+                node.style.shadow = shadow;
+                node.style.bold = bold;
+                applied_quick_style = Some(name);
+            }
+            ui.add_space(10.0);
 
             // Color theme presets
             Self::draw_section_header(ui, "COLOR THEMES");
@@ -822,6 +863,11 @@ impl FlowchartApp {
                         if (i + 1) % 2 == 0 { ui.end_row(); }
                     }
                 });
+        }
+        // Apply quick style history push outside the borrow
+        if let Some(style_name) = applied_quick_style {
+            self.history.push(&self.document);
+            self.status_message = Some((format!("{} style applied", style_name), std::time::Instant::now()));
         }
     }
 
