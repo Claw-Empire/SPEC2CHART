@@ -166,7 +166,15 @@ impl FlowchartApp {
         self.draw_node_tooltip(&painter, hover_pos, canvas_rect);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect);
+        self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
+
+        // Minimap click-to-pan
+        if let Some(click_pos) = pointer_pos {
+            if ui.ctx().input(|i| i.pointer.primary_clicked()) {
+                self.handle_minimap_click(click_pos, canvas_rect);
+            }
+        }
     }
 
     // --- Input dispatch helpers ---
@@ -664,6 +672,31 @@ impl FlowchartApp {
 
     // --- Canvas HUD ---
 
+    fn draw_empty_canvas_hint(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        if !self.document.nodes.is_empty() { return; }
+        let cx = canvas_rect.center().x;
+        let cy = canvas_rect.center().y;
+        let title_font = FontId::proportional(18.0);
+        let hint_font  = FontId::proportional(11.5);
+        painter.text(Pos2::new(cx, cy - 48.0), Align2::CENTER_CENTER,
+            "Empty canvas", title_font, TEXT_DIM);
+        let hints = [
+            ("N", "new node (toolbar)"),
+            ("E", "connect tool"),
+            ("V", "select tool"),
+            ("F", "fit to content"),
+            ("G", "toggle grid"),
+            ("⌘Z", "undo"),
+        ];
+        for (i, (key, desc)) in hints.iter().enumerate() {
+            let y = cy - 16.0 + i as f32 * 16.0;
+            painter.text(Pos2::new(cx - 60.0, y), Align2::LEFT_CENTER,
+                *key, hint_font.clone(), ACCENT);
+            painter.text(Pos2::new(cx - 40.0, y), Align2::LEFT_CENTER,
+                *desc, hint_font.clone(), TEXT_DIM);
+        }
+    }
+
     fn draw_canvas_hud(&self, painter: &egui::Painter, canvas_rect: Rect) {
         let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
         let n_nodes = self.document.nodes.len();
@@ -735,6 +768,58 @@ impl FlowchartApp {
     }
 
     // --- Minimap ---
+
+    fn handle_minimap_click(&mut self, click_pos: Pos2, canvas_rect: Rect) {
+        if self.document.nodes.is_empty() { return; }
+
+        let minimap_w: f32 = 180.0;
+        let minimap_h: f32 = 120.0;
+        let margin: f32 = 12.0;
+        let minimap_rect = Rect::from_min_size(
+            Pos2::new(
+                canvas_rect.max.x - minimap_w - margin,
+                canvas_rect.max.y - minimap_h - margin,
+            ),
+            Vec2::new(minimap_w, minimap_h),
+        );
+
+        if !minimap_rect.contains(click_pos) { return; }
+
+        // Compute world bounding box (same as draw_minimap)
+        let mut bb_min = Pos2::new(f32::MAX, f32::MAX);
+        let mut bb_max = Pos2::new(f32::MIN, f32::MIN);
+        for node in &self.document.nodes {
+            let r = node.rect();
+            bb_min.x = bb_min.x.min(r.min.x);
+            bb_min.y = bb_min.y.min(r.min.y);
+            bb_max.x = bb_max.x.max(r.max.x);
+            bb_max.y = bb_max.y.max(r.max.y);
+        }
+        let padding = 50.0;
+        bb_min.x -= padding; bb_min.y -= padding;
+        bb_max.x += padding; bb_max.y += padding;
+        let bb_w = (bb_max.x - bb_min.x).max(1.0);
+        let bb_h = (bb_max.y - bb_min.y).max(1.0);
+
+        let inset = 4.0;
+        let draw_rect = minimap_rect.shrink(inset);
+        let draw_w = draw_rect.width();
+        let draw_h = draw_rect.height();
+        let scale = (draw_w / bb_w).min(draw_h / bb_h);
+        let content_w = bb_w * scale;
+        let content_h = bb_h * scale;
+        let offset_x = draw_rect.min.x + (draw_w - content_w) / 2.0;
+        let offset_y = draw_rect.min.y + (draw_h - content_h) / 2.0;
+
+        // Invert map_point: minimap screen → world
+        let world_x = bb_min.x + (click_pos.x - offset_x) / scale;
+        let world_y = bb_min.y + (click_pos.y - offset_y) / scale;
+
+        // Pan viewport so (world_x, world_y) is at canvas center
+        let c = canvas_rect.center();
+        self.viewport.offset[0] = c.x - world_x * self.viewport.zoom;
+        self.viewport.offset[1] = c.y - world_y * self.viewport.zoom;
+    }
 
     fn draw_minimap(&self, painter: &egui::Painter, canvas_rect: Rect) {
         if self.document.nodes.is_empty() {

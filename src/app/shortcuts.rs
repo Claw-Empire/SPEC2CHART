@@ -189,6 +189,20 @@ impl FlowchartApp {
             self.selection.clear();
         }
 
+        // G = toggle grid
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
+            self.show_grid = !self.show_grid;
+            let msg = if self.show_grid { "Grid On" } else { "Grid Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
+        // S = toggle snap to grid
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.is_none()) {
+            self.snap_to_grid = !self.snap_to_grid;
+            let msg = if self.snap_to_grid { "Snap On" } else { "Snap Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
         // Arrow keys = nudge selected nodes (1px; 10px with Shift)
         if !any_text_focused && !self.selection.node_ids.is_empty() {
             let shift = ctx.input(|i| i.modifiers.shift);

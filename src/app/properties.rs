@@ -303,6 +303,11 @@ impl FlowchartApp {
             );
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
+            ui.add_space(4.0);
+            let mut opacity = node.style.fill_color[3] as f32 / 255.0 * 100.0;
+            if ui.add(egui::Slider::new(&mut opacity, 0.0..=100.0).text("Opacity").suffix("%")).changed() {
+                node.style.fill_color[3] = (opacity / 100.0 * 255.0).round() as u8;
+            }
             ui.add_space(16.0);
 
             // Dimensions
