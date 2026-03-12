@@ -516,6 +516,13 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // Shift+P = toggle quick-notes panel
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.shift && !i.modifiers.command) {
+            self.show_quick_notes = !self.show_quick_notes;
+            let msg = if self.show_quick_notes { "Quick Notes On" } else { "Quick Notes Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
         // H = toggle connectivity heatmap
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.is_none()) {
             self.show_heatmap = !self.show_heatmap;

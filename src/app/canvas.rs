@@ -668,6 +668,9 @@ impl FlowchartApp {
         self.draw_search_overlay(ui, canvas_rect);
         self.draw_zoom_presets(ui, canvas_rect);
         self.draw_minimap(&painter, canvas_rect);
+        if self.show_quick_notes {
+            self.draw_quick_notes_panel(ui, canvas_rect);
+        }
 
         // Minimap click-to-pan and drag-to-pan
         if let Some(click_pos) = pointer_pos {
@@ -2073,6 +2076,65 @@ impl FlowchartApp {
         let color = Color32::from_rgba_premultiplied(180, 180, 200, 100);
         let pos = Pos2::new(canvas_rect.min.x + 20.0, canvas_rect.min.y + 20.0);
         painter.text(pos, Align2::LEFT_TOP, &self.project_title, font, color);
+    }
+
+    fn draw_quick_notes_panel(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        // Floating "sticky" quick-notes panel in top-left area
+        let panel_w = 200.0_f32;
+        let panel_h = 160.0_f32;
+        let margin = 16.0_f32;
+        let panel_rect = Rect::from_min_size(
+            Pos2::new(canvas_rect.min.x + margin, canvas_rect.min.y + margin + 14.0),
+            Vec2::new(panel_w, panel_h),
+        );
+
+        // Draw sticky note background (warm yellow)
+        let painter2 = ui.painter();
+        painter2.rect_filled(
+            panel_rect,
+            CornerRadius::same(6),
+            Color32::from_rgba_unmultiplied(249, 226, 175, 230),
+        );
+        painter2.rect_stroke(
+            panel_rect,
+            CornerRadius::same(6),
+            Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 170, 90, 180)),
+            StrokeKind::Outside,
+        );
+
+        // Folded corner effect (top-right triangle)
+        let corner = panel_rect.right_top();
+        let fold_size = 14.0_f32;
+        painter2.add(egui::Shape::convex_polygon(
+            vec![
+                corner,
+                corner + Vec2::new(-fold_size, 0.0),
+                corner + Vec2::new(0.0, fold_size),
+            ],
+            Color32::from_rgba_unmultiplied(200, 160, 80, 200),
+            Stroke::NONE,
+        ));
+
+        // Title bar
+        painter2.text(
+            panel_rect.left_top() + Vec2::new(8.0, 8.0),
+            Align2::LEFT_TOP,
+            "📝 Quick Notes  (⇧P)",
+            FontId::proportional(9.5),
+            Color32::from_rgba_unmultiplied(100, 70, 20, 200),
+        );
+
+        // Text area
+        let text_rect = Rect::from_min_max(
+            panel_rect.min + Vec2::new(6.0, 24.0),
+            panel_rect.max - Vec2::new(6.0, 6.0),
+        );
+        ui.put(text_rect, egui::TextEdit::multiline(&mut self.quick_notes_text)
+            .desired_width(text_rect.width())
+            .font(FontId::proportional(10.5))
+            .frame(false)
+            .text_color(Color32::from_rgba_unmultiplied(80, 55, 15, 230))
+        );
     }
 
     fn draw_heatmap_overlay(&self, painter: &egui::Painter, canvas_rect: Rect) {
