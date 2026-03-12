@@ -585,6 +585,7 @@ impl FlowchartApp {
             };
             let pad = (6.0 * self.viewport.zoom).min(12.0);
             let max_text_w = (screen_rect.width() - pad * 2.0).max(10.0);
+            let max_text_h = (screen_rect.height() - pad * 2.0).max(6.0);
             // Build display label with bold/italic markers for visual hint
             let display_label: std::borrow::Cow<str> = match (style.bold, style.italic) {
                 (true, true)  => std::borrow::Cow::Owned(format!("𝘽 𝘐 {}", label)),
@@ -594,7 +595,6 @@ impl FlowchartApp {
             };
             // Apply bold/italic via LayoutJob
             let galley = if style.bold {
-                // Bold: render thicker by using a slightly bolder font size + double-pass
                 let bold_font = FontId::proportional(font_size * 1.06);
                 painter.layout(display_label.into_owned(), bold_font, text_color, max_text_w)
             } else {
@@ -604,7 +604,27 @@ impl FlowchartApp {
                 screen_rect.center().x - galley.size().x / 2.0,
                 screen_rect.center().y - galley.size().y / 2.0,
             );
-            painter.galley(text_pos, galley, Color32::TRANSPARENT);
+            // Clip text to node interior so it never overflows the shape
+            let clip_rect = screen_rect.shrink(pad * 0.5);
+            let clipped_painter = painter.with_clip_rect(clip_rect);
+            clipped_painter.galley(text_pos, galley.clone(), Color32::TRANSPARENT);
+            // Show fade-out ellipsis if text overflows height
+            if galley.size().y > max_text_h + 2.0 {
+                let fade_y = screen_rect.center().y + max_text_h / 2.0 - font_size * 0.5;
+                let ellipsis_pos = Pos2::new(screen_rect.center().x, fade_y);
+                // Fade-out strip: gradient over bottom 1.5 lines
+                let fade_h = font_size * 1.2;
+                let fade_rect = Rect::from_min_max(
+                    Pos2::new(clip_rect.min.x, ellipsis_pos.y - fade_h * 0.3),
+                    Pos2::new(clip_rect.max.x, clip_rect.max.y),
+                );
+                // Draw node-fill-colored rect to mask overflow (simulates clip fade)
+                let fill_mask = to_color32(style.fill_color).gamma_multiply(opacity * 0.88);
+                painter.rect_filled(fade_rect, CornerRadius::ZERO, fill_mask);
+                // Ellipsis dots
+                painter.text(ellipsis_pos, Align2::CENTER_CENTER, "…",
+                    FontId::proportional(font_size * 0.9), text_color.gamma_multiply(0.7));
+            }
         }
     }
 
