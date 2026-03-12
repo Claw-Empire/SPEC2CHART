@@ -560,6 +560,76 @@ impl FlowchartApp {
             }
         }
 
+        // Arrow keys on selected node = navigate to adjacent node by spatial direction
+        if !any_text_focused && self.selection.node_ids.len() == 1 && self.selection.edge_ids.is_empty() {
+            let sel_id = *self.selection.node_ids.iter().next().unwrap();
+            let shift = ctx.input(|i| i.modifiers.shift);
+            if !shift { // only without shift (shift+arrow = nudge node position)
+                let (left, right, up, down) = ctx.input(|i| (
+                    i.key_pressed(Key::ArrowLeft),
+                    i.key_pressed(Key::ArrowRight),
+                    i.key_pressed(Key::ArrowUp),
+                    i.key_pressed(Key::ArrowDown),
+                ));
+                let nav_dir = if left { Some((-1.0_f32, 0.0_f32)) }
+                    else if right { Some((1.0, 0.0)) }
+                    else if up { Some((0.0, -1.0)) }
+                    else if down { Some((0.0, 1.0)) }
+                    else { None };
+
+                if let Some((dx, dy)) = nav_dir {
+                    if let Some(sel_node) = self.document.find_node(&sel_id) {
+                        let sel_center = sel_node.rect().center();
+                        // Find all neighbors connected by edges
+                        let neighbors: Vec<NodeId> = self.document.edges.iter()
+                            .filter_map(|e| {
+                                if e.source.node_id == sel_id { Some(e.target.node_id) }
+                                else if e.target.node_id == sel_id { Some(e.source.node_id) }
+                                else { None }
+                            })
+                            .filter(|nid| *nid != sel_id)
+                            .collect();
+
+                        // Also include spatial neighbors (all nodes in roughly this direction)
+                        let all_candidates: Vec<NodeId> = if neighbors.is_empty() {
+                            self.document.nodes.iter().map(|n| n.id).filter(|id| *id != sel_id).collect()
+                        } else {
+                            neighbors
+                        };
+
+                        // Pick the neighbor closest in the requested direction
+                        let best = all_candidates.iter().filter_map(|nid| {
+                            self.document.find_node(nid).map(|n| {
+                                let nc = n.rect().center();
+                                let delta = nc - sel_center;
+                                // Project onto direction vector — must be positive (in correct direction)
+                                let proj = delta.x * dx + delta.y * dy;
+                                let lateral = (delta.x * dy - delta.y * dx).abs(); // perpendicular component
+                                (proj, lateral, *nid)
+                            })
+                        })
+                        .filter(|(proj, _, _)| *proj > 10.0) // must be in that direction
+                        .min_by(|a, b| {
+                            // Sort by: best directional score = high proj, low lateral
+                            let score_a = a.1 / (a.0 + 1.0);
+                            let score_b = b.1 / (b.0 + 1.0);
+                            score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+
+                        if let Some((_, _, target_id)) = best {
+                            self.selection.select_node(target_id);
+                            if let Some(n) = self.document.find_node(&target_id) {
+                                let c = self.canvas_rect.center();
+                                let np = n.rect().center();
+                                self.viewport.offset[0] = c.x - np.x * self.viewport.zoom;
+                                self.viewport.offset[1] = c.y - np.y * self.viewport.zoom;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Arrow keys on selected edge = adjust curve bend (±5; ±20 with Shift)
         if !any_text_focused && self.selection.node_ids.is_empty() && self.selection.edge_ids.len() == 1 {
             let shift = ctx.input(|i| i.modifiers.shift);
