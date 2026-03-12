@@ -64,6 +64,17 @@ fn paint_gradient_rect(painter: &egui::Painter, rect: Rect, color_top: Color32, 
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// Linearly interpolate between two Color32 values.
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    Color32::from_rgba_unmultiplied(
+        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
+        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
+        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
+        (a.a() as f32 + (b.a() as f32 - a.a() as f32) * t) as u8,
+    )
+}
+
 /// Darken a Color32 by blending toward black by `amount` (0.0 = unchanged, 1.0 = black).
 fn darken(c: Color32, amount: f32) -> Color32 {
     let f = 1.0 - amount.clamp(0.0, 1.0);
@@ -1090,6 +1101,22 @@ impl FlowchartApp {
                 .collect();
             for w in pts.windows(2) {
                 painter.line_segment([w[0], w[1]], Stroke::new(width, edge_color));
+            }
+        } else if !is_selected && !is_hovered {
+            // Gradient edge: tint progressively from source node fill to target node fill
+            // blended at 30% with the edge's own color for a subtle directional cue
+            let src_fill = to_color32(src_node.style.fill_color);
+            let tgt_fill = to_color32(tgt_node.style.fill_color);
+            let steps = 14_usize;
+            let mut prev_pt = src;
+            for i in 1..=steps {
+                let t = i as f32 / steps as f32;
+                let pt = cubic_bezier_point(src, cp1, cp2, tgt, t);
+                let seg_t = (2.0 * i as f32 - 1.0) / (2.0 * steps as f32); // midpoint t
+                let fill_tint = lerp_color(src_fill, tgt_fill, seg_t);
+                let seg_color = lerp_color(edge_color, fill_tint, 0.28);
+                painter.line_segment([prev_pt, pt], Stroke::new(width, seg_color));
+                prev_pt = pt;
             }
         } else {
             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
