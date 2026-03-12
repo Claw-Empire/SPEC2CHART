@@ -243,6 +243,50 @@ impl FlowchartApp {
                         }
                         ui.close_menu();
                     }
+                    if ui.button("⬇ Send to Back").clicked() {
+                        if let Some(i) = self.document.nodes.iter().position(|n| n.id == node_id) {
+                            let n = self.document.nodes.remove(i);
+                            self.document.nodes.insert(0, n);
+                            self.history.push(&self.document);
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    {
+                        let is_pinned = self.document.find_node(&node_id).map(|n| n.pinned).unwrap_or(false);
+                        let pin_label = if is_pinned { "📌 Unpin" } else { "📌 Pin" };
+                        if ui.button(pin_label).clicked() {
+                            if let Some(n) = self.document.find_node_mut(&node_id) {
+                                n.pinned = !n.pinned;
+                            }
+                            self.history.push(&self.document);
+                            ui.close_menu();
+                        }
+                    }
+                    {
+                        let is_locked = self.document.find_node(&node_id).map(|n| n.locked).unwrap_or(false);
+                        let lock_label = if is_locked { "🔓 Unlock" } else { "🔒 Lock" };
+                        if ui.button(lock_label).clicked() {
+                            if let Some(n) = self.document.find_node_mut(&node_id) {
+                                n.locked = !n.locked;
+                            }
+                            self.history.push(&self.document);
+                            ui.close_menu();
+                        }
+                    }
+                    if ui.button("🔗 Select Connected").clicked() {
+                        let connected: Vec<NodeId> = self.document.edges.iter()
+                            .filter_map(|e| {
+                                if e.source.node_id == node_id { Some(e.target.node_id) }
+                                else if e.target.node_id == node_id { Some(e.source.node_id) }
+                                else { None }
+                            })
+                            .collect();
+                        for nid in connected {
+                            self.selection.node_ids.insert(nid);
+                        }
+                        ui.close_menu();
+                    }
                     // Quick tag submenu
                     ui.menu_button("🏷 Tag…", |ui| {
                         let tags = [
