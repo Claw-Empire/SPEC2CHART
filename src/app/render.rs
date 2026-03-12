@@ -473,13 +473,55 @@ impl FlowchartApp {
             painter.add(glow);
         }
 
-        let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
-            [src, cp1, cp2, tgt],
-            false,
-            Color32::TRANSPARENT,
-            Stroke::new(width, edge_color),
-        );
-        painter.add(bezier);
+        if edge.style.dashed {
+            // Approximate dashed edge by sampling the bezier and drawing alternating segments
+            let dash = 10.0 * self.viewport.zoom.sqrt();
+            let gap = 6.0 * self.viewport.zoom.sqrt();
+            let steps = 80;
+            let mut pts: Vec<egui::Pos2> = (0..=steps)
+                .map(|i| cubic_bezier_point(src, cp1, cp2, tgt, i as f32 / steps as f32))
+                .collect();
+            let mut dist = 0.0_f32;
+            let mut drawing = true;
+            let mut seg_start = pts[0];
+            let mut progress = 0.0_f32;
+            for i in 1..pts.len() {
+                let seg_len = (pts[i] - pts[i - 1]).length();
+                let mut remaining = seg_len;
+                let mut cur = pts[i - 1];
+                while remaining > 0.0 {
+                    let to_flip = if drawing { dash - progress } else { gap - progress };
+                    if remaining >= to_flip {
+                        let t = to_flip / seg_len;
+                        let end = cur + (pts[i] - pts[i - 1]) * (to_flip / remaining.max(0.001));
+                        if drawing {
+                            painter.line_segment([seg_start, end], Stroke::new(width, edge_color));
+                        }
+                        cur = end;
+                        remaining -= to_flip;
+                        progress = 0.0;
+                        drawing = !drawing;
+                        seg_start = cur;
+                    } else {
+                        progress += remaining;
+                        if drawing { seg_start = pts[i - 1]; }
+                        remaining = 0.0;
+                    }
+                }
+                if drawing { seg_start = pts[i - 1]; }
+            }
+            if drawing {
+                painter.line_segment([seg_start, *pts.last().unwrap()], Stroke::new(width, edge_color));
+            }
+        } else {
+            let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src, cp1, cp2, tgt],
+                false,
+                Color32::TRANSPARENT,
+                Stroke::new(width, edge_color),
+            );
+            painter.add(bezier);
+        }
 
         // Endpoints
         if edge.source_cardinality != Cardinality::None {

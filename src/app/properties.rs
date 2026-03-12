@@ -312,6 +312,29 @@ impl FlowchartApp {
             ui.add_space(4.0);
             ui.add(egui::Slider::new(&mut node.size[1], 30.0..=400.0).text("H"));
         }
+
+        // Layer order controls (need node_id outside the borrow)
+        ui.add_space(12.0);
+        Self::draw_section_header(ui, "LAYER ORDER");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui.button("⬆ Front").on_hover_text("Bring to front").clicked() {
+                let idx = self.document.nodes.iter().position(|n| n.id == node_id);
+                if let Some(i) = idx {
+                    let node = self.document.nodes.remove(i);
+                    self.document.nodes.push(node);
+                    self.history.push(&self.document);
+                }
+            }
+            if ui.button("⬇ Back").on_hover_text("Send to back").clicked() {
+                let idx = self.document.nodes.iter().position(|n| n.id == node_id);
+                if let Some(i) = idx {
+                    let node = self.document.nodes.remove(i);
+                    self.document.nodes.insert(0, node);
+                    self.history.push(&self.document);
+                }
+            }
+        });
     }
 
     fn draw_edge_properties(&mut self, ui: &mut egui::Ui) {
@@ -452,6 +475,8 @@ impl FlowchartApp {
                 if ui.color_edit_button_srgba(&mut c).changed() {
                     edge.style.color = c.to_array();
                 }
+                ui.add_space(16.0);
+                ui.checkbox(&mut edge.style.dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
             });
             ui.add(egui::Slider::new(&mut edge.style.width, 1.0..=10.0).text("Width"));
         }

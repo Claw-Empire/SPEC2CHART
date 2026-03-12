@@ -63,17 +63,23 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+V = paste
+        // Cmd+V = paste (centered on viewport)
         if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.matches_exact(cmd))
             && !self.clipboard.is_empty()
         {
             self.selection.clear();
-            let offset = Vec2::new(30.0, 30.0);
+            // Compute clipboard centroid in world space
+            let n = self.clipboard.len() as f32;
+            let centroid: Vec2 = self.clipboard.iter().fold(Vec2::ZERO, |acc, nd| acc + nd.pos().to_vec2()) / n;
+            // Compute viewport center in world space
+            let vp_center: Vec2 = (self.canvas_rect.center().to_vec2()
+                - Vec2::new(self.viewport.offset[0], self.viewport.offset[1]))
+                / self.viewport.zoom;
+            let shift: Vec2 = vp_center - centroid;
             for template in self.clipboard.clone() {
                 let mut node = template;
                 node.id = NodeId::new();
-                let pos = node.pos() + offset;
-                node.set_pos(pos);
+                node.set_pos(node.pos() + shift);
                 self.selection.node_ids.insert(node.id);
                 self.document.nodes.push(node);
             }
@@ -181,6 +187,29 @@ impl FlowchartApp {
         // Escape = deselect
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.selection.clear();
+        }
+
+        // Arrow keys = nudge selected nodes (1px; 10px with Shift)
+        if !any_text_focused && !self.selection.node_ids.is_empty() {
+            let shift = ctx.input(|i| i.modifiers.shift);
+            let step = if shift { 10.0_f32 } else { 1.0_f32 };
+            let mut delta = egui::Vec2::ZERO;
+            ctx.input(|i| {
+                if i.key_pressed(Key::ArrowLeft)  { delta.x -= step; }
+                if i.key_pressed(Key::ArrowRight) { delta.x += step; }
+                if i.key_pressed(Key::ArrowUp)    { delta.y -= step; }
+                if i.key_pressed(Key::ArrowDown)  { delta.y += step; }
+            });
+            if delta != egui::Vec2::ZERO {
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(node) = self.document.nodes.iter_mut().find(|n| n.id == *id) {
+                        let p = node.pos();
+                        node.set_pos(p + delta);
+                    }
+                }
+                self.history.push(&self.document);
+            }
         }
     }
 }

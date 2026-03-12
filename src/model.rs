@@ -350,6 +350,7 @@ pub struct Port {
 pub struct EdgeStyle {
     pub color: [u8; 4],
     pub width: f32,
+    pub dashed: bool,
 }
 
 impl Default for EdgeStyle {
@@ -357,6 +358,7 @@ impl Default for EdgeStyle {
         Self {
             color: [100, 100, 100, 255],
             width: 2.5,
+            dashed: false,
         }
     }
 }
