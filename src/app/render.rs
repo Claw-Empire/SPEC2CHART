@@ -394,10 +394,37 @@ impl FlowchartApp {
             }
         }
 
-        // Pin indicator
-        if node.pinned && self.viewport.zoom > 0.4 {
-            let pin_pos = Pos2::new(screen_rect.min.x + 4.0, screen_rect.min.y - 2.0);
-            painter.text(pin_pos, Align2::LEFT_BOTTOM, "📌", FontId::proportional(10.0 * self.viewport.zoom.sqrt()), Color32::WHITE);
+        // Pin indicator — diagonal stripe overlay + pin badge
+        if node.pinned {
+            // Subtle diagonal stripe fill to indicate "immovable"
+            if self.viewport.zoom > 0.3 {
+                let clipped = painter.with_clip_rect(screen_rect);
+                let stripe_color = Color32::from_rgba_unmultiplied(150, 150, 200, 18);
+                let spacing = 10.0_f32;
+                let w = screen_rect.width();
+                let h = screen_rect.height();
+                let count = ((w + h) / spacing) as i32 + 2;
+                for i in 0..count {
+                    let x0 = screen_rect.min.x + i as f32 * spacing - h;
+                    let y0 = screen_rect.min.y;
+                    let x1 = x0 + h;
+                    let y1 = screen_rect.max.y;
+                    clipped.line_segment(
+                        [Pos2::new(x0, y0), Pos2::new(x1, y1)],
+                        Stroke::new(1.0, stripe_color),
+                    );
+                }
+            }
+            // Pin badge: small circle with 📌 in top-left
+            if self.viewport.zoom > 0.4 {
+                let badge_r = (7.0 * self.viewport.zoom.sqrt()).clamp(6.0, 11.0);
+                let badge_pos = Pos2::new(screen_rect.min.x + badge_r + 1.0, screen_rect.min.y + badge_r + 1.0);
+                painter.circle_filled(badge_pos, badge_r, Color32::from_rgba_unmultiplied(245, 194, 97, 210));
+                painter.circle_stroke(badge_pos, badge_r, Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 150, 40, 200)));
+                painter.text(badge_pos, Align2::CENTER_CENTER, "📌",
+                    FontId::proportional(badge_r * 1.1),
+                    Color32::from_rgb(40, 20, 10));
+            }
         }
 
         // Status icon strip (top-right): 💬 comment, 🔗 url, 🔒 locked
