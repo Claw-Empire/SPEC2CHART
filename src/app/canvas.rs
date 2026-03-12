@@ -778,6 +778,7 @@ impl FlowchartApp {
         self.draw_edge_tooltip(&painter, hover_pos, canvas_rect, &node_idx);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect, pointer_pos);
+        self.draw_canvas_vignette(&painter, canvas_rect);
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_search_overlay(ui, canvas_rect);
@@ -1860,6 +1861,53 @@ impl FlowchartApp {
                 egui::FontId::proportional(9.5),
                 Color32::from_rgba_unmultiplied(137, 220, 235, 160)); // cyan tint
         }
+    }
+
+    /// Subtle vignette gradient around the canvas edges — gives a "paper on desk" depth.
+    /// Uses a mesh-based gradient on each of the 4 edges.
+    fn draw_canvas_vignette(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        let depth = 48.0_f32; // pixels of fade
+        let alpha = 60_u8;    // max opacity at edge
+        let color_edge = Color32::from_rgba_premultiplied(10, 10, 20, alpha);
+        let color_mid  = Color32::from_rgba_premultiplied(10, 10, 20, 0);
+
+        // Helper: draw a gradient quad between two points with two color stops
+        let grad_quad = |p: &egui::Painter, corners: [Pos2; 4], c0: Color32, c1: Color32| {
+            let mut mesh = egui::Mesh::default();
+            // corners: [outer0, outer1, inner1, inner0] — outer=dark, inner=transparent
+            mesh.vertices.push(egui::epaint::Vertex { pos: corners[0], uv: Pos2::ZERO, color: c0 });
+            mesh.vertices.push(egui::epaint::Vertex { pos: corners[1], uv: Pos2::ZERO, color: c0 });
+            mesh.vertices.push(egui::epaint::Vertex { pos: corners[2], uv: Pos2::ZERO, color: c1 });
+            mesh.vertices.push(egui::epaint::Vertex { pos: corners[3], uv: Pos2::ZERO, color: c1 });
+            mesh.indices = vec![0, 1, 2, 0, 2, 3];
+            p.add(egui::Shape::mesh(mesh));
+        };
+
+        let r = canvas_rect;
+        // Top fade
+        grad_quad(painter, [
+            r.left_top(), r.right_top(),
+            Pos2::new(r.max.x, r.min.y + depth),
+            Pos2::new(r.min.x, r.min.y + depth),
+        ], color_edge, color_mid);
+        // Bottom fade
+        grad_quad(painter, [
+            r.left_bottom(), r.right_bottom(),
+            Pos2::new(r.max.x, r.max.y - depth),
+            Pos2::new(r.min.x, r.max.y - depth),
+        ], color_edge, color_mid);
+        // Left fade
+        grad_quad(painter, [
+            r.left_top(), r.left_bottom(),
+            Pos2::new(r.min.x + depth, r.max.y),
+            Pos2::new(r.min.x + depth, r.min.y),
+        ], color_edge, color_mid);
+        // Right fade
+        grad_quad(painter, [
+            r.right_top(), r.right_bottom(),
+            Pos2::new(r.max.x - depth, r.max.y),
+            Pos2::new(r.max.x - depth, r.min.y),
+        ], color_edge, color_mid);
     }
 
     /// Draw pulsing glow overlays on all edges connected to `hovered_node`.
