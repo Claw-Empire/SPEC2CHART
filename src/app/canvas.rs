@@ -335,6 +335,15 @@ impl FlowchartApp {
             }
         };
 
+        // Hovered node for connection highlighting (not dragging)
+        let hover_node_id: Option<NodeId> = match &self.drag {
+            DragState::None => hover_pos.and_then(|hp| {
+                let canvas_hp = self.viewport.screen_to_canvas(hp);
+                self.document.node_at_pos(canvas_hp)
+            }),
+            _ => None,
+        };
+
         // Edges (visible only)
         for edge in &self.document.edges {
             let src_visible = node_idx
@@ -361,7 +370,33 @@ impl FlowchartApp {
                 .unwrap_or(false);
             if src_visible || tgt_visible {
                 let hover_canvas = hover_pos.map(|p| self.viewport.screen_to_canvas(p));
-                self.draw_edge(edge, &painter, &node_idx, hover_canvas);
+
+                // Connection highlight: dim edges not connected to hovered node
+                let is_connected_to_hover = hover_node_id.map_or(false, |hid| {
+                    edge.source.node_id == hid || edge.target.node_id == hid
+                });
+                let should_dim = hover_node_id.is_some()
+                    && !is_connected_to_hover
+                    && self.selection.is_empty();
+                if should_dim {
+                    // Draw a dim overlay line instead of full edge rendering
+                    if let (Some(&si), Some(&ti)) = (node_idx.get(&edge.source.node_id), node_idx.get(&edge.target.node_id)) {
+                        if let (Some(sn), Some(tn)) = (self.document.nodes.get(si), self.document.nodes.get(ti)) {
+                            let s = self.viewport.canvas_to_screen(sn.port_position(edge.source.side));
+                            let t = self.viewport.canvas_to_screen(tn.port_position(edge.target.side));
+                            let offset = 60.0 * self.viewport.zoom;
+                            let (cp1, cp2) = super::interaction::control_points_for_side(s, t, edge.source.side, offset);
+                            let dim_color = Color32::from_rgba_unmultiplied(100, 100, 120, 40);
+                            let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
+                                [s, cp1, cp2, t], false, Color32::TRANSPARENT,
+                                Stroke::new(edge.style.width, dim_color),
+                            );
+                            painter.add(bezier);
+                        }
+                    }
+                } else {
+                    self.draw_edge(edge, &painter, &node_idx, hover_canvas);
+                }
                 // Draw path highlight overlay
                 if path_edge_ids.contains(&edge.id) {
                     self.draw_path_highlight(edge, &painter, &node_idx);
