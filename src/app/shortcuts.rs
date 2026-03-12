@@ -176,6 +176,41 @@ impl FlowchartApp {
             self.shape_picker = Some(pos);
         }
 
+        // Shift+N = add connected node to the right of the selected node
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.shift && !i.modifiers.command) {
+            if let Some(&src_id) = self.selection.node_ids.iter().next() {
+                let (src_pos, src_size) = self.document.find_node(&src_id)
+                    .map(|n| (n.pos(), n.size_vec()))
+                    .unwrap_or((egui::Pos2::ZERO, egui::Vec2::new(140.0, 60.0)));
+                let gap = 60.0;
+                let new_pos = egui::Pos2::new(src_pos.x + src_size.x + gap, src_pos.y);
+                let mut new_node = crate::model::Node::new(crate::model::NodeShape::Rectangle, new_pos);
+                // Copy style from source
+                if let Some(src_node) = self.document.find_node(&src_id) {
+                    new_node.style = src_node.style.clone();
+                }
+                let new_id = new_node.id;
+                self.document.nodes.push(new_node);
+                // Create edge: src -> new (right to left)
+                let edge = crate::model::Edge {
+                    id: EdgeId::new(),
+                    source: crate::model::Port { node_id: src_id, side: crate::model::PortSide::Right },
+                    target: crate::model::Port { node_id: new_id, side: crate::model::PortSide::Left },
+                    label: String::new(),
+                    source_label: String::new(),
+                    target_label: String::new(),
+                    source_cardinality: crate::model::Cardinality::None,
+                    target_cardinality: crate::model::Cardinality::None,
+                    style: crate::model::EdgeStyle::default(),
+                };
+                self.document.edges.push(edge);
+                self.selection.select_node(new_id);
+                self.focus_label_edit = true;
+                self.history.push(&self.document);
+                self.status_message = Some(("Connected node added".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Quick shape creation shortcuts (skip when editing text)
         let shape_to_create: Option<crate::model::NodeShape> = if !any_text_focused {
             if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.is_none()) {
