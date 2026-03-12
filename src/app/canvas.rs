@@ -510,6 +510,11 @@ impl FlowchartApp {
             }
         }
 
+        // Connectivity heatmap overlay
+        if self.show_heatmap && !self.document.nodes.is_empty() {
+            self.draw_heatmap_overlay(&painter, canvas_rect);
+        }
+
         // Resize handles on single-selected node
         if self.selection.node_ids.len() == 1 {
             let sel_id = *self.selection.node_ids.iter().next().unwrap();
@@ -1850,6 +1855,95 @@ impl FlowchartApp {
         let color = Color32::from_rgba_premultiplied(180, 180, 200, 100);
         let pos = Pos2::new(canvas_rect.min.x + 20.0, canvas_rect.min.y + 20.0);
         painter.text(pos, Align2::LEFT_TOP, &self.project_title, font, color);
+    }
+
+    fn draw_heatmap_overlay(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        // Count degree (in + out edges) per node
+        let mut degree: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+        for node in &self.document.nodes {
+            degree.entry(node.id).or_insert(0);
+        }
+        for edge in &self.document.edges {
+            *degree.entry(edge.source.node_id).or_insert(0) += 1;
+            *degree.entry(edge.target.node_id).or_insert(0) += 1;
+        }
+        let max_deg = degree.values().copied().max().unwrap_or(1).max(1) as f32;
+
+        for node in &self.document.nodes {
+            if node.is_frame { continue; }
+            let deg = *degree.get(&node.id).unwrap_or(&0) as f32;
+            let t = (deg / max_deg).clamp(0.0, 1.0); // 0 = cool, 1 = hot
+
+            let screen_pos = self.viewport.canvas_to_screen(node.pos());
+            let screen_size = node.size_vec() * self.viewport.zoom;
+            let screen_rect = Rect::from_min_size(screen_pos, screen_size);
+            if !screen_rect.intersects(canvas_rect) { continue; }
+
+            // Interpolate color: blue(0) → green(0.5) → orange(0.75) → red(1.0)
+            let heat_color = if t < 0.5 {
+                let s = t * 2.0;
+                Color32::from_rgba_unmultiplied(
+                    (30.0 + s * 100.0) as u8,
+                    (100.0 + s * 127.0) as u8,
+                    (220.0 - s * 180.0) as u8,
+                    100,
+                )
+            } else {
+                let s = (t - 0.5) * 2.0;
+                Color32::from_rgba_unmultiplied(
+                    (130.0 + s * 125.0) as u8,
+                    (227.0 - s * 180.0) as u8,
+                    40,
+                    110,
+                )
+            };
+
+            // Draw a colored ring around the node
+            let ring_width = (2.0 + t * 5.0) * self.viewport.zoom.sqrt();
+            painter.rect_stroke(
+                screen_rect.expand(ring_width * 0.5),
+                CornerRadius::same(6),
+                Stroke::new(ring_width, heat_color),
+                StrokeKind::Outside,
+            );
+
+            // Degree label badge in top-left
+            if self.viewport.zoom > 0.4 {
+                let deg_i = deg as usize;
+                let badge = format!("{deg_i}");
+                let bp = screen_pos + Vec2::new(-2.0, -2.0);
+                painter.rect_filled(
+                    Rect::from_min_size(bp - Vec2::new(2.0, 2.0), Vec2::new(16.0, 12.0)),
+                    CornerRadius::same(3),
+                    heat_color,
+                );
+                painter.text(bp + Vec2::new(6.0, 4.0), Align2::CENTER_CENTER,
+                    &badge, FontId::proportional(8.0), Color32::WHITE);
+            }
+        }
+
+        // Legend in bottom-right
+        let leg_w = 120.0_f32;
+        let leg_h = 20.0_f32;
+        let leg_pos = Pos2::new(canvas_rect.max.x - leg_w - 20.0, canvas_rect.max.y - leg_h - 16.0);
+        painter.text(leg_pos, Align2::LEFT_TOP, "Connectivity:", FontId::proportional(9.0), TEXT_DIM);
+        let bar_y = leg_pos.y + 11.0;
+        for i in 0..=60 {
+            let t = i as f32 / 60.0;
+            let color = if t < 0.5 {
+                let s = t * 2.0;
+                Color32::from_rgba_unmultiplied((30.0 + s*100.0) as u8, (100.0+s*127.0) as u8, (220.0-s*180.0) as u8, 180)
+            } else {
+                let s = (t - 0.5) * 2.0;
+                Color32::from_rgba_unmultiplied((130.0+s*125.0) as u8, (227.0-s*180.0) as u8, 40, 180)
+            };
+            let x = leg_pos.x + t * leg_w;
+            painter.rect_filled(Rect::from_min_size(Pos2::new(x, bar_y), Vec2::new(leg_w/60.0+0.5, 7.0)), CornerRadius::ZERO, color);
+        }
+        painter.text(leg_pos + Vec2::new(0.0, 12.0), Align2::LEFT_TOP, "low", FontId::proportional(7.0), TEXT_DIM);
+        painter.text(leg_pos + Vec2::new(leg_w, 12.0), Align2::RIGHT_TOP, "high", FontId::proportional(7.0), TEXT_DIM);
+        painter.text(Pos2::new(canvas_rect.max.x - 12.0, canvas_rect.max.y - 30.0),
+            Align2::RIGHT_BOTTOM, "[H] heatmap", FontId::proportional(8.0), TEXT_DIM.gamma_multiply(0.6));
     }
 
     fn draw_presentation_spotlight(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {

@@ -516,6 +516,13 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // H = toggle connectivity heatmap
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.is_none()) {
+            self.show_heatmap = !self.show_heatmap;
+            let msg = if self.show_heatmap { "Heatmap On" } else { "Heatmap Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
         // G = toggle grid
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;

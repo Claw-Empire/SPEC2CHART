@@ -142,6 +142,8 @@ pub struct FlowchartApp {
     pub(crate) canvas_bg: [u8; 4],
     /// Optional project title shown as a watermark in the canvas top-left
     pub(crate) project_title: String,
+    /// When true, overlay connectivity heatmap on nodes (toggle with H)
+    pub(crate) show_heatmap: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +261,7 @@ impl FlowchartApp {
             presentation_mode: false,
             canvas_bg: [30, 30, 46, 255], // default = CANVAS_BG
             project_title: String::new(),
+            show_heatmap: false,
         }
     }
 
