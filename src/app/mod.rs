@@ -667,44 +667,82 @@ impl eframe::App for FlowchartApp {
                 .resizable(false)
                 .collapsible(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .min_width(460.0)
                 .show(ctx, |ui| {
-                    let shortcuts: &[(&str, &str)] = &[
-                        ("V", "Select tool"),
-                        ("E", "Connect tool"),
-                        ("G", "Toggle grid"),
-                        ("S", "Toggle snap"),
-                        ("F", "Fit / zoom to selection"),
-                        ("⌘F", "Search nodes"),
-                        ("⌘Z", "Undo"),
-                        ("⌘⇧Z", "Redo"),
-                        ("⌘C / ⌘V", "Copy / Paste"),
-                        ("⌘D", "Duplicate"),
-                        ("⌘A", "Select all"),
-                        ("O", "Toggle bird's eye overview"),
-                        ("N", "Insert shape picker"),
-                        ("R / C / D", "Quick-create Rect / Circle / Diamond"),
-                        ("⌘L", "Auto-layout (hierarchical)"),
-                        ("⌘1", "Fit to content"),
-                        ("⌘2", "Zoom to selection"),
-                        ("⌘= / ⌘-", "Zoom in / out"),
-                        ("⌘0", "Reset zoom"),
-                        ("Arrow keys", "Nudge 1px (⇧ = 10px)"),
-                        ("Del / Backspace", "Delete selected"),
-                        ("Escape", "Deselect"),
-                        ("Double-click", "Edit label / Create node"),
-                        ("Right-click", "Context menu"),
-                        ("F1 / ?", "This panel"),
+                    type Section = (&'static str, &'static [(&'static str, &'static str)]);
+                    let sections: &[Section] = &[
+                        ("Tools", &[
+                            ("V", "Select tool"),
+                            ("E", "Connect / edge tool"),
+                            ("N", "Insert shape picker"),
+                            ("R / C / D", "Quick-create Rect / Circle / Diamond"),
+                            ("Double-click canvas", "Create node"),
+                            ("Double-click node", "Edit label"),
+                            ("Right-click", "Context menu"),
+                        ]),
+                        ("Selection", &[
+                            ("⌘A", "Select all"),
+                            ("Escape", "Deselect"),
+                            ("Del / Backspace", "Delete selected"),
+                            ("Arrow keys", "Nudge 1 px  (⇧ = 10 px)"),
+                            ("⇧H / ⇧V", "Distribute selected horizontally / vertically"),
+                            ("⌘G", "Group into frame"),
+                        ]),
+                        ("Edit", &[
+                            ("⌘Z", "Undo"),
+                            ("⌘⇧Z", "Redo"),
+                            ("⌘C / ⌘V", "Copy / Paste (nodes + edges)"),
+                            ("⌘D", "Duplicate"),
+                            ("⌘⇧H", "Collapse / expand selected nodes"),
+                            ("⌘L", "Auto-layout (hierarchical)"),
+                        ]),
+                        ("View", &[
+                            ("⌘1", "Fit all to view"),
+                            ("⌘2", "Zoom to selection"),
+                            ("⌘= / ⌘-", "Zoom in / out"),
+                            ("⌘0", "Reset zoom to 100%"),
+                            ("F", "Focus mode — dim unconnected nodes"),
+                            ("G", "Toggle grid"),
+                            ("S", "Toggle snap to grid"),
+                            ("O", "Bird's-eye overview"),
+                            ("Alt+hover", "Show distance rulers"),
+                        ]),
+                        ("Search & Navigate", &[
+                            ("⌘F", "Search nodes (spotlight)"),
+                            ("↑ / ↓", "Navigate search results"),
+                            ("Enter", "Jump to search result"),
+                            ("⌘⇧1–5", "Save viewport bookmark"),
+                            ("⇧1–5", "Jump to bookmark"),
+                        ]),
+                        ("Help", &[
+                            ("F1 / ?", "This shortcuts panel"),
+                        ]),
                     ];
-                    egui::Grid::new("shortcuts_grid")
-                        .striped(true)
-                        .spacing([16.0, 4.0])
-                        .show(ui, |ui| {
-                            for (key, desc) in shortcuts {
-                                ui.label(egui::RichText::new(*key).monospace().color(ACCENT).size(12.0));
-                                ui.label(egui::RichText::new(*desc).size(12.0).color(TEXT_SECONDARY));
-                                ui.end_row();
-                            }
-                        });
+                    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                        for (section, items) in sections {
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new(*section)
+                                .size(10.0)
+                                .color(TEXT_DIM)
+                                .strong());
+                            egui::Grid::new(format!("sc_{}", section))
+                                .striped(true)
+                                .num_columns(2)
+                                .spacing([16.0, 3.0])
+                                .show(ui, |ui| {
+                                    for (key, desc) in *items {
+                                        ui.label(egui::RichText::new(*key)
+                                            .monospace()
+                                            .color(ACCENT)
+                                            .size(11.5));
+                                        ui.label(egui::RichText::new(*desc)
+                                            .size(11.5)
+                                            .color(TEXT_SECONDARY));
+                                        ui.end_row();
+                                    }
+                                });
+                        }
+                    });
                 });
             self.show_shortcuts_panel = open;
         }
