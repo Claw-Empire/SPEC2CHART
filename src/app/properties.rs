@@ -480,11 +480,38 @@ impl FlowchartApp {
             // Style section
             Self::draw_section_header(ui, "STYLE");
             ui.add_space(4.0);
+            // Recent colors row — collect click result first, apply below after node borrow released
+            let mut recent_color_pick: Option<[u8; 4]> = None;
+            if !self.recent_colors.is_empty() {
+                let recent = self.recent_colors.clone();
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(egui::RichText::new("Recent:").size(10.0).color(TEXT_DIM));
+                    for col in &recent {
+                        let c = to_color32(*col);
+                        let (r, painter) = ui.allocate_painter(egui::vec2(16.0, 16.0), egui::Sense::click());
+                        painter.rect_filled(r.rect, egui::CornerRadius::same(3), c);
+                        painter.rect_stroke(r.rect, egui::CornerRadius::same(3),
+                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255,255,255,30)),
+                            egui::StrokeKind::Inside);
+                        if r.clicked() { recent_color_pick = Some(*col); }
+                        r.on_hover_text(format!("#{:02X}{:02X}{:02X}", col[0], col[1], col[2]));
+                    }
+                });
+                ui.add_space(4.0);
+            }
+            if let Some(picked) = recent_color_pick {
+                node.style.fill_color = picked;
+            }
             ui.horizontal(|ui| {
                 let mut c = to_color32(node.style.fill_color);
                 ui.label(egui::RichText::new("Fill").size(11.0).color(TEXT_DIM));
                 if ui.color_edit_button_srgba(&mut c).changed() {
                     node.style.fill_color = c.to_array();
+                    // Track recent color
+                    let arr = c.to_array();
+                    self.recent_colors.retain(|&x| x != arr);
+                    self.recent_colors.insert(0, arr);
+                    self.recent_colors.truncate(10);
                 }
                 ui.add_space(8.0);
                 let mut b = to_color32(node.style.border_color);

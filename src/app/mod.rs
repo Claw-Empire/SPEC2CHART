@@ -119,6 +119,8 @@ pub struct FlowchartApp {
     pub(crate) llm_config: specgraph::LlmConfig,
     pub(crate) show_llm_settings: bool,
     pub(crate) style_clipboard: Option<crate::model::NodeStyle>,
+    /// Recently used fill colors (most recent first, max 10)
+    pub(crate) recent_colors: Vec<[u8; 4]>,
     pub(crate) show_search: bool,
     pub(crate) search_query: String,
     pub(crate) show_shortcuts_panel: bool,
@@ -241,6 +243,7 @@ impl FlowchartApp {
             llm_config: specgraph::LlmConfig::default(),
             show_llm_settings: false,
             style_clipboard: None,
+            recent_colors: Vec::new(),
             show_search: false,
             search_query: String::new(),
             show_shortcuts_panel: false,
