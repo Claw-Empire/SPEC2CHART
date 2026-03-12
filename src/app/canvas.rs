@@ -496,6 +496,17 @@ impl FlowchartApp {
             }
         }
 
+        // Alt-hover distance rulers: show spacing measurement lines to nearby nodes
+        let alt_held = ui.ctx().input(|i| i.modifiers.alt);
+        if alt_held {
+            if let Some(hid) = hover_node_id {
+                self.draw_distance_rulers(&painter, hid, canvas_rect);
+            } else if let Some(sel_id) = self.selection.node_ids.iter().next().copied() {
+                // Also show rulers for the selected node when Alt is held
+                self.draw_distance_rulers(&painter, sel_id, canvas_rect);
+            }
+        }
+
         // Data-flow animation: dots traveling along edges
         if self.show_flow_animation && !self.document.edges.is_empty() {
             let time = painter.ctx().input(|i| i.time) as f32;
@@ -3100,5 +3111,145 @@ impl FlowchartApp {
                 painter.circle_filled(pos, dot_r, dot_color);
             }
         }
+    }
+
+    /// Draw Figma-style distance rulers from `source_id` to its nearest neighbours.
+    /// Shows dashed red lines with pixel-distance labels on each axis.
+    fn draw_distance_rulers(&self, painter: &egui::Painter, source_id: NodeId, canvas_rect: Rect) {
+        let source = match self.document.find_node(&source_id) {
+            Some(n) => n,
+            None => return,
+        };
+        let src_rect = source.rect();
+
+        // Ruler appearance
+        let ruler_color = Color32::from_rgba_premultiplied(243, 139, 168, 200); // soft red
+        let label_bg    = Color32::from_rgba_premultiplied(243, 139, 168, 220);
+        let label_fg    = Color32::from_rgb(17, 17, 27);
+        let font        = egui::FontId::proportional(10.5);
+        let stroke      = Stroke::new(1.0, ruler_color);
+
+        // Collect up to 4 nearest nodes per direction (left/right/up/down)
+        // by finding the closest node whose rect overlaps on the perpendicular axis.
+        let mut closest: [Option<(&Node, f32)>; 4] = [None; 4]; // L, R, U, D
+
+        for node in &self.document.nodes {
+            if node.id == source_id { continue; }
+            let r = node.rect();
+
+            // Horizontal overlap: their Y ranges intersect?
+            let h_overlap = r.min.y < src_rect.max.y && r.max.y > src_rect.min.y;
+            // Vertical overlap: their X ranges intersect?
+            let v_overlap = r.min.x < src_rect.max.x && r.max.x > src_rect.min.x;
+
+            // Left: node is to the left, and Y-overlaps
+            if h_overlap && r.max.x <= src_rect.min.x {
+                let gap = src_rect.min.x - r.max.x;
+                if closest[0].map_or(true, |(_, g)| gap < g) {
+                    closest[0] = Some((node, gap));
+                }
+            }
+            // Right: node is to the right, and Y-overlaps
+            if h_overlap && r.min.x >= src_rect.max.x {
+                let gap = r.min.x - src_rect.max.x;
+                if closest[1].map_or(true, |(_, g)| gap < g) {
+                    closest[1] = Some((node, gap));
+                }
+            }
+            // Up: node is above, and X-overlaps
+            if v_overlap && r.max.y <= src_rect.min.y {
+                let gap = src_rect.min.y - r.max.y;
+                if closest[2].map_or(true, |(_, g)| gap < g) {
+                    closest[2] = Some((node, gap));
+                }
+            }
+            // Down: node is below, and X-overlaps
+            if v_overlap && r.min.y >= src_rect.max.y {
+                let gap = r.min.y - src_rect.max.y;
+                if closest[3].map_or(true, |(_, g)| gap < g) {
+                    closest[3] = Some((node, gap));
+                }
+            }
+        }
+
+        // Helper: draw dashed line + label
+        let draw_ruler = |p0: Pos2, p1: Pos2, dist: f32| {
+            if !canvas_rect.contains(p0) && !canvas_rect.contains(p1) { return; }
+            // Dashed line (8px on, 4px off)
+            let total = (p1 - p0).length();
+            if total < 1.0 { return; }
+            let dir = (p1 - p0) / total;
+            let mut t = 0.0_f32;
+            let dash = 6.0_f32;
+            let gap  = 3.0_f32;
+            let mut drawing = true;
+            while t < total {
+                let seg_end = (t + if drawing { dash } else { gap }).min(total);
+                if drawing {
+                    painter.line_segment([p0 + dir * t, p0 + dir * seg_end], stroke);
+                }
+                t = seg_end;
+                drawing = !drawing;
+            }
+            // End tick marks
+            let perp = Vec2::new(-dir.y, dir.x) * 4.0;
+            painter.line_segment([p0 - perp, p0 + perp], stroke);
+            painter.line_segment([p1 - perp, p1 + perp], stroke);
+
+            // Distance label
+            let mid = p0 + (p1 - p0) * 0.5;
+            let text = format!("{:.0}", dist);
+            let galley = painter.ctx().fonts(|f| {
+                f.layout_no_wrap(text.clone(), font.clone(), label_fg)
+            });
+            let text_size = galley.size();
+            let bg = Rect::from_center_size(mid, text_size + egui::vec2(6.0, 4.0));
+            painter.rect_filled(bg, CornerRadius::same(3), label_bg);
+            painter.text(mid, Align2::CENTER_CENTER, &text, font.clone(), label_fg);
+        };
+
+        // Convert world distances to screen for drawing, but keep world-unit label
+        let s = self.viewport.zoom; // scale factor
+
+        // Left ruler
+        if let Some((other, gap)) = closest[0] {
+            let other_r = other.rect();
+            let mid_y_world = (src_rect.min.y.max(other_r.min.y) + src_rect.max.y.min(other_r.max.y)) / 2.0;
+            let p0 = self.viewport.canvas_to_screen(Pos2::new(other_r.max.x, mid_y_world));
+            let p1 = self.viewport.canvas_to_screen(Pos2::new(src_rect.min.x, mid_y_world));
+            draw_ruler(p0, p1, gap * s);
+        }
+        // Right ruler
+        if let Some((other, gap)) = closest[1] {
+            let other_r = other.rect();
+            let mid_y_world = (src_rect.min.y.max(other_r.min.y) + src_rect.max.y.min(other_r.max.y)) / 2.0;
+            let p0 = self.viewport.canvas_to_screen(Pos2::new(src_rect.max.x, mid_y_world));
+            let p1 = self.viewport.canvas_to_screen(Pos2::new(other_r.min.x, mid_y_world));
+            draw_ruler(p0, p1, gap * s);
+        }
+        // Up ruler
+        if let Some((other, gap)) = closest[2] {
+            let other_r = other.rect();
+            let mid_x_world = (src_rect.min.x.max(other_r.min.x) + src_rect.max.x.min(other_r.max.x)) / 2.0;
+            let p0 = self.viewport.canvas_to_screen(Pos2::new(mid_x_world, other_r.max.y));
+            let p1 = self.viewport.canvas_to_screen(Pos2::new(mid_x_world, src_rect.min.y));
+            draw_ruler(p0, p1, gap * s);
+        }
+        // Down ruler
+        if let Some((other, gap)) = closest[3] {
+            let other_r = other.rect();
+            let mid_x_world = (src_rect.min.x.max(other_r.min.x) + src_rect.max.x.min(other_r.max.x)) / 2.0;
+            let p0 = self.viewport.canvas_to_screen(Pos2::new(mid_x_world, src_rect.max.y));
+            let p1 = self.viewport.canvas_to_screen(Pos2::new(mid_x_world, other_r.min.y));
+            draw_ruler(p0, p1, gap * s);
+        }
+
+        // Also draw the source node rect outline in ruler color for reference
+        let src_screen = Rect::from_min_size(
+            self.viewport.canvas_to_screen(src_rect.min),
+            src_rect.size() * self.viewport.zoom,
+        );
+        painter.rect_stroke(src_screen, CornerRadius::ZERO,
+            Stroke::new(1.0, ruler_color.gamma_multiply(0.6)), StrokeKind::Outside);
     }
 }

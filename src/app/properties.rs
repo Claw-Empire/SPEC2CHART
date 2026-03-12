@@ -192,6 +192,7 @@ impl FlowchartApp {
                 ("⇧A", "Flow animation"),
                 ("↵ Enter", "Chain node →right"),
                 ("⇧↵", "Chain node ↓down"),
+                ("⌥ Alt+hover", "Distance rulers"),
             ]),
             ("Editing", &[
                 ("⌘Z / ⌘⇧Z", "Undo / Redo"),
