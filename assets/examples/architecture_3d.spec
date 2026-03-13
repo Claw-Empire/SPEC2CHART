@@ -40,13 +40,20 @@ layer2 = Frontend
   Edge caching for static assets.
 
 ## Flow
+// Frontend clients
 web -> api
 mobile -> api
-api -> auth
-api -> pg
+
+// REST API — sync calls
+api -> [auth, pg]
+
+// REST API — async + cached
 api -> redis {note:session lookup}
 api -> worker {dashed} {note:async jobs}
-worker -> pg
-worker -> s3
+
+// Background worker
+worker -> [pg, s3]
+
+// CDN
 cdn -> s3
 web -> cdn
