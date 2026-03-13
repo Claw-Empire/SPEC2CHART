@@ -441,17 +441,47 @@ fn append_description(node: &mut Node, text: &str) {
 }
 
 /// Parse a flow line that may be a chain: `a --> b --> c` or `a "label" --> b --> c`.
+/// Also supports `->` as a shorter alias and `<--` / `<->` for reverse/bidirectional.
 /// Splits into individual edges.
 fn parse_flow_line_chain(
     line: &str,
     id_map: &HashMap<String, NodeId>,
     line_num: usize,
 ) -> Result<Vec<Edge>, String> {
+    // Normalize arrow variants to "-->":
+    //   "->"  → "-->"   (shorter alias)
+    //   "<--" → split into reversed edge
+    //   "<->" → bidirectional (forward + backward)
+    // We handle these by normalizing the input first.
+    // Strategy: replace "-->" variants then split.
+    //
+    // Order matters: replace "<->" first (bidirectional), then "<--" (reverse), then "->"
+    // We convert "<->" to "-->" but set a flag; convert "<--" by reversing.
+    // Simplest approach: expand bidirectional into two lines by replacing `<->` with `-->`.
+    // Then for `<--` lines, reverse direction.
+
+    // Detect dominant arrow type in this line
+    let is_reverse = !line.contains("-->") && !line.contains("<->") && line.contains("<--");
+    let is_bidir = line.contains("<->");
+
+    // Normalize to use "-->" for all splits
+    let normalized = if is_bidir {
+        line.replace("<->", "-->").replace("<-->", "-->")
+    } else if is_reverse {
+        line.replace("<--", "-->")
+    } else {
+        // Support "->" as alias for "-->" (replace only bare "->", not "-->")
+        // Do this carefully: replace "-->" temporarily, sub "->", restore
+        line.replace("-->", "\x00ARROW\x00")
+            .replace("->", "-->")
+            .replace("\x00ARROW\x00", "-->")
+    };
+
     // Split on "-->" but preserve quoted labels that precede arrows
     // Strategy: tokenise by splitting on "-->" then pair up segments
-    let segments: Vec<&str> = line.split("-->").collect();
+    let segments: Vec<&str> = normalized.split("-->").collect();
     if segments.len() < 2 {
-        return Err(format!("Line {}: expected '-->' in flow definition", line_num + 1));
+        return Err(format!("Line {}: expected '-->' or '->' in flow definition", line_num + 1));
     }
 
     let mut edges = Vec::new();
@@ -487,10 +517,16 @@ fn parse_flow_line_chain(
             format!("Line {}: unknown node '{}' (not defined in ## Nodes)", line_num + 1, to_id)
         })?;
 
-        let source = Port { node_id: *source_node_id, side: PortSide::Bottom };
-        let target = Port { node_id: *target_node_id, side: PortSide::Top };
+        // For reverse arrows (<--), swap source and target
+        let (actual_source_id, actual_target_id) = if is_reverse {
+            (target_node_id, source_node_id)
+        } else {
+            (source_node_id, target_node_id)
+        };
+        let source = Port { node_id: *actual_source_id, side: PortSide::Bottom };
+        let target = Port { node_id: *actual_target_id, side: PortSide::Top };
         let mut edge = Edge::new(source, target);
-        edge.label = label;
+        edge.label = label.clone();
         // Apply edge style tags
         for etag in &edge_tags {
             if etag.starts_with("color:") {
@@ -525,6 +561,18 @@ fn parse_flow_line_chain(
             }
         }
         edges.push(edge);
+
+        // Bidirectional: also add a reversed edge
+        if is_bidir {
+            let rev_source = Port { node_id: *actual_target_id, side: PortSide::Bottom };
+            let rev_target = Port { node_id: *actual_source_id, side: PortSide::Top };
+            let mut rev_edge = Edge::new(rev_source, rev_target);
+            // Share the same style as the forward edge (use last edge pushed)
+            if let Some(fwd) = edges.last() {
+                rev_edge.style = fwd.style.clone();
+            }
+            edges.push(rev_edge);
+        }
     }
 
     Ok(edges)
@@ -1457,5 +1505,46 @@ web --> api
             "expected Database name in: {}", exported);
         assert!(exported.contains("## Layer 1: Backend") || exported.contains("Backend"),
             "expected Backend name in: {}", exported);
+    }
+
+    #[test]
+    fn test_arrow_aliases() {
+        // -> and <-- and <-> arrow variants
+        let input = r#"
+# Arrow Test
+
+## Nodes
+- [a] Node A
+- [b] Node B
+- [c] Node C
+- [d] Node D
+
+## Flow
+a -> b
+c <-- d
+a <-> c
+"#;
+        let doc = parse_hrf(input).unwrap();
+        // a->b: 1 edge from a to b
+        // c<--d: 1 edge from d to c (reversed)
+        // a<->c: 2 edges (a->c and c->a)
+        assert_eq!(doc.edges.len(), 4, "expected 4 edges, got {}", doc.edges.len());
+
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Node A").unwrap().id;
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Node B").unwrap().id;
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Node C").unwrap().id;
+        let d = doc.nodes.iter().find(|n| n.display_label() == "Node D").unwrap().id;
+
+        // a->b
+        assert!(doc.edges.iter().any(|e| e.source.node_id == a && e.target.node_id == b),
+            "expected a->b edge");
+        // c<--d means d->c
+        assert!(doc.edges.iter().any(|e| e.source.node_id == d && e.target.node_id == c),
+            "expected d->c edge (from c<--d)");
+        // a<->c creates a->c and c->a
+        assert!(doc.edges.iter().any(|e| e.source.node_id == a && e.target.node_id == c),
+            "expected a->c edge (from a<->c)");
+        assert!(doc.edges.iter().any(|e| e.source.node_id == c && e.target.node_id == a),
+            "expected c->a edge (from a<->c)");
     }
 }
