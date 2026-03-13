@@ -310,6 +310,86 @@ fn expand_styles(input: &str) -> String {
     out
 }
 
+/// Pre-scan `## Layers` sections and expand `{layer:name}` tokens to `{z:N}`.
+///
+/// Format:
+/// ```text
+/// ## Layers
+/// frontend = 240   // or z:240 or z=240
+/// backend  = 120
+/// data     = 0
+/// ```
+/// After this pass, `{layer:frontend}` becomes `{z:240}` for downstream parsing.
+fn expand_layers(input: &str) -> String {
+    use std::collections::HashMap;
+    let mut layer_map: HashMap<String, f32> = HashMap::new();
+    let mut in_layers = false;
+
+    // First pass: collect layer definitions
+    for line in input.lines() {
+        let t = line.trim();
+        if t.starts_with("## ") {
+            let h = t[3..].trim().to_lowercase();
+            in_layers = matches!(h.as_str(), "layers" | "layer-map" | "layer-names" | "z-layers");
+            continue;
+        }
+        if !in_layers || t.is_empty() || t.starts_with("//") { continue; }
+        let sep = if t.contains('=') { '=' } else if t.contains(':') { ':' } else { continue; };
+        if let Some(pos) = t.find(sep) {
+            let name = t[..pos].trim().to_lowercase();
+            if name.is_empty() { continue; }
+            let val = t[pos+1..].trim();
+            // Parse value as z offset: "240", "z:240", "z=240", or named tier
+            let z: Option<f32> = if let Ok(n) = val.parse::<f32>() {
+                Some(n)
+            } else if let Some(rest) = val.strip_prefix("z:").or_else(|| val.strip_prefix("z=")) {
+                rest.trim().parse::<f32>().ok()
+            } else {
+                // Named tier fallback
+                match val.to_lowercase().as_str() {
+                    "db" | "data" | "database" | "storage" | "cache" | "queue" | "persistence" => Some(0.0),
+                    "app" | "api" | "service" | "backend" | "server" | "logic" | "worker" => Some(120.0),
+                    "ui" | "frontend" | "client" | "web" | "browser" | "view" | "spa" => Some(240.0),
+                    "edge" | "gateway" | "lb" | "proxy" | "cdn" | "ingress" => Some(360.0),
+                    "infra" | "platform" | "ops" | "host" | "cloud" => Some(480.0),
+                    _ => None,
+                }
+            };
+            if let Some(z_val) = z {
+                layer_map.insert(name, z_val);
+            }
+        }
+    }
+    if layer_map.is_empty() { return input.to_string(); }
+
+    // Second pass: replace {layer:name} with {z:N}
+    let mut out = String::with_capacity(input.len() + 64);
+    let mut in_layers_skip = false;
+    for line in input.lines() {
+        let t = line.trim();
+        if t.starts_with("## ") {
+            let h = t[3..].trim().to_lowercase();
+            in_layers_skip = matches!(h.as_str(), "layers" | "layer-map" | "layer-names" | "z-layers");
+            out.push_str(line); out.push('\n');
+            continue;
+        }
+        if in_layers_skip { out.push_str(line); out.push('\n'); continue; }
+
+        let mut expanded = line.to_string();
+        for (name, z_val) in &layer_map {
+            // Replace {layer:name} and {tier:name} with {z:N}
+            let z_int = z_val.round() as i32;
+            for prefix in &["layer:", "tier:", "level:"] {
+                let search = format!("{{{}{}}}", prefix, name);
+                let replace = format!("{{z:{}}}", z_int);
+                expanded = expanded.replace(&search, &replace);
+            }
+        }
+        out.push_str(&expanded); out.push('\n');
+    }
+    out
+}
+
 /// Parse a `.spec` Human-Readable Format string into a `FlowchartDocument`.
 ///
 /// See the full format reference in the doc-comment on `expand_palette` above.
@@ -319,7 +399,8 @@ fn expand_styles(input: &str) -> String {
 /// before edge parsing.
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Pre-expand style templates, then palette color names
-    let input_with_styles = expand_styles(input);
+    let input_with_layers = expand_layers(input);
+    let input_with_styles = expand_styles(&input_with_layers);
     let (expanded_input, _palette_map) = expand_palette(&input_with_styles);
     let input = expanded_input.as_str();
 
@@ -409,6 +490,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "config" | "settings" | "meta" => Section::Config,
                 "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
                 "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
+                "layers" | "layer-map" | "layer-names" | "z-layers" => Section::Palette, // skip: handled by expand_layers pre-pass
                 "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
                     // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
@@ -3554,6 +3636,38 @@ gw -> api
         assert_eq!(find("Frontend"),   240.0, "frontend → z=240");
         assert_eq!(find("Gateway"),    360.0, "edge → z=360");
         assert_eq!(find("Host"),       480.0, "infra → z=480");
+    }
+
+    #[test]
+    fn test_layers_section_defines_custom_z() {
+        // ## Layers section allows arbitrary name → z mapping
+        let input = r#"
+# Layers Section Test
+
+## Layers
+frontend = 240
+middletier = 120
+persistence = 0
+edge = 360
+
+## Nodes
+- [a] Browser    {layer:frontend}
+- [b] Service    {layer:middletier}
+- [c] Database   {layer:persistence}
+- [d] Gateway    {layer:edge}
+
+## Flow
+d -> a
+a -> b
+b -> c
+"#;
+        let doc = parse_hrf(input).expect("layers section parse");
+        let find_z = |label: &str| doc.nodes.iter().find(|n| n.display_label() == label)
+            .unwrap().z_offset;
+        assert_eq!(find_z("Browser"),   240.0, "frontend → 240");
+        assert_eq!(find_z("Service"),   120.0, "middletier → 120");
+        assert_eq!(find_z("Database"),    0.0, "persistence → 0");
+        assert_eq!(find_z("Gateway"),   360.0, "edge → 360");
     }
 
     #[test]
