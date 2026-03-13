@@ -789,6 +789,7 @@ impl FlowchartApp {
                 // Status footer: show node/edge count or pending indicator
                 let n = self.document.nodes.len();
                 let e = self.document.edges.len();
+                let total_lines = self.spec_editor_text.lines().count();
                 let (footer_text, footer_color) = if let Some(_) = self.spec_editor_last_edit {
                     ("⏱ parsing…".to_string(), theme.text_dim)
                 } else if self.spec_editor_error.is_some() {
@@ -800,6 +801,9 @@ impl FlowchartApp {
                     ui.add_space(12.0);
                     ui.colored_label(footer_color, egui::RichText::new(footer_text).size(10.5));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(8.0);
+                        ui.colored_label(theme.text_dim,
+                            egui::RichText::new(format!("{} lines", total_lines)).size(10.0));
                         ui.add_space(8.0);
                         ui.colored_label(theme.text_dim,
                             egui::RichText::new("Cmd+E to close").size(10.0));
