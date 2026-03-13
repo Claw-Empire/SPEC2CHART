@@ -694,11 +694,24 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
         let use_layers = z_groups.len() > 1;
 
         for section_z in &z_groups {
-            let group: Vec<&Node> = shape_nodes
+            let mut group: Vec<&Node> = shape_nodes
                 .iter()
                 .copied()
                 .filter(|n| (n.z_offset - section_z).abs() < 0.5)
                 .collect();
+            // Sort nodes top-to-bottom, left-to-right for human-readable spec output.
+            // Frames (is_frame=true) are placed last since they're background containers.
+            group.sort_by(|a, b| {
+                let a_frame = a.is_frame as i32;
+                let b_frame = b.is_frame as i32;
+                if a_frame != b_frame { return a_frame.cmp(&b_frame); }
+                // Primary sort: Y (top to bottom), quantized to 80px buckets
+                let ay = (a.position[1] / 80.0).floor() as i64;
+                let by = (b.position[1] / 80.0).floor() as i64;
+                if ay != by { return ay.cmp(&by); }
+                // Secondary sort: X (left to right)
+                a.position[0].partial_cmp(&b.position[0]).unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             if use_layers {
                 // Use natural index (0,1,2...) when z is a multiple of Z_SPACING (120),
@@ -2188,9 +2201,10 @@ web --> api
             "missing position in: {}", exported
         );
 
-        // Re-import should preserve position
+        // Re-import should preserve position (find by label, not index)
         let doc2 = parse_hrf(&exported).unwrap();
-        let a2 = &doc2.nodes[0];
+        let a2 = doc2.nodes.iter().find(|n| n.display_label() == "Fixed Node")
+            .expect("Fixed Node not found in re-imported doc");
         assert!(a2.pinned);
         assert!((a2.position[0] - 250.0).abs() < 1.0);
         assert!((a2.position[1] - 180.0).abs() < 1.0);
