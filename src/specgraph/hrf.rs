@@ -54,6 +54,8 @@ use std::collections::HashMap;
 /// ### Supported node style tags:
 ///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/white/black)
 ///   `{fill:#rrggbb}` — fill color as CSS hex (e.g. `{fill:#1e6f5c}`)
+///   `{border-color:red}` or `{stroke:red}` — border/stroke color
+///   `{text-color:white}` or `{color:white}` — text color override
 ///   `{size:200x80}` — shorthand for `{w:200} {h:80}`
 ///   `{pos:X,Y}` — shorthand for `{x:X} {y:Y}` (also pins the node)
 ///   `{w:200}` — explicit width in canvas units
@@ -335,6 +337,12 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                 // Only export non-default colors (gray is default)
                 if name != "gray" {
                     style_tags.push(format!("color:{}", name));
+                }
+            } else {
+                let ec = edge.style.color;
+                let default_ec = [150_u8, 150, 170, 255];
+                if ec != default_ec {
+                    style_tags.push(format!("color:#{:02x}{:02x}{:02x}", ec[0], ec[1], ec[2]));
                 }
             }
             match edge.style.arrow_head {
@@ -638,6 +646,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut gradient = false;
     let mut locked = false;
     let mut url_override: Option<String> = None;
+    let mut border_color: Option<[u8; 4]> = None;
+    let mut text_color: Option<[u8; 4]> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -710,6 +720,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag.starts_with("url:") || tag.starts_with("link:") {
             let prefix_len = if tag.starts_with("url:") { 4 } else { 5 };
             url_override = Some(tag[prefix_len..].trim().to_string());
+        } else if tag.starts_with("border-color:") || tag.starts_with("stroke:") {
+            let v = if tag.starts_with("border-color:") { &tag[13..] } else { &tag[7..] };
+            border_color = tag_to_fill_color(v.trim());
+        } else if tag.starts_with("text-color:") || tag.starts_with("color:") {
+            let v = if tag.starts_with("text-color:") { &tag[11..] } else { &tag[6..] };
+            text_color = tag_to_fill_color(v.trim());
         } else if tag == "shadow" || tag == "drop-shadow" {
             shadow = true;
         } else if tag == "bold" || tag == "strong" {
@@ -787,6 +803,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if gradient { node.style.gradient = true; }
     if locked { node.locked = true; }
     if let Some(u) = url_override { node.url = u; }
+    if let Some(bc) = border_color { node.style.border_color = bc; }
+    if let Some(tc) = text_color { node.style.text_color = tc; }
 
     Ok((id, node))
 }
@@ -968,7 +986,7 @@ fn tag_to_edge_color(name: &str) -> Option<[u8; 4]> {
         "red"            => Some([243, 139, 168, 255]),
         "yellow"         => Some([249, 226, 175, 255]),
         "purple"         => Some([203, 166, 247, 255]),
-        _ => None,
+        _ => parse_hex_color(name),
     }
 }
 
@@ -1085,10 +1103,30 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 crate::model::TextVAlign::Bottom => " {valign:bottom}",
                 crate::model::TextVAlign::Middle => "",
             };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            // Border color and text color (only if non-default)
+            let default_border = [100_u8, 100, 140, 255];
+            let default_text   = [220_u8, 220, 230, 255];
+            let border_color_tag = if node.style.border_color != default_border {
+                if let Some(name) = fill_color_name(node.style.border_color) {
+                    format!(" {{border-color:{}}}", name)
+                } else {
+                    let bc = node.style.border_color;
+                    format!(" {{border-color:#{:02x}{:02x}{:02x}}}", bc[0], bc[1], bc[2])
+                }
+            } else { String::new() };
+            let text_color_tag = if node.style.text_color != default_text {
+                if let Some(name) = fill_color_name(node.style.text_color) {
+                    format!(" {{text-color:{}}}", name)
+                } else {
+                    let tc = node.style.text_color;
+                    format!(" {{text-color:#{:02x}{:02x}{:02x}}}", tc[0], tc[1], tc[2])
+                }
+            } else { String::new() };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
-                border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag, w_tag, h_tag));
+                border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
+                border_color_tag, text_color_tag, w_tag, h_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));

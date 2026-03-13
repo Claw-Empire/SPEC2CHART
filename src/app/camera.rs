@@ -2,6 +2,18 @@ use egui::{Pos2, Vec2};
 use crate::model::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Target state for a smooth camera transition.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CameraTarget {
+    pub yaw: f32,
+    pub pitch: f32,
+    /// egui time at which transition was triggered
+    pub start_time: f64,
+    pub duration: f32,
+    pub start_yaw: f32,
+    pub start_pitch: f32,
+}
+
 // ---------------------------------------------------------------------------
 // Camera3D — perspective projection for 3D overview
 // ---------------------------------------------------------------------------
@@ -12,6 +24,8 @@ pub(crate) struct Camera3D {
     pub distance: f32,
     pub target: [f32; 3],
     pub fov: f32,
+    /// Target for smooth camera animation; None when not animating.
+    pub anim_target: Option<CameraTarget>,
 }
 
 impl Default for Camera3D {
@@ -22,6 +36,37 @@ impl Default for Camera3D {
             distance: 1200.0,
             target: [0.0, 0.0, 0.0],
             fov: std::f32::consts::FRAC_PI_4,
+            anim_target: None,
+        }
+    }
+}
+
+impl Camera3D {
+    /// Initiate a smooth transition to target yaw/pitch over `duration` seconds.
+    pub fn animate_to(&mut self, yaw: f32, pitch: f32, now: f64, duration: f32) {
+        self.anim_target = Some(CameraTarget {
+            yaw,
+            pitch,
+            start_time: now,
+            duration,
+            start_yaw: self.yaw,
+            start_pitch: self.pitch,
+        });
+    }
+
+    /// Advance the animation by one frame, returns true if still animating.
+    pub fn tick_animation(&mut self, now: f64) -> bool {
+        let Some(anim) = self.anim_target else { return false };
+        let t = ((now - anim.start_time) as f32 / anim.duration).clamp(0.0, 1.0);
+        // Smooth-step easing
+        let ease = t * t * (3.0 - 2.0 * t);
+        self.yaw   = anim.start_yaw   + (anim.yaw   - anim.start_yaw)   * ease;
+        self.pitch = anim.start_pitch + (anim.pitch  - anim.start_pitch) * ease;
+        if t >= 1.0 {
+            self.anim_target = None;
+            false
+        } else {
+            true
         }
     }
 }
@@ -166,6 +211,7 @@ mod tests {
             distance: 500.0,
             target: [0.0, 0.0, 0.0],
             fov: std::f32::consts::FRAC_PI_4,
+            anim_target: None,
         };
         let screen_center = Pos2::new(400.0, 300.0);
         let screen_size = Vec2::new(800.0, 600.0);
@@ -184,6 +230,7 @@ mod tests {
             distance: 500.0,
             target: [0.0, 0.0, 0.0],
             fov: std::f32::consts::FRAC_PI_4,
+            anim_target: None,
         };
         let screen_center = Pos2::new(400.0, 300.0);
         let screen_size = Vec2::new(800.0, 600.0);
@@ -203,6 +250,7 @@ mod tests {
             distance: 500.0,
             target: [0.0, 0.0, 0.0],
             fov: std::f32::consts::FRAC_PI_4,
+            anim_target: None,
         };
         let screen_center = Pos2::new(400.0, 300.0);
         let screen_size = Vec2::new(800.0, 600.0);

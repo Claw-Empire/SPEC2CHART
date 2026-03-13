@@ -382,6 +382,12 @@ impl FlowchartApp {
         let canvas_rect = response.rect;
         self.canvas_rect = canvas_rect;
 
+        // Tick smooth camera animation
+        let now = ui.ctx().input(|i| i.time);
+        if self.camera3d.tick_animation(now) {
+            ui.ctx().request_repaint();
+        }
+
         let canvas_bg = Color32::from_rgba_unmultiplied(
             self.canvas_bg[0], self.canvas_bg[1], self.canvas_bg[2], self.canvas_bg[3],
         );
@@ -925,8 +931,10 @@ impl FlowchartApp {
                     Pos2::new(start_x + k as f32 * (btn_w + gap), y),
                     Vec2::new(btn_w, btn_h),
                 );
-                let is_active = (self.camera3d.pitch - preset_pitch).abs() < 0.05
-                    && (self.camera3d.yaw - preset_yaw).abs() < 0.05;
+                let target_yaw   = self.camera3d.anim_target.map(|a| a.yaw).unwrap_or(self.camera3d.yaw);
+                let target_pitch = self.camera3d.anim_target.map(|a| a.pitch).unwrap_or(self.camera3d.pitch);
+                let is_active = (target_pitch - preset_pitch).abs() < 0.05
+                    && (target_yaw - preset_yaw).abs() < 0.05;
                 let hovered = pointer.map_or(false, |p| btn_rect.contains(p));
                 let bg = if is_active {
                     Color32::from_rgba_premultiplied(139, 213, 202, 200)
@@ -955,8 +963,8 @@ impl FlowchartApp {
                     txt_color,
                 );
                 if hovered && clicked {
-                    self.camera3d.yaw = *preset_yaw;
-                    self.camera3d.pitch = *preset_pitch;
+                    self.camera3d.animate_to(*preset_yaw, *preset_pitch, now, 0.35);
+                    ui.ctx().request_repaint();
                 }
             }
         }
@@ -1009,6 +1017,76 @@ impl FlowchartApp {
                     color,
                 );
                 y += pill_h + 4.0;
+            }
+        }
+
+        // Compass rose (bottom-right corner) — shows world X/Y axis directions
+        {
+            let cx = canvas_rect.max.x - 42.0;
+            let cy = canvas_rect.max.y - 90.0;
+            let r = 22.0_f32;
+            // Background disc
+            painter.circle_filled(
+                Pos2::new(cx, cy),
+                r + 3.0,
+                Color32::from_rgba_premultiplied(10, 10, 22, 140),
+            );
+            painter.circle_stroke(
+                Pos2::new(cx, cy),
+                r + 3.0,
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(80, 80, 120, 150)),
+            );
+            // Project world axes through the camera to find screen directions.
+            // We use a unit point offset in each axis direction and project it.
+            let origin_proj = self.camera3d.project([0.0, 0.0, 0.0], screen_center, screen_size);
+            let x_proj = self.camera3d.project([200.0, 0.0, 0.0], screen_center, screen_size);
+            let y_proj = self.camera3d.project([0.0, 200.0, 0.0], screen_center, screen_size);
+            let z_proj = self.camera3d.project([0.0, 0.0, 200.0], screen_center, screen_size);
+            if let (Some((op, _)), Some((xp, _)), Some((yp, _)), Some((zp, _))) =
+                (origin_proj, x_proj, y_proj, z_proj)
+            {
+                let dx = xp - op;
+                let dy = yp - op;
+                let dz = zp - op;
+                let scale_to = |d: Vec2| -> Vec2 {
+                    let len = d.length().max(0.001);
+                    d / len * r
+                };
+                let sx = scale_to(dx);
+                let sy = scale_to(dy);
+                let sz = scale_to(dz);
+                let axes = [
+                    (sx, "X", Color32::from_rgb(243, 139, 168)),
+                    (sy, "Y", Color32::from_rgb(166, 227, 161)),
+                    (sz, "Z", Color32::from_rgb(137, 180, 250)),
+                ];
+                for (dir, lbl, color) in &axes {
+                    let tip = Pos2::new(cx + dir.x, cy + dir.y);
+                    painter.line_segment(
+                        [Pos2::new(cx, cy), tip],
+                        Stroke::new(1.8, *color),
+                    );
+                    // Arrowhead
+                    let norm = if dir.length() > 0.1 { *dir / dir.length() } else { Vec2::ZERO };
+                    let perp = Vec2::new(-norm.y, norm.x);
+                    let arrow_len = 5.0_f32;
+                    let arrow_wing = 3.0_f32;
+                    painter.line_segment(
+                        [tip, tip - norm * arrow_len + perp * arrow_wing],
+                        Stroke::new(1.5, *color),
+                    );
+                    painter.line_segment(
+                        [tip, tip - norm * arrow_len - perp * arrow_wing],
+                        Stroke::new(1.5, *color),
+                    );
+                    painter.text(
+                        tip + norm * 7.0,
+                        Align2::CENTER_CENTER,
+                        lbl,
+                        FontId::proportional(9.5),
+                        *color,
+                    );
+                }
             }
         }
 
