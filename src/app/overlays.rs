@@ -7,6 +7,100 @@ use egui::{Color32, Pos2, Vec2};
 use crate::app::FlowchartApp;
 use crate::model::*;
 
+// ---------------------------------------------------------------------------
+// Spec editor syntax highlighter
+// ---------------------------------------------------------------------------
+
+/// Build a syntax-highlighted `LayoutJob` for the HRF spec editor.
+/// Called as a TextEdit layouter closure.
+fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::Arc<egui::Galley> {
+    use egui::text::{LayoutJob, TextFormat};
+    use egui::FontId;
+
+    // Colours (dark-theme palette)
+    let c_section  = Color32::from_rgb(137, 180, 250); // blue  — ## headings
+    let c_comment  = Color32::from_rgb(108, 112, 134); // gray  — // comments
+    let c_arrow    = Color32::from_rgb(203, 166, 247); // mauve — --> edges
+    let c_tag      = Color32::from_rgb(166, 227, 161); // green — {tags}
+    let c_node     = Color32::from_rgb(205, 214, 244); // white — node lines
+    let c_key      = Color32::from_rgb(250, 179, 135); // peach — key = value
+    let c_default  = Color32::from_rgb(166, 173, 200); // subtext0
+
+    let font = FontId::monospace(12.5);
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap_width;
+    job.wrap.break_anywhere = false;
+
+    let fmt = |color: Color32| TextFormat { font_id: font.clone(), color, ..Default::default() };
+
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("## ") || trimmed.starts_with("# ") {
+            // Section / title headers
+            job.append(line, 0.0, fmt(c_section));
+        } else if trimmed.starts_with("//") {
+            // Comment lines
+            job.append(line, 0.0, fmt(c_comment));
+        } else if trimmed.contains("-->") || trimmed.contains("->") || trimmed.contains("<--") || trimmed.contains("<->") {
+            // Edge / flow lines — colour tags inline
+            append_line_with_tags(&mut job, line, c_arrow, c_tag, &font);
+        } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            // Node definition lines
+            append_line_with_tags(&mut job, line, c_node, c_tag, &font);
+        } else if trimmed.contains(" = ") && !trimmed.starts_with(' ') {
+            // Config key = value lines
+            if let Some(eq) = line.find(" = ") {
+                job.append(&line[..eq + 3], 0.0, fmt(c_key));
+                job.append(&line[eq + 3..], 0.0, fmt(c_default));
+            } else {
+                job.append(line, 0.0, fmt(c_key));
+            }
+        } else {
+            // Description / other text
+            job.append(line, 0.0, fmt(c_default));
+        }
+    }
+
+    ui.fonts(|f| f.layout_job(job))
+}
+
+/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`.
+fn append_line_with_tags(
+    job: &mut egui::text::LayoutJob,
+    line: &str,
+    base_color: Color32,
+    tag_color: Color32,
+    font: &egui::FontId,
+) {
+    use egui::text::TextFormat;
+    let fmt_base = TextFormat { font_id: font.clone(), color: base_color, ..Default::default() };
+    let fmt_tag  = TextFormat { font_id: font.clone(), color: tag_color,  ..Default::default() };
+
+    let mut remaining = line;
+    while !remaining.is_empty() {
+        if let Some(open) = remaining.find('{') {
+            // Append the part before the tag
+            if open > 0 {
+                job.append(&remaining[..open], 0.0, fmt_base.clone());
+            }
+            remaining = &remaining[open..];
+            // Find closing brace
+            if let Some(close) = remaining.find('}') {
+                job.append(&remaining[..close + 1], 0.0, fmt_tag.clone());
+                remaining = &remaining[close + 1..];
+            } else {
+                // No closing brace — rest of line is a tag
+                job.append(remaining, 0.0, fmt_tag.clone());
+                break;
+            }
+        } else {
+            job.append(remaining, 0.0, fmt_base.clone());
+            break;
+        }
+    }
+}
+
 impl FlowchartApp {
     // -----------------------------------------------------------------------
     // Zoom indicator pill (fades after zoom changes)
@@ -660,7 +754,7 @@ impl FlowchartApp {
                         .font(egui::FontId::monospace(12.5))
                         .desired_rows(40)
                         .lock_focus(false)
-                        .text_color(theme.text_secondary),
+                        .layouter(&mut spec_syntax_layout),
                 );
                 if resp.changed() {
                     let now = ui2.ctx().input(|i| i.time);
