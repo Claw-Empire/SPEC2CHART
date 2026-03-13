@@ -852,13 +852,12 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
         }
     }
 
-    // Flow section
+    // Flow section — edges grouped by source node for human readability
     if !doc.edges.is_empty() {
-        out.push_str("## Flow\n");
-        for edge in &doc.edges {
+        // Build a helper closure to format a single edge line
+        let fmt_edge_line = |edge: &Edge| -> String {
             let from = id_map.get(&edge.source.node_id).cloned().unwrap_or_default();
             let to = id_map.get(&edge.target.node_id).cloned().unwrap_or_default();
-            // Collect edge style tags
             let mut style_tags: Vec<String> = Vec::new();
             if edge.style.dashed { style_tags.push("dashed".to_string()); }
             if edge.style.glow { style_tags.push("glow".to_string()); }
@@ -869,7 +868,6 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
                 style_tags.push(format!("bend:{:.1}", edge.style.curve_bend));
             }
             if let Some(name) = edge_color_name(edge.style.color) {
-                // Only export non-default colors (gray is default)
                 if name != "gray" {
                     style_tags.push(format!("color:{}", name));
                 }
@@ -884,7 +882,7 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
                 ArrowHead::Open => style_tags.push("arrow:open".to_string()),
                 ArrowHead::Circle => style_tags.push("arrow:circle".to_string()),
                 ArrowHead::None => style_tags.push("arrow:none".to_string()),
-                ArrowHead::Filled => {} // default, don't export
+                ArrowHead::Filled => {}
             }
             if !edge.source_label.is_empty() {
                 style_tags.push(format!("from:{}", edge.source_label));
@@ -907,12 +905,55 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
                 format!(" {{{}}}", style_tags.join("} {"))
             };
             if edge.label.is_empty() {
-                out.push_str(&format!("{} --> {}{}\n", from, to, tag_str));
+                format!("{} --> {}{}\n", from, to, tag_str)
             } else {
-                out.push_str(&format!("{} \"{}\" --> {}{}\n", from, edge.label, to, tag_str));
+                format!("{} \"{}\" --> {}{}\n", from, edge.label, to, tag_str)
+            }
+        };
+
+        // Group edges by source node id, preserving first-seen order
+        let mut source_order: Vec<NodeId> = Vec::new();
+        let mut groups: std::collections::HashMap<NodeId, Vec<&Edge>> = std::collections::HashMap::new();
+        for edge in &doc.edges {
+            let sid = edge.source.node_id;
+            if !groups.contains_key(&sid) {
+                source_order.push(sid);
+            }
+            groups.entry(sid).or_default().push(edge);
+        }
+
+        // Sort source groups by canvas Y then X so top-left nodes appear first
+        source_order.sort_by(|a, b| {
+            let pos_a = doc.nodes.iter().find(|n| n.id == *a).map(|n| (n.position[1] as i32, n.position[0] as i32)).unwrap_or((0, 0));
+            let pos_b = doc.nodes.iter().find(|n| n.id == *b).map(|n| (n.position[1] as i32, n.position[0] as i32)).unwrap_or((0, 0));
+            pos_a.cmp(&pos_b)
+        });
+
+        out.push_str("## Flow\n");
+        // Only add group headers when there are multiple source nodes
+        let use_headers = source_order.len() > 1;
+        for sid in &source_order {
+            if use_headers {
+                // Find a human-readable label for this source node
+                let header = doc.nodes.iter().find(|n| n.id == *sid)
+                    .map(|n| n.display_label().to_string())
+                    .unwrap_or_else(|| id_map.get(sid).cloned().unwrap_or_default());
+                if !header.is_empty() {
+                    out.push_str(&format!("// {}\n", header));
+                }
+            }
+            if let Some(edges) = groups.get(sid) {
+                for edge in edges {
+                    out.push_str(&fmt_edge_line(edge));
+                }
+            }
+            if use_headers {
+                out.push('\n');
             }
         }
-        out.push('\n');
+        if !use_headers {
+            out.push('\n');
+        }
     }
 
     // Notes section
