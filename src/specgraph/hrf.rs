@@ -1646,8 +1646,29 @@ fn parse_flow_line_chain(
     // Simplest approach: expand bidirectional into two lines by replacing `<->` with `-->`.
     // Then for `<--` lines, reverse direction.
 
+    // Detect style-shorthand arrows before Unicode normalization:
+    // -.->  or  -.--> = dashed edge
+    // ==>   or  ====> = thick edge
+    // ~~>   or  ~->   = animated edge
+    let implicit_dashed   = line.contains("-.->");
+    let implicit_thick    = line.contains("==>") || line.contains("====>");
+    let implicit_animated = line.contains("~~>") || line.contains("~->");
+
     // Normalize Unicode arrows to ASCII equivalents before further processing
     let line_unicode_normalized: String = line
+        // Style shorthand arrows → standard -->
+        .replace("-.--->", "-->")
+        .replace("-.-->", "-->")
+        .replace("-.->" , "-->")
+        .replace("====>", "-->")
+        .replace("==>",   "-->")
+        .replace("~~>",   "-->")
+        .replace("~->",   "-->")
+        // Reverse style shorthands
+        .replace("<-.-", "<--")
+        .replace("<===", "<--")
+        .replace("<~~",  "<--")
+        // Unicode arrows
         .replace('→', "-->")   // U+2192 RIGHTWARDS ARROW
         .replace('⇒', "-->")   // U+21D2 RIGHTWARDS DOUBLE ARROW
         .replace('⟶', "-->")   // U+27F6 LONG RIGHTWARDS ARROW
@@ -1828,6 +1849,10 @@ fn parse_flow_line_chain(
                 }
             }
         }
+        // Apply line-level implicit style flags from shorthand arrows
+        if implicit_dashed   && !edge.style.dashed    { edge.style.dashed    = true; }
+        if implicit_thick    && edge.style.width < 4.0 { edge.style.width    = 5.0; }
+        if implicit_animated && !edge.style.animated   { edge.style.animated = true; }
         edges.push(edge);
 
         // Bidirectional: also add a reversed edge
@@ -3878,6 +3903,36 @@ b -> c: stores data {dashed}
         assert_eq!(a.z_offset, 240.0, "frontend tier");
         assert_eq!(b.z_offset, 120.0, "backend tier");
         assert_eq!(c.z_offset, 0.0,   "storage tier");
+    }
+
+    #[test]
+    fn test_style_shorthand_arrows() {
+        let input = r#"
+# Style Arrow Test
+
+## Nodes
+- [a] Alpha
+- [b] Beta
+- [c] Gamma
+- [d] Delta
+
+## Flow
+a -.-> b
+c ==> d
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Alpha").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Beta").unwrap();
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Gamma").unwrap();
+        let d = doc.nodes.iter().find(|n| n.display_label() == "Delta").unwrap();
+
+        let ab = doc.edges.iter().find(|e| e.source.node_id == a.id && e.target.node_id == b.id)
+            .expect("a->b edge via -.-> should exist");
+        assert!(ab.style.dashed, "-.-> should create dashed edge");
+
+        let cd = doc.edges.iter().find(|e| e.source.node_id == c.id && e.target.node_id == d.id)
+            .expect("c->d edge via ==> should exist");
+        assert!(cd.style.width > 4.0, "==> should create thick edge, width={}", cd.style.width);
     }
 
     #[test]

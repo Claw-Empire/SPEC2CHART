@@ -595,6 +595,7 @@ impl FlowchartApp {
                             ("Cardinality", "{c-src:1} {c-tgt:0..N}"),
                             ("Ports", "{src-port:top/l/r/bottom} {tgt-port:...}"),
                             ("Arrow aliases", "-> (short) / <-- (reverse) / <-> (bidir)"),
+                            ("Style arrows", "-.-> (dashed) / ==> (thick) / ~~> (animated)"),
                             ("Unicode arrows", "a → b  a ⇒ b  a ↔ b  (same as -->/→/<->)"),
                             ("Edge label", "a -> b: label text  {dashed}  (suffix syntax)"),
                             ("Inline comment", "a -> b  // this comment is ignored by parser"),

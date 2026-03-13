@@ -50,6 +50,7 @@ fn spec_syntax_layout_ex(ui: &egui::Ui, text: &str, wrap_width: f32, error_line:
             // Comment lines
             job.append(line, 0.0, fmt_bg(c_comment, bg));
         } else if trimmed.contains("-->") || trimmed.contains("->") || trimmed.contains("<--") || trimmed.contains("<->")
+                 || trimmed.contains("-.->") || trimmed.contains("==>") || trimmed.contains("~~>") || trimmed.contains("~->")
                  || trimmed.contains('→') || trimmed.contains('⇒') || trimmed.contains('←') || trimmed.contains('↔')
                  || trimmed.contains('⟶') || trimmed.contains('⟵') || trimmed.contains('⇔') || trimmed.contains('⟷') {
             // Edge / flow lines — colour tags inline (including Unicode arrow variants)
