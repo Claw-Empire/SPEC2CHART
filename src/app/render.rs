@@ -283,6 +283,16 @@ impl FlowchartApp {
             }
         }
 
+        // Node glow effect: multi-layer neon halo around border
+        if node.style.glow && !node.is_frame {
+            let gc = node.style.border_color;
+            let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt()) as u8);
+            for (expand, alpha) in [(12.0_f32, 20_u8), (7.0, 40), (3.0, 70)] {
+                let s = Stroke::new(expand * self.viewport.zoom.sqrt(), Color32::from_rgba_unmultiplied(gc[0], gc[1], gc[2], alpha));
+                painter.rect_stroke(screen_rect, cr, s, StrokeKind::Outside);
+            }
+        }
+
         // Group frame: translucent container with label in top-left corner
         if node.is_frame {
             let fc = node.frame_color;

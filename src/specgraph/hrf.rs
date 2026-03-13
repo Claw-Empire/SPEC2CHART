@@ -76,6 +76,12 @@ use std::collections::HashMap;
 ///   `{icon:🔒}` — icon badge
 ///   `{shadow}` — drop shadow effect
 ///   `{highlight}` / `{pulse}` / `{starred}` / `{important}` — slow amber pulsing ring (important node marker)
+///   `{glow}` / `{neon}` — neon glow effect on node border
+///   `{done}` / `{complete}` — progress=100%, Ok badge (green)
+///   `{wip}` / `{in-progress}` / `{doing}` — progress=50%, Info badge (blue)
+///   `{review}` / `{in-review}` — progress=75%, Warning badge (yellow)
+///   `{blocked}` / `{stuck}` / `{failed}` — Critical badge (red), no progress implied
+///   `{todo}` / `{pending}` / `{backlog}` — Warning badge (yellow), no progress
 ///   `{note:text}` / `{annotation:text}` / `{comment:text}` — 💬 annotation tooltip shown on hover
 ///   `{group:name}` / `{cluster:name}` / `{in:name}` — assign to inline group frame (auto-creates bounding frame)
 ///   `{bold}` — bold text
@@ -1854,6 +1860,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut depth_3d: f32 = 0.0;
     let mut highlight = false;
     let mut progress: f32 = 0.0;
+    let mut node_glow = false;
     let mut collapsed = false;
     for tag in &tags {
         if tag.starts_with("z:") {
@@ -1921,6 +1928,26 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag.starts_with("icon:") || tag.starts_with("badge:") || tag.starts_with("v:") {
             let colon = tag.find(':').unwrap();
             icon = Some(tag[colon+1..].trim().to_string());
+        } else if tag == "done" || tag == "complete" || tag == "completed" || tag == "finished" {
+            // Status shorthand: done → full progress + Ok badge
+            progress = 1.0;
+            if node_tag.is_none() { node_tag = Some(NodeTag::Ok); }
+        } else if tag == "wip" || tag == "in-progress" || tag == "doing" || tag == "active" {
+            // Status shorthand: wip → half progress + Info badge
+            if progress < 0.01 { progress = 0.5; }
+            if node_tag.is_none() { node_tag = Some(NodeTag::Info); }
+        } else if tag == "review" || tag == "in-review" || tag == "reviewing" {
+            // Status shorthand: review → 75% progress + Warning badge
+            if progress < 0.01 { progress = 0.75; }
+            if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+        } else if tag == "blocked" || tag == "stuck" || tag == "failed" || tag == "error" {
+            // Status shorthand: blocked → Critical badge (no progress implied)
+            if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
+        } else if tag == "todo" || tag == "pending" || tag == "backlog" || tag == "queued" {
+            // Status shorthand: todo → Warning badge (no progress)
+            if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+        } else if tag == "glow" || tag == "neon" || tag == "glow-node" {
+            node_glow = true;
         } else if let Some(nt) = tag_to_node_tag(tag) {
             node_tag = Some(nt);
         } else if tag == "pinned" || tag == "pin" {
@@ -2106,6 +2133,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         node.depth_3d = depth_3d;
     }
     if highlight { node.highlight = true; }
+    if node_glow { node.style.glow = true; }
     if progress > 0.0 { node.progress = progress; }
     if let Some(nn) = node_note_text {
         node.comment = nn;
@@ -2541,11 +2569,12 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let note_tag = if !node.comment.is_empty() {
                 format!(" {{note:{}}}", node.comment)
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let glow_tag = if node.style.glow { " {glow}" } else { "" };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, collapsed_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag, glow_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
@@ -3721,5 +3750,49 @@ b -> c: stores data {dashed}
         assert_eq!(a.z_offset, 240.0, "frontend tier");
         assert_eq!(b.z_offset, 120.0, "backend tier");
         assert_eq!(c.z_offset, 0.0,   "storage tier");
+    }
+
+    #[test]
+    fn test_status_shorthand_tags() {
+        let input = r#"
+# Status Tags Test
+
+## Nodes
+- [a] Alpha {done}
+- [b] Beta {wip}
+- [c] Gamma {review}
+- [d] Delta {blocked}
+- [e] Epsilon {todo}
+- [f] Zeta {glow}
+- [g] Eta {in-progress}
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        let find = |label: &str| doc.nodes.iter().find(|n| n.display_label() == label).unwrap();
+
+        let a = find("Alpha");
+        assert!((a.progress - 1.0).abs() < 0.01, "done -> progress=1.0, got {}", a.progress);
+        assert_eq!(a.tag, Some(crate::model::NodeTag::Ok), "done -> Ok badge");
+
+        let b = find("Beta");
+        assert!((b.progress - 0.5).abs() < 0.01, "wip -> progress=0.5, got {}", b.progress);
+        assert_eq!(b.tag, Some(crate::model::NodeTag::Info), "wip -> Info badge");
+
+        let c = find("Gamma");
+        assert!((c.progress - 0.75).abs() < 0.01, "review -> progress=0.75, got {}", c.progress);
+        assert_eq!(c.tag, Some(crate::model::NodeTag::Warning), "review -> Warning badge");
+
+        let d = find("Delta");
+        assert_eq!(d.tag, Some(crate::model::NodeTag::Critical), "blocked -> Critical badge");
+
+        let e = find("Epsilon");
+        assert_eq!(e.tag, Some(crate::model::NodeTag::Warning), "todo -> Warning badge");
+        assert!(e.progress < 0.01, "todo -> no progress, got {}", e.progress);
+
+        let f = find("Zeta");
+        assert!(f.style.glow, "glow -> node.style.glow should be true");
+
+        let g = find("Eta");
+        assert_eq!(g.tag, Some(crate::model::NodeTag::Info), "in-progress -> Info badge");
+        assert!((g.progress - 0.5).abs() < 0.01, "in-progress -> progress=0.5, got {}", g.progress);
     }
 }
