@@ -496,6 +496,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "notes" | "note" | "stickies" => Section::Notes,
                 "groups" | "group" | "clusters" => Section::Groups,
                 "config" | "settings" | "meta" | "diagram" | "options" => Section::Config,
+                "summary" | "about" | "overview" | "readme" | "description" => Section::Summary,
                 "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
                 "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
                 "layers" | "layer-map" | "layer-names" | "z-layers" => Section::Palette, // skip: handled by expand_layers pre-pass
@@ -690,6 +691,17 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         let key = trimmed[..pos].trim().to_lowercase();
                         let val = trimmed[pos+1..].trim().to_string();
                         config_map.insert(key, val);
+                    }
+                }
+            }
+            Section::Summary => {
+                // ## Summary: collect prose lines into doc.description (overrides preamble)
+                if !trimmed.is_empty() {
+                    if doc.description.is_empty() {
+                        doc.description = trimmed.to_string();
+                    } else {
+                        doc.description.push('\n');
+                        doc.description.push_str(trimmed);
                     }
                 }
             }
@@ -1504,6 +1516,8 @@ enum Section {
     Groups,
     Config,
     Palette,
+    /// `## Summary` / `## About` — prose paragraph stored as doc.description.
+    Summary,
     /// `## Steps` — numbered list creates sequential flowchart nodes with auto edges.
     /// Tracks (last_step_id, section_z, step_count).
     Steps { default_z: f32, last_step_id: Option<NodeId>, step_count: u32 },
