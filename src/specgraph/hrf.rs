@@ -80,8 +80,12 @@ use std::collections::HashMap;
 ///   `{bold}` — bold text
 ///   `{italic}` — italic text
 ///   `{dashed-border}` — dashed border line
-///   `{r:N}` — corner radius override
+///   `{r:N}` / `{radius:N}` / `{corner:N}` — corner radius override
+///   `{rounded}` — corner radius 12 (shorthand)
+///   `{pill-shape}` — fully rounded corners (radius 50)
+///   `{sharp}` / `{square}` — zero corner radius
 ///   `{border:N}` — border width (e.g. `{border:2.5}`)
+///   `{text-size:N}` / `{font-size:N}` / `{fs:N}` — font size override
 ///   `{align:left}` `{align:right}` `{align:center}` — horizontal text alignment
 ///   `{valign:top}` `{valign:bottom}` `{valign:middle}` — vertical text alignment
 ///
@@ -1632,8 +1636,15 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             width_override = tag[2..].trim().parse::<f32>().ok();
         } else if tag.starts_with("h:") {
             height_override = tag[2..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("r:") {
-            corner_radius = tag[2..].trim().parse::<f32>().ok();
+        } else if tag.starts_with("r:") || tag.starts_with("radius:") || tag.starts_with("corner:") {
+            let colon = tag.find(':').unwrap();
+            corner_radius = tag[colon+1..].trim().parse::<f32>().ok();
+        } else if tag == "rounded" || tag == "round" {
+            corner_radius = Some(12.0);
+        } else if tag == "pill-shape" {
+            corner_radius = Some(50.0);
+        } else if tag == "sharp" || tag == "square" {
+            corner_radius = Some(0.0);
         } else if tag.starts_with("icon:") || tag.starts_with("badge:") || tag.starts_with("v:") {
             let colon = tag.find(':').unwrap();
             icon = Some(tag[colon+1..].trim().to_string());
@@ -1661,7 +1672,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                 "bottom" => Some(crate::model::TextVAlign::Bottom),
                 _ => Some(crate::model::TextVAlign::Middle),
             };
-        } else if tag.starts_with("font-size:") || tag.starts_with("fs:") || tag.starts_with("fontsize:") {
+        } else if tag.starts_with("font-size:") || tag.starts_with("fs:") || tag.starts_with("fontsize:") || tag.starts_with("text-size:") || tag.starts_with("textsize:") {
             let colon = tag.find(':').unwrap();
             font_size_override = tag[colon+1..].trim().parse::<f32>().ok();
         } else if tag.starts_with("opacity:") || tag.starts_with("alpha:") {
