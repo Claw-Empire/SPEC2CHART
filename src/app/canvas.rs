@@ -26,33 +26,53 @@ impl FlowchartApp {
             .hover_pos()
             .or_else(|| ui.ctx().input(|i| i.pointer.hover_pos()));
 
-        // Scroll => pan (infinite canvas), Pinch/Cmd+scroll => zoom
-        let (raw_scroll, smooth_scroll, pinch_zoom, cmd_held) = ui.ctx().input(|i| {
-            (
-                i.raw_scroll_delta,
-                i.smooth_scroll_delta,
-                i.zoom_delta(),
-                i.modifiers.command,
-            )
-        });
-        let scroll = if raw_scroll.length() > 0.0 { raw_scroll } else { smooth_scroll };
+        // Scroll => pan (infinite canvas), Pinch/Cmd+scroll => zoom.
+        // Only act on scroll events when the canvas is hovered. Use input_mut to
+        // *consume* both raw and smooth scroll deltas so they cannot leak to the
+        // sidebar ScrollArea (which only consumes smooth_scroll_delta itself).
+        let canvas_hovered = response.hovered()
+            || matches!(self.drag, DragState::Panning { .. } | DragState::DraggingNode { .. });
+        let (raw_scroll, smooth_scroll, pinch_zoom, cmd_held) = if canvas_hovered {
+            ui.ctx().input_mut(|i| {
+                let raw   = i.raw_scroll_delta;
+                let smooth = i.smooth_scroll_delta;
+                let pinch  = i.zoom_delta();
+                let cmd    = i.modifiers.command;
+                // Consume both scroll fields so the sidebar never sees them.
+                i.raw_scroll_delta    = Vec2::ZERO;
+                i.smooth_scroll_delta = Vec2::ZERO;
+                (raw, smooth, pinch, cmd)
+            })
+        } else {
+            (Vec2::ZERO, Vec2::ZERO, 1.0, false)
+        };
+        // Prefer smooth_scroll for Cmd+scroll zoom (raw is unbuffered and causes jitter).
+        // For regular pan, use raw if available (more responsive).
+        let pan_scroll = if raw_scroll.length() > 0.0 { raw_scroll } else { smooth_scroll };
+        let zoom_scroll_raw = smooth_scroll.y;
 
         // Pinch-to-zoom or Cmd+scroll => zoom towards mouse
-        let zoom_scroll = if cmd_held { scroll.y } else { 0.0 };
-        if pinch_zoom != 1.0 || zoom_scroll != 0.0 {
+        let zoom_input = if pinch_zoom != 1.0 {
+            Some(pinch_zoom)
+        } else if cmd_held && zoom_scroll_raw != 0.0 {
+            Some((1.0 + zoom_scroll_raw * 0.004).clamp(0.85, 1.15))
+        } else {
+            None
+        };
+        if let Some(factor) = zoom_input {
             if let Some(mouse) = pointer_pos {
                 let old_zoom = self.viewport.zoom;
-                let factor = if pinch_zoom != 1.0 {
-                    pinch_zoom
-                } else {
-                    (1.0 + zoom_scroll * 0.003).clamp(0.9, 1.1)
-                };
-                self.viewport.zoom = (self.viewport.zoom * factor).clamp(0.1, 10.0);
-                let ratio = self.viewport.zoom / old_zoom;
+                let new_zoom = (old_zoom * factor).clamp(0.1, 10.0);
+                // Update both zoom and zoom_target so the smooth interpolator
+                // doesn't fight against the scroll-driven change.
+                self.viewport.zoom = new_zoom;
+                self.zoom_target = new_zoom;
+                let ratio = new_zoom / old_zoom;
                 self.viewport.offset[0] = mouse.x - ratio * (mouse.x - self.viewport.offset[0]);
                 self.viewport.offset[1] = mouse.y - ratio * (mouse.y - self.viewport.offset[1]);
             }
         }
+        let scroll = if cmd_held { Vec2::ZERO } else { pan_scroll };
 
         // Advance animated layout transition each frame
         let dt = ui.ctx().input(|i| i.stable_dt).clamp(0.001, 0.1);
@@ -62,7 +82,8 @@ impl FlowchartApp {
         }
 
         // Regular scroll => pan canvas (with inertia accumulation)
-        if !cmd_held && scroll.length() > 0.0 {
+        // scroll is already Vec2::ZERO when cmd_held, so no extra guard needed.
+        if scroll.length() > 0.0 {
             // User is scrolling — cancel any in-progress fly-to animation
             self.pan_target = None;
             // Add scroll to velocity (weighted by frame time for consistent feel)
@@ -113,6 +134,69 @@ impl FlowchartApp {
         self.handle_drag_start(&response, ui, pointer_pos);
         self.handle_dragging(&response, ui, pointer_pos);
         self.handle_drag_end(&response, ui, pointer_pos, canvas_rect);
+
+        // Global handler for DraggingNewNode dragged in from the toolbar sidebar.
+        // handle_drag_end only fires on canvas response.drag_stopped(), which won't
+        // trigger when the drag originated in a different panel (the toolbar).
+        if matches!(self.drag, DragState::DraggingNewNode { .. }) {
+            let (hover, primary_down, primary_released) = ui.ctx().input(|i| {
+                (i.pointer.hover_pos(), i.pointer.primary_down(), i.pointer.primary_released())
+            });
+            // Track pointer position globally
+            if let (Some(pos), DragState::DraggingNewNode { ref mut current_screen, .. }) =
+                (hover, &mut self.drag)
+            {
+                *current_screen = pos;
+            }
+            // On release, place node if pointer is over the canvas
+            if primary_released || !primary_down {
+                let node_to_place = if let DragState::DraggingNewNode { ref kind, ref current_screen } =
+                    self.drag
+                {
+                    if canvas_rect.contains(*current_screen) {
+                        let mut canvas_pos = self.viewport.screen_to_canvas(*current_screen);
+                        if self.snap_to_grid {
+                            canvas_pos = self.snap_pos(canvas_pos);
+                        }
+                        Some(match kind {
+                            NodeKind::Shape { shape, .. } => Node::new(*shape, canvas_pos),
+                            NodeKind::StickyNote { color, .. } => Node::new_sticky(*color, canvas_pos),
+                            NodeKind::Entity { .. } => Node::new_entity(canvas_pos),
+                            NodeKind::Text { .. } => Node::new_text(canvas_pos),
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(node) = node_to_place {
+                    self.selection.clear();
+                    self.selection.node_ids.insert(node.id);
+                    self.document.nodes.push(node);
+                    self.history.push(&self.document);
+                }
+                self.drag = DragState::None;
+            }
+        }
+
+        // Live position tooltip — show X,Y while dragging a node
+        if let DragState::DraggingNode { start_positions, .. } = &self.drag {
+            if start_positions.len() == 1 {
+                let node_id = start_positions[0].0;
+                if let (Some(node), Some(mp)) = (self.document.find_node(&node_id), pointer_pos) {
+                    let pos = node.pos();
+                    let text = format!("{},{}", pos.x.round() as i32, pos.y.round() as i32);
+                    let tp = mp + Vec2::new(12.0, -22.0);
+                    let pad = Vec2::new(6.0, 3.0);
+                    let font = FontId::proportional(10.5);
+                    let galley = ui.ctx().fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), TEXT_DIM));
+                    let bg_rect = Rect::from_min_size(tp - pad, galley.size() + pad * 2.0);
+                    painter.rect_filled(bg_rect, CornerRadius::same(3), TOOLTIP_BG);
+                    painter.text(tp, Align2::LEFT_TOP, &text, font, TEXT_DIM);
+                }
+            }
+        }
 
         // Live resize tooltip — show W×H while ResizingNode
         if let DragState::ResizingNode { node_id, .. } = &self.drag {
@@ -208,17 +292,9 @@ impl FlowchartApp {
                     ui.separator();
 
                     // Quick bulk-color row
-                    let bulk_colors: &[([u8;4], &str)] = &[
-                        ([137, 180, 250, 255], "Blue"),
-                        ([166, 227, 161, 255], "Green"),
-                        ([243, 139, 168, 255], "Red"),
-                        ([249, 226, 175, 255], "Yellow"),
-                        ([203, 166, 247, 255], "Purple"),
-                        ([148, 226, 213, 255], "Teal"),
-                    ];
                     let mut bulk_color_pick: Option<[u8;4]> = None;
                     ui.horizontal_wrapped(|ui| {
-                        for (color, name) in bulk_colors {
+                        for (color, name) in BULK_COLORS {
                             let c = to_color32(*color);
                             if ui.add(egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(22.0, 22.0)))
                                 .on_hover_text(*name).clicked() {
@@ -324,21 +400,9 @@ impl FlowchartApp {
 
                     // Quick-color row at top
                     ui.label(egui::RichText::new("Fill").size(9.5).color(TEXT_DIM));
-                    let quick_colors: &[([u8;4], &str)] = &[
-                        ([30, 30, 46, 255],  "Surface"),
-                        ([137, 180, 250, 255], "Blue"),
-                        ([166, 227, 161, 255], "Green"),
-                        ([243, 139, 168, 255], "Red"),
-                        ([249, 226, 175, 255], "Yellow"),
-                        ([203, 166, 247, 255], "Purple"),
-                        ([245, 194, 231, 255], "Pink"),
-                        ([148, 226, 213, 255], "Teal"),
-                        ([255, 255, 255, 255], "White"),
-                        ([17, 17, 27, 255],   "Black"),
-                    ];
                     let mut color_pick: Option<[u8;4]> = None;
                     ui.horizontal_wrapped(|ui| {
-                        for (color, name) in quick_colors {
+                        for (color, name) in NODE_COLORS {
                             let c = to_color32(*color);
                             let is_current = self.document.find_node(&node_id)
                                 .map(|n| n.style.fill_color == *color)
@@ -354,14 +418,7 @@ impl FlowchartApp {
                     if let Some(col) = color_pick {
                         if let Some(n) = self.document.find_node_mut(&node_id) {
                             n.style.fill_color = col;
-                            // Auto-contrast: pick legible text color
-                            let [r, g, b, _] = col;
-                            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-                            n.style.text_color = if luma > 140.0 {
-                                [15, 15, 20, 255]
-                            } else {
-                                [220, 220, 230, 255]
-                            };
+                            n.style.text_color = auto_contrast_text(col);
                         }
                         self.history.push(&self.document);
                         ui.close_menu();
@@ -468,16 +525,8 @@ impl FlowchartApp {
                     ui.label(egui::RichText::new("Edge").size(11.0).color(TEXT_DIM));
                     ui.separator();
                     // Color presets
-                    let colors: &[([u8; 4], &str)] = &[
-                        ([100, 100, 100, 255], "Gray"),
-                        ([137, 180, 250, 255], "Blue"),
-                        ([166, 227, 161, 255], "Green"),
-                        ([243, 139, 168, 255], "Red"),
-                        ([249, 226, 175, 255], "Yellow"),
-                        ([203, 166, 247, 255], "Purple"),
-                    ];
                     ui.horizontal_wrapped(|ui| {
-                        for (color, name) in colors {
+                        for (color, name) in EDGE_COLORS {
                             let c = to_color32(*color);
                             if ui.add(egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(22.0, 22.0)))
                                 .on_hover_text(*name).clicked() {
@@ -2511,14 +2560,30 @@ impl FlowchartApp {
             FontId::proportional(28.0),
             Color32::from_rgba_unmultiplied(137, 180, 250, 200));
 
-        // Rotating contextual message (cycles every 5 seconds)
-        let messages = [
-            "Double-click anywhere to add your first node",
-            "Press N to pick a shape · or drag from toolbar",
-            "Build a flow, architecture, or idea map",
-            "Every great diagram starts with a single node",
-            "Press ? for all keyboard shortcuts",
-        ];
+        // Rotating contextual message (cycles every 5 seconds, diagram-mode aware)
+        let messages: &[&str] = match self.diagram_mode {
+            super::DiagramMode::ER => &[
+                "Double-click to add your first entity",
+                "Cmd+click to add entity fields",
+                "Build an entity-relationship diagram",
+                "Drag to connect entities with relationships",
+                "Press ? for all keyboard shortcuts",
+            ],
+            super::DiagramMode::FigJam => &[
+                "Double-click to add a sticky note",
+                "Press N to pick shapes · drag from toolbar",
+                "Collaborate with sticky notes and frames",
+                "Group ideas, then connect them",
+                "Press ? for all keyboard shortcuts",
+            ],
+            super::DiagramMode::Flowchart => &[
+                "Double-click anywhere to add your first node",
+                "Press N to pick a shape · or drag from toolbar",
+                "Build a flow, architecture, or idea map",
+                "Every great diagram starts with a single node",
+                "Press ? for all keyboard shortcuts",
+            ],
+        };
         let slot = ((t / 5.0) as usize) % messages.len();
         // Cross-fade between messages
         let fade_t = (t % 5.0) / 5.0;
@@ -3698,7 +3763,9 @@ impl FlowchartApp {
                     let mut y = start_y;
                     while y < canvas_rect.max.y {
                         let is_major = (xi % major_every == 0) && (yi % major_every == 0);
-                        let (r, c) = if is_major { (1.8, GRID_MAJOR_COLOR) } else { (0.8, GRID_COLOR) };
+                        // Scale dot radius with zoom for crisp appearance at any zoom level
+                        let zoom_scale = zoom.sqrt().clamp(0.5, 2.0);
+                        let (r, c) = if is_major { (1.8 * zoom_scale, GRID_MAJOR_COLOR) } else { (0.8 * zoom_scale, GRID_COLOR) };
                         painter.circle_filled(Pos2::new(x, y), r, c);
                         y += grid_screen;
                         yi += 1;

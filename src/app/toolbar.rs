@@ -448,7 +448,7 @@ impl FlowchartApp {
                     }
                     DiagramMode::ER => {
                         let available_width = ui.available_width();
-                        if ui
+                        let er_resp = ui
                             .add_sized(
                                 egui::vec2(available_width, 40.0),
                                 egui::Button::new(
@@ -456,8 +456,8 @@ impl FlowchartApp {
                                 )
                                 .fill(SURFACE0),
                             )
-                            .clicked()
-                        {
+                            .on_hover_text("Click or drag onto canvas");
+                        if er_resp.clicked() {
                             let center_screen = self.canvas_rect.center();
                             let center_canvas = self.viewport.screen_to_canvas(center_screen);
                             let node = Node::new_entity(center_canvas);
@@ -465,6 +465,14 @@ impl FlowchartApp {
                             self.selection.node_ids.insert(node.id);
                             self.document.nodes.push(node);
                             self.history.push(&self.document);
+                        }
+                        if er_resp.drag_started() {
+                            if let Some(pos) = er_resp.interact_pointer_pos() {
+                                self.drag = DragState::DraggingNewNode {
+                                    kind: NodeKind::Entity { name: "Entity".into(), attributes: vec![] },
+                                    current_screen: pos,
+                                };
+                            }
                         }
                     }
                     DiagramMode::FigJam => {
@@ -533,14 +541,8 @@ impl FlowchartApp {
                         self.canvas_bg = bg.to_array();
                     }
                     // Preset swatches
-                    let presets: &[([u8; 4], &str)] = &[
-                        ([30, 30, 46, 255], "Dark"),
-                        ([245, 244, 240, 255], "Light"),
-                        ([10, 20, 60, 255], "Blueprint"),
-                        ([8, 8, 8, 255], "Midnight"),
-                    ];
-                    for (color, name) in presets {
-                        let c = egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]);
+                    for (color, name) in CANVAS_BG_PRESETS {
+                        let c = to_color32(*color);
                         if ui.add(egui::Button::new("  ").fill(c).min_size(egui::Vec2::new(14.0, 14.0)))
                             .on_hover_text(*name).clicked() {
                             self.canvas_bg = *color;
@@ -551,7 +553,7 @@ impl FlowchartApp {
 
                 // Zoom
                 ui.horizontal(|ui| {
-                    let zoom_label = egui::RichText::new(format!("{:.0}%", self.viewport.zoom * 100.0))
+                    let zoom_label = egui::RichText::new(format!("{:.0}%", self.effective_zoom() * 100.0))
                         .size(12.0)
                         .color(TEXT_DIM)
                         .monospace();
@@ -680,7 +682,7 @@ impl FlowchartApp {
     fn draw_figjam_shapes(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         let available_width = ui.available_width();
         // Sticky note button
-        if ui
+        let sticky_resp = ui
             .add_sized(
                 egui::vec2(available_width, 40.0),
                 egui::Button::new(
@@ -688,8 +690,8 @@ impl FlowchartApp {
                 )
                 .fill(SURFACE0),
             )
-            .clicked()
-        {
+            .on_hover_text("Click or drag onto canvas");
+        if sticky_resp.clicked() {
             let center_screen = self.canvas_rect.center();
             let center_canvas = self.viewport.screen_to_canvas(center_screen);
             let node = Node::new_sticky(self.selected_sticky_color, center_canvas);
@@ -697,6 +699,17 @@ impl FlowchartApp {
             self.selection.node_ids.insert(node.id);
             self.document.nodes.push(node);
             self.history.push(&self.document);
+        }
+        if sticky_resp.drag_started() {
+            if let Some(pos) = sticky_resp.interact_pointer_pos() {
+                self.drag = DragState::DraggingNewNode {
+                    kind: NodeKind::StickyNote {
+                        text: String::new(),
+                        color: self.selected_sticky_color,
+                    },
+                    current_screen: pos,
+                };
+            }
         }
         ui.add_space(4.0);
 
@@ -721,7 +734,7 @@ impl FlowchartApp {
         ui.add_space(8.0);
 
         // Text node button
-        if ui
+        let text_resp = ui
             .add_sized(
                 egui::vec2(available_width, 36.0),
                 egui::Button::new(
@@ -729,8 +742,8 @@ impl FlowchartApp {
                 )
                 .fill(SURFACE0),
             )
-            .clicked()
-        {
+            .on_hover_text("Click or drag onto canvas");
+        if text_resp.clicked() {
             let center_screen = self.canvas_rect.center();
             let center_canvas = self.viewport.screen_to_canvas(center_screen);
             let node = Node::new_text(center_canvas);
@@ -738,6 +751,14 @@ impl FlowchartApp {
             self.selection.node_ids.insert(node.id);
             self.document.nodes.push(node);
             self.history.push(&self.document);
+        }
+        if text_resp.drag_started() {
+            if let Some(pos) = text_resp.interact_pointer_pos() {
+                self.drag = DragState::DraggingNewNode {
+                    kind: NodeKind::Text { content: String::new() },
+                    current_screen: pos,
+                };
+            }
         }
 
         // Frame node button

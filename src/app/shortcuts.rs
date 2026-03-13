@@ -106,6 +106,20 @@ impl FlowchartApp {
             self.history.push(&self.document);
         }
 
+        // B (no modifier) = toggle border dashed for selected nodes
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::B) && i.modifiers.is_none()) && !self.selection.node_ids.is_empty() {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let all_dashed = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.style.border_dashed));
+            for id in &ids {
+                if let Some(node) = self.document.find_node_mut(id) {
+                    node.style.border_dashed = !all_dashed;
+                }
+            }
+            self.history.push(&self.document);
+            let label = if !all_dashed { "Dashed border" } else { "Solid border" };
+            self.status_message = Some((label.to_string(), std::time::Instant::now()));
+        }
+
         // Cmd+I = toggle italic for selected nodes
         if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
@@ -680,6 +694,11 @@ impl FlowchartApp {
                 super::BgPattern::None       => "No pattern",
             };
             self.status_message = Some((name.to_string(), std::time::Instant::now()));
+        }
+
+        // Shift+T = toggle dark/light mode (full theme switch)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::T) && i.modifiers.shift && !i.modifiers.command) {
+            self.toggle_dark_mode(ctx);
         }
 
         // W = toggle focus mode (dim non-selected)

@@ -212,6 +212,10 @@ pub struct FlowchartApp {
     pub(crate) command_palette_query: String,
     /// Command palette selected row
     pub(crate) command_palette_cursor: usize,
+    /// Current color theme (dark or light)
+    pub(crate) theme: theme::Theme,
+    /// Whether dark mode is active (true = dark, false = light)
+    pub(crate) dark_mode: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,58 +228,8 @@ pub enum BgPattern {
 
 impl FlowchartApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut visuals = egui::Visuals::dark();
-
-        // Colors only used in theme setup (not global constants)
-        let crust = Color32::from_rgb(17, 17, 27);
-        let surface2 = Color32::from_rgb(88, 91, 112);
-        let lavender = Color32::from_rgb(180, 190, 254);
-
-        visuals.panel_fill = MANTLE;
-        visuals.window_fill = CANVAS_BG;
-        visuals.extreme_bg_color = crust;
-        visuals.faint_bg_color = SURFACE0;
-
-        visuals.widgets.noninteractive.bg_fill = SURFACE0;
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_SECONDARY);
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(0.5, SURFACE1);
-        visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
-
-        visuals.widgets.inactive.bg_fill = SURFACE0;
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
-        visuals.widgets.inactive.bg_stroke = Stroke::new(0.5, SURFACE1);
-        visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
-
-        visuals.widgets.hovered.bg_fill = SURFACE1;
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
-        visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
-
-        visuals.widgets.active.bg_fill = surface2;
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0, lavender);
-        visuals.widgets.active.corner_radius = CornerRadius::same(6);
-
-        visuals.widgets.open.bg_fill = SURFACE1;
-        visuals.widgets.open.fg_stroke = Stroke::new(1.0, TEXT_PRIMARY);
-        visuals.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT);
-        visuals.widgets.open.corner_radius = CornerRadius::same(6);
-
-        visuals.selection.bg_fill = ACCENT_SELECT_BG;
-        visuals.selection.stroke = Stroke::new(1.0, ACCENT);
-
-        visuals.window_corner_radius = CornerRadius::same(8);
-        visuals.window_shadow = egui::Shadow {
-            offset: [0, 4],
-            blur: 12,
-            spread: 0,
-            color: Color32::from_rgba_premultiplied(0, 0, 0, 60),
-        };
-        visuals.window_stroke = Stroke::new(1.0, SURFACE1);
-
-        visuals.override_text_color = Some(TEXT_PRIMARY);
-
-        cc.egui_ctx.set_visuals(visuals);
+        let t = theme::Theme::dark();
+        Self::apply_visuals(&cc.egui_ctx, &t, true);
 
         let mut style = (*cc.egui_ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
@@ -362,7 +316,75 @@ impl FlowchartApp {
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_cursor: 0,
+            theme: t,
+            dark_mode: true,
         }
+    }
+
+    /// Toggle between dark and light mode, re-applying egui visuals.
+    pub(crate) fn toggle_dark_mode(&mut self, ctx: &egui::Context) {
+        self.dark_mode = !self.dark_mode;
+        self.theme = if self.dark_mode {
+            theme::Theme::dark()
+        } else {
+            theme::Theme::light()
+        };
+        Self::apply_visuals(ctx, &self.theme, self.dark_mode);
+        // Update canvas background to match the theme
+        let bg = self.theme.canvas_bg;
+        self.canvas_bg = [bg.r(), bg.g(), bg.b(), bg.a()];
+        let label = if self.dark_mode { "Dark mode" } else { "Light mode" };
+        self.status_message = Some((label.to_string(), std::time::Instant::now()));
+    }
+
+    /// Apply theme colors to egui visuals.
+    fn apply_visuals(ctx: &egui::Context, t: &theme::Theme, dark: bool) {
+        let mut visuals = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+
+        visuals.panel_fill = t.mantle;
+        visuals.window_fill = t.canvas_bg;
+        visuals.extreme_bg_color = t.crust;
+        visuals.faint_bg_color = t.surface0;
+
+        visuals.widgets.noninteractive.bg_fill = t.surface0;
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, t.text_secondary);
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(0.5, t.surface1);
+        visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.inactive.bg_fill = t.surface0;
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, t.text_primary);
+        visuals.widgets.inactive.bg_stroke = Stroke::new(0.5, t.surface1);
+        visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.hovered.bg_fill = t.surface1;
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, t.text_primary);
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, t.accent);
+        visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.active.bg_fill = t.surface2;
+        visuals.widgets.active.fg_stroke = Stroke::new(1.0, t.text_primary);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.0, t.lavender);
+        visuals.widgets.active.corner_radius = CornerRadius::same(6);
+
+        visuals.widgets.open.bg_fill = t.surface1;
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0, t.text_primary);
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0, t.accent);
+        visuals.widgets.open.corner_radius = CornerRadius::same(6);
+
+        visuals.selection.bg_fill = t.accent_select_bg;
+        visuals.selection.stroke = Stroke::new(1.0, t.accent);
+
+        visuals.window_corner_radius = CornerRadius::same(8);
+        visuals.window_shadow = egui::Shadow {
+            offset: [0, 4],
+            blur: 12,
+            spread: 0,
+            color: Color32::from_rgba_premultiplied(0, 0, 0, if dark { 60 } else { 25 }),
+        };
+        visuals.window_stroke = Stroke::new(1.0, t.surface1);
+        visuals.override_text_color = Some(t.text_primary);
+
+        ctx.set_visuals(visuals);
     }
 
     pub(crate) fn draw_section_header(ui: &mut egui::Ui, label: &str) {
@@ -419,7 +441,7 @@ impl eframe::App for FlowchartApp {
 
         // Zoom change indicator: show a floating pill for 1.5s after zoom changes
         {
-            let current_zoom = self.viewport.zoom;
+            let current_zoom = self.effective_zoom();
             let now = ctx.input(|i| i.time);
             if (current_zoom - self.last_zoom).abs() > 0.001 {
                 self.zoom_indicator_time = Some(now);
@@ -818,6 +840,7 @@ impl eframe::App for FlowchartApp {
                             ("⌘= / ⌘-", "Zoom in / out"),
                             ("⌘0", "Reset zoom to 100%"),
                             ("F", "Focus mode — dim unconnected nodes"),
+                            ("⇧T", "Toggle dark/light mode"),
                             ("G", "Toggle grid"),
                             ("S", "Toggle snap · S with edge selected = cycle edge style"),
                             ("O", "Bird's-eye overview"),
