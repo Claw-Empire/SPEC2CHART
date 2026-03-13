@@ -872,6 +872,13 @@ impl FlowchartApp {
         use crate::specgraph::hrf::parse_hrf;
         match parse_hrf(&self.spec_editor_text) {
             Ok(doc) => {
+                // Apply import hints (bg-color, project title)
+                if let Some(bg) = doc.import_hints.canvas_bg {
+                    self.canvas_bg = bg;
+                }
+                if let Some(ref title) = doc.import_hints.project_title.clone() {
+                    self.project_title = title.clone();
+                }
                 // Preserve viewport (don't jump around)
                 let vp = self.viewport.clone();
                 self.document = doc;

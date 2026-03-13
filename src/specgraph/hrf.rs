@@ -140,8 +140,9 @@ use std::collections::HashMap;
 /// ### `## Config` section
 /// ```text
 /// ## Config
-/// title  = My Diagram
-/// bg     = dots          (dots / lines / crosshatch / none)
+/// title    = My Diagram     (project title watermark on canvas)
+/// bg       = dots           (dots / lines / crosshatch / none)
+/// bg-color = #1e1e2e        (canvas background color: hex or name)
 /// snap   = true
 /// grid-size = 20
 /// zoom   = 1.5           (or "fit"/"auto" to auto-fit on load)
@@ -716,6 +717,18 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     _ => "TB", // default top-to-bottom
                 };
                 doc.layout_dir = dir.to_string();
+            }
+            // canvas background color: bg-color = #1e1e2e  or  bg-color = dark
+            "bg-color" | "background-color" | "background" | "canvas-bg" | "canvas-color" => {
+                let v = val.trim();
+                let rgba = parse_hex_color(v).or_else(|| tag_to_fill_color(v).filter(|c| c[3] > 0));
+                if let Some(c) = rgba {
+                    doc.import_hints.canvas_bg = Some(c);
+                }
+            }
+            // project title watermark
+            "title" | "project-title" | "watermark" => {
+                doc.import_hints.project_title = Some(val.clone());
             }
             // layer names: layer0 = Data Tier, layer 1 = Backend
             _ if key.starts_with("layer") => {

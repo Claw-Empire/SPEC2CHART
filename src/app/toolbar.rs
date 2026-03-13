@@ -481,6 +481,12 @@ impl FlowchartApp {
                                     if let Some(true) = doc.import_hints.view_3d {
                                         self.view_mode = super::ViewMode::ThreeD;
                                     }
+                                    if let Some(bg) = doc.import_hints.canvas_bg {
+                                        self.canvas_bg = bg;
+                                    }
+                                    if let Some(ref title) = doc.import_hints.project_title.clone() {
+                                        self.project_title = title.clone();
+                                    }
                                     self.document = doc;
                                     self.selection.clear();
                                     self.history.push(&self.document);

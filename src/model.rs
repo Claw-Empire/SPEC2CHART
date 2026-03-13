@@ -697,6 +697,10 @@ pub struct ImportHints {
     pub view_3d: Option<bool>,
     /// Auto-fit the viewport to show all nodes after import
     pub auto_fit: bool,
+    /// Override canvas background color (RGBA). None = keep current.
+    pub canvas_bg: Option<[u8; 4]>,
+    /// Override project title watermark. None = keep current.
+    pub project_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
