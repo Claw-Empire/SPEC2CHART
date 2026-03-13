@@ -801,6 +801,41 @@ impl FlowchartApp {
                 });
                 ui.add_space(4.0);
 
+                // Camera preset buttons (3D mode only)
+                if self.view_mode == super::ViewMode::ThreeD {
+                    ui.horizontal(|ui| {
+                        // Each preset: (label, yaw, pitch)
+                        let presets: &[(&str, f32, f32, &str)] = &[
+                            ("Iso",  -0.6,  0.5, "Isometric — classic 3D view"),
+                            ("Top",   0.0,  1.55, "Top-down overhead"),
+                            ("Front", 0.0,  0.05, "Front elevation"),
+                            ("Side",  1.57, 0.05, "Right side elevation"),
+                        ];
+                        let btn_w = 40.0_f32;
+                        let btn_h = 22.0_f32;
+                        for (label, yaw, pitch, hint) in presets {
+                            let active = (self.camera3d.yaw - yaw).abs() < 0.08
+                                      && (self.camera3d.pitch - pitch).abs() < 0.08;
+                            let text = if active {
+                                egui::RichText::new(*label).size(10.5).strong().color(self.theme.accent)
+                            } else {
+                                egui::RichText::new(*label).size(10.5).color(self.theme.text_secondary)
+                            };
+                            if ui.add_sized([btn_w, btn_h], egui::Button::new(text)
+                                .fill(if active { self.theme.surface1 } else { self.theme.surface0 })
+                            ).on_hover_text(*hint).clicked() {
+                                self.camera3d.yaw = *yaw;
+                                self.camera3d.pitch = *pitch;
+                                self.status_message = Some((
+                                    format!("Camera: {} view", label),
+                                    std::time::Instant::now(),
+                                ));
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.show_grid, "");
                     ui.label(egui::RichText::new("Grid").size(12.0).color(self.theme.text_secondary));
