@@ -310,6 +310,53 @@ impl FlowchartApp {
                     }
                 });
                 ui.add_space(2.0);
+                // Spec cheatsheet toggle
+                if ui
+                    .add_sized(
+                        egui::vec2(ui.available_width(), 24.0),
+                        egui::Button::new(
+                            egui::RichText::new(if self.show_spec_cheatsheet {
+                                "▼ Spec Reference"
+                            } else {
+                                "▶ Spec Reference"
+                            })
+                            .size(11.0)
+                            .color(self.theme.text_dim),
+                        )
+                        .fill(Color32::TRANSPARENT),
+                    )
+                    .on_hover_text("Show HRF spec syntax reference")
+                    .clicked()
+                {
+                    self.show_spec_cheatsheet = !self.show_spec_cheatsheet;
+                }
+                if self.show_spec_cheatsheet {
+                    ui.add_space(2.0);
+                    ui.group(|ui| {
+                        ui.set_width(ui.available_width());
+                        let entries: &[(&str, &str)] = &[
+                            ("Node shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector}"),
+                            ("3D layers", "## Layer 0 / ## Layer 1 / {z:N}"),
+                            ("Tags", "{critical} {warning} {ok} {info}"),
+                            ("Style", "{fill:blue} {bold} {italic} {shadow} {dashed-border}"),
+                            ("Size", "{w:200} {h:100} {r:8} {border:2}"),
+                            ("Align", "{align:left/right} {valign:top/bottom}"),
+                            ("Position", "{pinned} {x:100} {y:200}"),
+                            ("Icon", "{icon:🔒}"),
+                            ("Special", "{entity} {text}"),
+                            ("Edge", "{dashed} {glow} {animated} {thick} {ortho}"),
+                            ("Edge", "{arrow:open/circle/none} {bend:0.3}"),
+                            ("Edge", "{color:blue} {from:label} {to:label}"),
+                            ("Cardinality", "{c-src:1} {c-tgt:0..N}"),
+                        ];
+                        for (section, tags) in entries {
+                            ui.add_space(2.0);
+                            ui.label(egui::RichText::new(*section).size(9.5).color(self.theme.text_secondary));
+                            ui.label(egui::RichText::new(*tags).size(9.0).color(self.theme.text_dim).monospace());
+                        }
+                    });
+                }
+                ui.add_space(2.0);
                 // LLM Settings button
                 if ui
                     .add_sized(
@@ -724,7 +771,7 @@ impl FlowchartApp {
                 let r = response.rect;
                 painter.circle_filled(r.center(), size / 2.0, fill);
                 if is_selected {
-                    painter.circle_stroke(r.center(), size / 2.0, Stroke::new(2.0, Color32::WHITE));
+                    painter.circle_stroke(r.center(), size / 2.0, Stroke::new(2.0, self.theme.text_primary));
                 }
                 if response.clicked() {
                     self.selected_sticky_color = *color;

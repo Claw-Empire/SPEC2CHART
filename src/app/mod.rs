@@ -123,6 +123,7 @@ pub struct FlowchartApp {
     pub(crate) pending_fit: bool,
     pub(crate) llm_config: specgraph::LlmConfig,
     pub(crate) show_llm_settings: bool,
+    pub(crate) show_spec_cheatsheet: bool,
     pub(crate) style_clipboard: Option<crate::model::NodeStyle>,
     /// Recently used fill colors (most recent first, max 10)
     pub(crate) recent_colors: Vec<[u8; 4]>,
@@ -145,6 +146,7 @@ pub struct FlowchartApp {
     /// Alignment guide lines computed during node drag: (is_horizontal, canvas_coord)
     pub(crate) alignment_guides: Vec<(bool, f32)>,
     /// User-placed ruler guides: (is_vertical, canvas_coordinate). Cleared with Cmd+Shift+G.
+    #[allow(dead_code)]
     pub(crate) ruler_guides: Vec<(bool, f32)>,
     /// When true, hide all panels for a clean presentation view (toggle with F)
     pub(crate) presentation_mode: bool,
@@ -267,6 +269,7 @@ impl FlowchartApp {
             pending_fit: false,
             llm_config: specgraph::LlmConfig::default(),
             show_llm_settings: false,
+            show_spec_cheatsheet: false,
             style_clipboard: None,
             recent_colors: Vec::new(),
             show_search: false,
