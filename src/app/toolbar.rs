@@ -415,6 +415,7 @@ impl FlowchartApp {
                 let example_specs: &[(&str, &str)] = &[
                     ("Flow", include_str!("../../assets/examples/flowchart.spec")),
                     ("3D Arch", include_str!("../../assets/examples/architecture_3d.spec")),
+                    ("Cloud", include_str!("../../assets/examples/cloud_arch.spec")),
                     ("ER", include_str!("../../assets/examples/er_diagram.spec")),
                     ("Network", include_str!("../../assets/examples/network.spec")),
                 ];
@@ -454,26 +455,29 @@ impl FlowchartApp {
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
                         let entries: &[(&str, &str)] = &[
-                            ("Sections", "## Nodes / ## Flow / ## Notes"),
+                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups"),
                             ("3D layers", "## Layer 0: Database / ## Layer 1: Backend"),
-                            ("3D layers", "{z:N} (explicit px) / {layer:N} (N×120)"),
+                            ("3D layers", "{z:N} (px) / {layer:N} (N×120px)"),
                             ("Comments", "// this line is ignored"),
-                            ("Node shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector}"),
-                            ("Tags", "{critical} {warning} {ok} {info}"),
-                            ("Style", "{fill:blue} {bold} {italic} {shadow} {gradient} {dashed-border}"),
+                            ("Shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector}"),
+                            ("Semantic presets", "{server} {database} {cloud} {user} {service}"),
+                            ("Semantic presets", "{queue} {cache} {internet} {decision} {start} {end}"),
+                            ("Status tags", "{critical} {warning} {ok} {info}"),
+                            ("Color", "{fill:blue/#rrggbb} {border-color:red} {text-color:white}"),
+                            ("Style", "{bold} {italic} {shadow} {gradient} {dashed-border}"),
                             ("Opacity", "{opacity:50} (50%) or {opacity:0.5}"),
-                            ("Size", "{w:200} {h:100} {r:8} {border:2}"),
+                            ("Size", "{size:200x80} or {w:200} {h:100} {r:8} {border:2}"),
+                            ("Position", "{pos:100,200} (pinned) or {x:100} {y:200} {pinned}"),
                             ("Align", "{align:left/right} {valign:top/bottom}"),
-                            ("Position", "{pinned} {x:100} {y:200}"),
-                            ("Icon/Group", "{icon:🔒} {frame}"),
-                            ("Special", "{entity} {text}"),
-                            ("Desc (indent)", "  Description line under node"),
-                            ("Edge", "{dashed} {glow} {animated} {thick} {ortho}"),
-                            ("Edge", "{arrow:open/circle/none} {bend:0.3}"),
-                            ("Edge", "{color:blue} {from:label} {to:label}"),
+                            ("Icon/Frame", "{icon:🔒} {frame}"),
+                            ("Tooltip", "{tooltip:description text}  (or indent lines below)"),
+                            ("Special", "{entity} {text} {locked} {url:https://...}"),
+                            ("Edge flow", "{dashed} {glow} {animated} {thick} {ortho}"),
+                            ("Edge style", "{arrow:open/circle/none} {bend:0.3} {weight:2}"),
+                            ("Edge color", "{color:blue/#rrggbb} {from:label} {to:label}"),
                             ("Cardinality", "{c-src:1} {c-tgt:0..N}"),
-                            ("Ports", "{src-port:top/bottom/left/right} {tgt-port:...}"),
-                            ("Misc", "{locked} {url:https://...}"),
+                            ("Ports", "{src-port:top/l/r/bottom} {tgt-port:...}"),
+                            ("Arrow aliases", "-> (short) / <-- (reverse) / <-> (bidir)"),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);
