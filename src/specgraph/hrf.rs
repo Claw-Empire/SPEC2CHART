@@ -16,9 +16,18 @@ use std::collections::HashMap;
 ///   Description of this node. Can span multiple indented lines.
 ///   More detail here.
 /// - [id] Label text {diamond}
-/// - [id] Label text {circle} {z:120}       ← 3D layer offset
+/// - [id] Label text {circle} {z:120}       ← 3D layer offset (explicit)
 /// - [id] Label text {critical}              ← tag badge
-/// - [id] Label text {pinned}                ← pinned to canvas
+/// - [id] Label text {pinned} {x:100} {y:200} ← pinned to canvas position
+///
+/// ## Layer 0                               ← 3D layer sections (z = 0)
+/// - [db] Database {circle}                 ← all nodes in this section get z=0
+///
+/// ## Layer 1                               ← z = 1 × 120 = 120
+/// - [api] API Service
+///
+/// ## Layer 120                             ← explicit z value (> 10 = raw z)
+/// - [frontend] Web App
 ///
 /// ## Flow
 /// id "label" --> id
@@ -92,10 +101,34 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             last_node_id = None;
             let header = trimmed[3..].trim().to_lowercase();
             section = match header.as_str() {
-                "nodes" | "node" | "components" => Section::Nodes,
+                "nodes" | "node" | "components" => Section::Nodes { default_z: 0.0 },
                 "flow" | "flows" | "edges" | "connections" => Section::Flow,
                 "notes" | "note" | "stickies" => Section::Notes,
-                _ => Section::None,
+                _ => {
+                    // Check for "Layer N" or "Layer N — description" patterns
+                    // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
+                    // "layer z:120", "layer z=120" → z = 120 (explicit)
+                    if header.starts_with("layer") {
+                        let after = header[5..].trim();
+                        let z = if after.is_empty() {
+                            0.0_f32
+                        } else {
+                            // Strip "— description" and parse the number
+                            let num_part = after.split('—').next().unwrap_or(after).trim();
+                            // Support "z:120" or "z=120" or just "1" (layer index)
+                            let num_str = num_part.trim_start_matches("z:").trim_start_matches("z=");
+                            if let Ok(v) = num_str.parse::<f32>() {
+                                // Heuristic: if > 10 treat as raw z offset, otherwise as layer index
+                                if v <= 10.0 { v * 120.0 } else { v }
+                            } else {
+                                0.0
+                            }
+                        };
+                        Section::Nodes { default_z: z }
+                    } else {
+                        Section::None
+                    }
+                }
             };
             continue;
         }
@@ -114,11 +147,15 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
 
         match section {
-            Section::Nodes => {
+            Section::Nodes { default_z } => {
                 if trimmed.starts_with("- ") {
                     // New node definition
                     let stripped = &trimmed[2..];
-                    let (id, node) = parse_node_line(stripped, line_num)?;
+                    let (id, mut node) = parse_node_line(stripped, line_num)?;
+                    // Apply section default z if node doesn't have an explicit {z:N} tag
+                    if node.z_offset == 0.0 && default_z != 0.0 {
+                        node.z_offset = default_z;
+                    }
                     last_node_id = Some(node.id);
                     id_map.insert(id, node.id);
                     doc.nodes.push(node);
@@ -191,6 +228,7 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
         .collect();
 
     // Nodes section (shapes + entities + text)
+    // Group by z_offset: if multiple layers exist, emit ## Layer z=N sections.
     let shape_nodes: Vec<&Node> = doc
         .nodes
         .iter()
@@ -198,106 +236,41 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
         .collect();
 
     if !shape_nodes.is_empty() {
-        out.push_str("## Nodes\n");
-        for node in &shape_nodes {
-            let id = id_map.get(&node.id).cloned().unwrap_or_default();
-            match &node.kind {
-                NodeKind::Shape { shape, label, description } => {
-                    let shape_tag = match shape {
-                        NodeShape::Rectangle => "",
-                        NodeShape::RoundedRect => "",
-                        NodeShape::Diamond => " {diamond}",
-                        NodeShape::Circle => " {circle}",
-                        NodeShape::Parallelogram => " {parallelogram}",
-                        NodeShape::Hexagon => " {hexagon}",
-                        NodeShape::Connector => " {connector}",
-                    };
-                    let z_tag = if node.z_offset != 0.0 {
-                        format!(" {{z:{}}}", node.z_offset)
-                    } else { String::new() };
-                    let tag_tag = match node.tag {
-                        Some(NodeTag::Critical) => " {critical}",
-                        Some(NodeTag::Warning) => " {warning}",
-                        Some(NodeTag::Ok) => " {ok}",
-                        Some(NodeTag::Info) => " {info}",
-                        None => "",
-                    };
-                    let pin_tag = if node.pinned {
-                        format!(" {{pinned}} {{x:{:.0}}} {{y:{:.0}}}", node.position[0], node.position[1])
-                    } else { String::new() };
-                    let fill_tag = fill_color_name(node.style.fill_color)
-                        .map(|n| format!(" {{fill:{}}}", n))
-                        .unwrap_or_default();
-                    let w_tag = if node.size[0] != 160.0 {
-                        format!(" {{w:{}}}", node.size[0])
-                    } else { String::new() };
-                    let h_tag = if node.size[1] != 80.0 {
-                        format!(" {{h:{}}}", node.size[1])
-                    } else { String::new() };
-                    let icon_tag = if !node.icon.is_empty() {
-                        format!(" {{icon:{}}}", node.icon)
-                    } else { String::new() };
-                    let shadow_tag = if node.style.shadow { " {shadow}" } else { "" };
-                    let bold_tag = if node.style.bold { " {bold}" } else { "" };
-                    let italic_tag = if node.style.italic { " {italic}" } else { "" };
-                    let dashed_border_tag = if node.style.border_dashed { " {dashed-border}" } else { "" };
-                    let radius_tag = if (node.style.corner_radius - 6.0).abs() > 0.1 {
-                        format!(" {{r:{}}}", node.style.corner_radius)
-                    } else { String::new() };
-                    let border_tag = if (node.style.border_width - 1.5).abs() > 0.1 {
-                        format!(" {{border:{}}}", node.style.border_width)
-                    } else { String::new() };
-                    let align_tag = match node.style.text_align {
-                        crate::model::TextAlign::Left => " {align:left}",
-                        crate::model::TextAlign::Right => " {align:right}",
-                        crate::model::TextAlign::Center => "",
-                    };
-                    let valign_tag = match node.style.text_valign {
-                        crate::model::TextVAlign::Top => " {valign:top}",
-                        crate::model::TextVAlign::Bottom => " {valign:bottom}",
-                        crate::model::TextVAlign::Middle => "",
-                    };
-                    out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
-                        id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
-                        shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
-                        border_tag, align_tag, valign_tag, w_tag, h_tag));
-                    if !description.is_empty() {
-                        for desc_line in description.lines() {
-                            out.push_str(&format!("  {}\n", desc_line));
-                        }
-                    }
-                }
-                NodeKind::Entity { name, attributes } => {
-                    let z_tag = if node.z_offset != 0.0 {
-                        format!(" {{z:{}}}", node.z_offset)
-                    } else { String::new() };
-                    out.push_str(&format!("- [{}] {} {{entity}}{}\n", id, name, z_tag));
-                    for attr in attributes {
-                        let mut tags = Vec::new();
-                        if attr.is_primary_key { tags.push("PK"); }
-                        if attr.is_foreign_key { tags.push("FK"); }
-                        let tag_str = if tags.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" [{}]", tags.join(", "))
-                        };
-                        if attr.attr_type.is_empty() {
-                            out.push_str(&format!("  {}{}\n", attr.name, tag_str));
-                        } else {
-                            out.push_str(&format!("  {} ({}){}\n", attr.name, attr.attr_type, tag_str));
-                        }
-                    }
-                }
-                NodeKind::Text { content } => {
-                    let z_tag = if node.z_offset != 0.0 {
-                        format!(" {{z:{}}}", node.z_offset)
-                    } else { String::new() };
-                    out.push_str(&format!("- [{}] {} {{text}}{}\n", id, content, z_tag));
-                }
-                _ => {}
+        // Collect distinct z-offsets (preserve insertion order via Vec dedup)
+        let mut z_groups: Vec<f32> = Vec::new();
+        for n in &shape_nodes {
+            let z = n.z_offset;
+            if !z_groups.iter().any(|&g| (g - z).abs() < 0.5) {
+                z_groups.push(z);
             }
         }
-        out.push('\n');
+        z_groups.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let use_layers = z_groups.len() > 1;
+
+        for section_z in &z_groups {
+            let group: Vec<&Node> = shape_nodes
+                .iter()
+                .copied()
+                .filter(|n| (n.z_offset - section_z).abs() < 0.5)
+                .collect();
+
+            if use_layers {
+                out.push_str(&format!("## Layer {}\n", section_z));
+            } else {
+                out.push_str("## Nodes\n");
+            }
+
+            for node in group {
+                let id = id_map.get(&node.id).cloned().unwrap_or_default();
+                // Only emit z_tag if the node's z differs from the section default
+                let z_tag = if (node.z_offset - section_z).abs() > 0.5 {
+                    format!(" {{z:{}}}", node.z_offset)
+                } else { String::new() };
+                export_node_to_hrf(node, &id, &z_tag, &mut out);
+            }
+            out.push('\n');
+        }
     }
 
     // Flow section
@@ -391,7 +364,8 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
 #[derive(Clone, Copy)]
 enum Section {
     None,
-    Nodes,
+    /// `default_z` is applied to any node in this section that doesn't have an explicit {z:N} tag.
+    Nodes { default_z: f32 },
     Flow,
     Notes,
 }
@@ -847,6 +821,97 @@ fn tag_to_shape(tag: &str) -> NodeShape {
     }
 }
 
+/// Format a single non-sticky node into HRF text and append to `out`.
+/// `z_tag` is pre-computed so callers can suppress it when a section already implies the z.
+fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
+    match &node.kind {
+        NodeKind::Shape { shape, label, description } => {
+            let shape_tag = match shape {
+                NodeShape::Rectangle => "",
+                NodeShape::RoundedRect => "",
+                NodeShape::Diamond => " {diamond}",
+                NodeShape::Circle => " {circle}",
+                NodeShape::Parallelogram => " {parallelogram}",
+                NodeShape::Hexagon => " {hexagon}",
+                NodeShape::Connector => " {connector}",
+            };
+            let tag_tag = match node.tag {
+                Some(NodeTag::Critical) => " {critical}",
+                Some(NodeTag::Warning) => " {warning}",
+                Some(NodeTag::Ok) => " {ok}",
+                Some(NodeTag::Info) => " {info}",
+                None => "",
+            };
+            let pin_tag = if node.pinned {
+                format!(" {{pinned}} {{x:{:.0}}} {{y:{:.0}}}", node.position[0], node.position[1])
+            } else { String::new() };
+            let fill_tag = fill_color_name(node.style.fill_color)
+                .map(|n| format!(" {{fill:{}}}", n))
+                .unwrap_or_default();
+            let w_tag = if node.size[0] != 160.0 {
+                format!(" {{w:{}}}", node.size[0])
+            } else { String::new() };
+            let h_tag = if node.size[1] != 80.0 {
+                format!(" {{h:{}}}", node.size[1])
+            } else { String::new() };
+            let icon_tag = if !node.icon.is_empty() {
+                format!(" {{icon:{}}}", node.icon)
+            } else { String::new() };
+            let shadow_tag = if node.style.shadow { " {shadow}" } else { "" };
+            let bold_tag = if node.style.bold { " {bold}" } else { "" };
+            let italic_tag = if node.style.italic { " {italic}" } else { "" };
+            let dashed_border_tag = if node.style.border_dashed { " {dashed-border}" } else { "" };
+            let radius_tag = if (node.style.corner_radius - 6.0).abs() > 0.1 {
+                format!(" {{r:{}}}", node.style.corner_radius)
+            } else { String::new() };
+            let border_tag = if (node.style.border_width - 1.5).abs() > 0.1 {
+                format!(" {{border:{}}}", node.style.border_width)
+            } else { String::new() };
+            let align_tag = match node.style.text_align {
+                crate::model::TextAlign::Left => " {align:left}",
+                crate::model::TextAlign::Right => " {align:right}",
+                crate::model::TextAlign::Center => "",
+            };
+            let valign_tag = match node.style.text_valign {
+                crate::model::TextVAlign::Top => " {valign:top}",
+                crate::model::TextVAlign::Bottom => " {valign:bottom}",
+                crate::model::TextVAlign::Middle => "",
+            };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+                id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
+                shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
+                border_tag, align_tag, valign_tag, w_tag, h_tag));
+            if !description.is_empty() {
+                for desc_line in description.lines() {
+                    out.push_str(&format!("  {}\n", desc_line));
+                }
+            }
+        }
+        NodeKind::Entity { name, attributes } => {
+            out.push_str(&format!("- [{}] {} {{entity}}{}\n", id, name, z_tag));
+            for attr in attributes {
+                let mut tags = Vec::new();
+                if attr.is_primary_key { tags.push("PK"); }
+                if attr.is_foreign_key { tags.push("FK"); }
+                let tag_str = if tags.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", tags.join(", "))
+                };
+                if attr.attr_type.is_empty() {
+                    out.push_str(&format!("  {}{}\n", attr.name, tag_str));
+                } else {
+                    out.push_str(&format!("  {} ({}){}\n", attr.name, attr.attr_type, tag_str));
+                }
+            }
+        }
+        NodeKind::Text { content } => {
+            out.push_str(&format!("- [{}] {} {{text}}{}\n", id, content, z_tag));
+        }
+        _ => {}
+    }
+}
+
 fn parse_cardinality(s: &str) -> Cardinality {
     match s {
         "1" => Cardinality::ExactlyOne,
@@ -987,10 +1052,18 @@ a "serves" --> b {dashed}
 "#;
         let doc = parse_hrf(input).unwrap();
         let exported = export_hrf(&doc, "Export Test");
-        assert!(exported.contains("{z:50}"));
+        // With multi-layer export, z:50 is expressed as a ## Layer 50 section
+        // (rather than inline {z:50} tags on each node).
+        assert!(exported.contains("## Layer 50") || exported.contains("{z:50}"),
+            "expected z:50 info in: {}", exported);
         assert!(exported.contains("{critical}"));
         assert!(exported.contains("{connector}"));
         assert!(exported.contains("{dashed}"));
+        // Verify the layer section round-trips correctly
+        let doc2 = parse_hrf(&exported).unwrap();
+        let server = doc2.nodes.iter().find(|n| n.display_label() == "Server").expect("Server node");
+        assert!((server.z_offset - 50.0).abs() < 1.0,
+            "Server z_offset should be 50 after round-trip, got {}", server.z_offset);
     }
 
     #[test]
@@ -1158,6 +1231,49 @@ b "next" --> c
         assert!(exported.contains("## Nodes"));
         assert!(exported.contains("## Flow"));
         assert!(exported.contains("-->"));
+    }
+
+    #[test]
+    fn test_layer_sections_3d() {
+        // ## Layer N sections should assign z-offset to all nodes in that section
+        let input = r#"
+# Layered Architecture
+
+## Layer 0
+- [db] Database {circle}
+- [cache] Redis Cache
+
+## Layer 1
+- [api] API Service
+- [auth] Auth Service
+
+## Layer 2
+- [web] Web Frontend {parallelogram}
+
+## Flow
+api --> db
+auth --> db
+web --> api
+"#;
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 5);
+
+        let db = doc.nodes.iter().find(|n| n.display_label() == "Database").unwrap();
+        let api = doc.nodes.iter().find(|n| n.display_label() == "API Service").unwrap();
+        let web = doc.nodes.iter().find(|n| n.display_label() == "Web Frontend").unwrap();
+
+        assert!((db.z_offset - 0.0).abs() < 1.0, "Layer 0 should give z=0, got {}", db.z_offset);
+        assert!((api.z_offset - 120.0).abs() < 1.0, "Layer 1 should give z=120, got {}", api.z_offset);
+        assert!((web.z_offset - 240.0).abs() < 1.0, "Layer 2 should give z=240, got {}", web.z_offset);
+
+        // Round-trip: multi-layer export should use ## Layer sections
+        let exported = export_hrf(&doc, "Layered Architecture");
+        assert!(exported.contains("## Layer"), "expected layer sections in: {}", exported);
+
+        let doc2 = parse_hrf(&exported).unwrap();
+        let api2 = doc2.nodes.iter().find(|n| n.display_label() == "API Service").unwrap();
+        assert!((api2.z_offset - 120.0).abs() < 1.0,
+            "API z_offset after round-trip: {}", api2.z_offset);
     }
 
     #[test]
