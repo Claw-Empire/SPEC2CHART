@@ -150,6 +150,7 @@ use std::collections::HashMap;
 /// flow   = LR            (layout direction: LR / TB / RL / BT)
 /// view   = 3d            (open in 3D view on import)
 /// camera = iso           (preset: iso / top / front / side)
+/// auto-z = true          (auto-assign z-offsets from topological layers)
 /// camera_yaw   = -0.6    (raw yaw in radians, overridden by camera preset)
 /// camera_pitch =  0.5    (raw pitch in radians)
 /// layer0 = Database      (display name for 3D layer 0)
@@ -719,6 +720,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 };
                 doc.layout_dir = dir.to_string();
             }
+            // auto-z: automatically assign z offsets from topological layer ordering
+            "auto-z" | "auto_z" | "z-auto" | "auto-layers" | "3d-auto" => {
+                match val.to_lowercase().as_str() {
+                    "true" | "yes" | "on" | "1" => { doc.import_hints.auto_z = true; }
+                    _ => {}
+                }
+            }
             // canvas background color: bg-color = #1e1e2e  or  bg-color = dark
             "bg-color" | "background-color" | "background" | "canvas-bg" | "canvas-color" => {
                 let v = val.trim();
@@ -746,6 +754,37 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     // Auto-layout: topological / hierarchical placement
     super::layout::hierarchical_layout(&mut doc);
+
+    // auto-z: assign z-offsets from topological layer ordering (only for nodes at z=0)
+    if doc.import_hints.auto_z {
+        use std::collections::{HashMap as HM, VecDeque};
+        let n = doc.nodes.len();
+        let ni: HM<NodeId, usize> = doc.nodes.iter().enumerate().map(|(i, nd)| (nd.id, i)).collect();
+        let mut in_deg: Vec<i32> = vec![0; n];
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for e in &doc.edges {
+            if let (Some(&f), Some(&t)) = (ni.get(&e.source.node_id), ni.get(&e.target.node_id)) {
+                if f != t { adj[f].push(t); in_deg[t] += 1; }
+            }
+        }
+        let mut topo_layer: Vec<i32> = vec![0; n];
+        let mut queue: VecDeque<usize> = (0..n).filter(|&i| in_deg[i] == 0).collect();
+        let mut rem = in_deg.clone();
+        while let Some(u) = queue.pop_front() {
+            for &v in &adj[u] {
+                let c = topo_layer[u] + 1;
+                if c > topo_layer[v] { topo_layer[v] = c; }
+                rem[v] -= 1;
+                if rem[v] == 0 { queue.push_back(v); }
+            }
+        }
+        const Z_SPACING: f32 = 120.0;
+        for (i, node) in doc.nodes.iter_mut().enumerate() {
+            if node.z_offset == 0.0 && !node.is_frame {
+                node.z_offset = topo_layer[i] as f32 * Z_SPACING;
+            }
+        }
+    }
 
     // Create frame nodes for each group (after layout so positions are known)
     for (gid, label, fill_color, member_ids) in groups {
@@ -3096,5 +3135,36 @@ b -> a  // return path; https://example.com is not a comment stop
         let ba = doc.edges.iter().any(|e| e.source.node_id == b.id && e.target.node_id == a.id);
         assert!(ab, "expected a->b edge");
         assert!(ba, "expected b->a edge (URL in inline comment not swallowed)");
+    }
+
+    #[test]
+    fn test_auto_z_assigns_z_offsets() {
+        let input = r#"
+# Auto-Z Test
+
+## Config
+auto-z = true
+view   = 3d
+
+## Nodes
+- [client] Client {user}
+- [api]    API Service
+- [db]     Database {database}
+
+## Flow
+client -> api
+api    -> db
+"#;
+        let doc = parse_hrf(input).expect("should parse auto-z spec");
+        assert!(doc.import_hints.auto_z, "auto_z hint should be set");
+        let client = doc.nodes.iter().find(|n| n.display_label() == "Client").unwrap();
+        let api    = doc.nodes.iter().find(|n| n.display_label() == "API Service").unwrap();
+        let db     = doc.nodes.iter().find(|n| n.display_label() == "Database").unwrap();
+        // client has no incoming edges → layer 0 → z=0
+        assert_eq!(client.z_offset, 0.0, "client should be at z=0");
+        // api has 1 predecessor → layer 1 → z=120
+        assert_eq!(api.z_offset, 120.0, "api should be at z=120");
+        // db has 2 predecessors → layer 2 → z=240
+        assert_eq!(db.z_offset, 240.0, "db should be at z=240");
     }
 }

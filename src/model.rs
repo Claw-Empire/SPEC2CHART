@@ -701,6 +701,8 @@ pub struct ImportHints {
     pub canvas_bg: Option<[u8; 4]>,
     /// Override project title watermark. None = keep current.
     pub project_title: Option<String>,
+    /// Automatically assign z-offsets from topological layer ordering after import.
+    pub auto_z: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
