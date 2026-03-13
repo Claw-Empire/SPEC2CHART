@@ -404,6 +404,22 @@ impl FlowchartApp {
                             } else { Some(&self.llm_config) };
                             match specgraph::import_auto(&text, llm_cfg) {
                                 Ok(doc) => {
+                                    // Apply ## Config import hints before replacing document
+                                    if let Some(bg) = doc.import_hints.bg_pattern.as_deref() {
+                                        self.bg_pattern = match bg {
+                                            "dots" | "dot" => super::BgPattern::Dots,
+                                            "lines" | "line" | "grid" => super::BgPattern::Lines,
+                                            "crosshatch" | "cross" | "hash" => super::BgPattern::Crosshatch,
+                                            "none" | "off" | "blank" => super::BgPattern::None,
+                                            _ => self.bg_pattern,
+                                        };
+                                    }
+                                    if let Some(snap) = doc.import_hints.snap {
+                                        self.snap_to_grid = snap;
+                                    }
+                                    if let Some(gs) = doc.import_hints.grid_size {
+                                        self.grid_size = gs;
+                                    }
                                     self.document = doc;
                                     self.selection.clear();
                                     self.history.push(&self.document);
@@ -472,7 +488,8 @@ impl FlowchartApp {
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
                         let entries: &[(&str, &str)] = &[
-                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps"),
+                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps / ## Config"),
+                            ("## Config", "bg = dots | snap = true | grid-size = 20 | zoom = 1.5"),
                             ("## Palette", "brand = #1e3a5f  →  use {fill:brand} anywhere"),
                             ("Inline edges", "- [api] Service → db, cache {dashed}"),
                             ("## Steps", "1. Step label {diamond}  (sequential flowchart)"),

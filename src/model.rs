@@ -674,6 +674,20 @@ impl Selection {
 /// All four port sides, useful for iterating over every port on a node.
 pub const ALL_SIDES: [PortSide; 4] = [PortSide::Top, PortSide::Bottom, PortSide::Left, PortSide::Right];
 
+/// Optional import-time hints from `## Config` section.
+/// Never serialized — only used during the import pipeline.
+#[derive(Debug, Clone, Default)]
+pub struct ImportHints {
+    /// Background pattern to apply: "dots", "lines", "crosshatch", "none"
+    pub bg_pattern: Option<String>,
+    /// Enable snap-to-grid
+    pub snap: Option<bool>,
+    /// Grid size in canvas units
+    pub grid_size: Option<f32>,
+    /// Initial zoom level (1.0 = 100%)
+    pub zoom: Option<f32>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FlowchartDocument {
     pub title: String,
@@ -683,6 +697,9 @@ pub struct FlowchartDocument {
     /// Optional human-readable names for 3D layers, keyed by layer index (0=z0, 1=z120, etc.)
     #[serde(default)]
     pub layer_names: HashMap<i32, String>,
+    /// Import-time hints from `## Config` — not serialized, applied on import only.
+    #[serde(skip)]
+    pub import_hints: ImportHints,
 }
 
 impl FlowchartDocument {

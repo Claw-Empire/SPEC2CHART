@@ -121,6 +121,19 @@ use std::collections::HashMap;
 ///   node_id1, node_id2, node_id3
 /// ```
 /// Creates a frame node bounding all listed member nodes (after auto-layout).
+///
+/// ### `## Config` section
+/// ```text
+/// ## Config
+/// title = My Diagram
+/// bg = dots
+/// snap = true
+/// grid-size = 20
+/// zoom = 1.5
+/// layer0 = Database
+/// layer1 = API
+/// ```
+/// Import-time viewport hints applied when the spec is loaded into the app.
 /// Pre-scan `## Palette` sections and return a palette map + pre-expanded input string
 /// where `{fill:name}` and `{color:name}` are replaced with `{fill:#hex}` / `{color:#hex}`.
 fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
@@ -470,6 +483,27 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         match key.as_str() {
             "title" => { doc.title = val.clone(); }
             "description" | "desc" => { doc.description = val.clone(); }
+            // import hints — applied by the toolbar after import
+            "bg" | "background" | "bg-pattern" => {
+                doc.import_hints.bg_pattern = Some(val.to_lowercase());
+            }
+            "snap" | "snap-to-grid" | "snap_to_grid" => {
+                doc.import_hints.snap = match val.to_lowercase().as_str() {
+                    "true" | "on" | "yes" | "1" => Some(true),
+                    "false" | "off" | "no" | "0" => Some(false),
+                    _ => None,
+                };
+            }
+            "grid-size" | "grid_size" | "grid" => {
+                if let Ok(sz) = val.trim().parse::<f32>() {
+                    doc.import_hints.grid_size = Some(sz.clamp(5.0, 200.0));
+                }
+            }
+            "zoom" | "initial-zoom" | "scale" => {
+                if let Ok(z) = val.trim().parse::<f32>() {
+                    doc.import_hints.zoom = Some(z.clamp(0.1, 4.0));
+                }
+            }
             // layer names: layer0 = Data Tier, layer 1 = Backend
             _ if key.starts_with("layer") => {
                 let num_part = key.trim_start_matches("layer").trim();
