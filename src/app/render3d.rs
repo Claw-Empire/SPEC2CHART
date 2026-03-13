@@ -1685,8 +1685,36 @@ impl FlowchartApp {
         for layer in 1..=max_layer {
             let z = layer as f32 * Z_SPACING;
             let node_count = z_layers.values().filter(|&&l| l == layer).count();
-            let label_pos =
-                [target[0] - grid_range, target[1] - grid_range, z];
+
+            // Draw a subtle transparent grid plane for each non-zero layer
+            // to help visualize the 3D separation.
+            if node_count > 0 {
+                let plane_alpha = 8u8; // very transparent
+                let plane_color = self.theme.accent.gamma_multiply(plane_alpha as f32 / 255.0);
+                let edge_alpha = 20u8;
+                let edge_color = self.theme.accent.gamma_multiply(edge_alpha as f32 / 255.0);
+
+                // Draw 4 grid lines as a bounding frame on this plane
+                let plane_corners = [
+                    [target[0] - grid_range * 0.7, target[1] - grid_range * 0.7, z],
+                    [target[0] + grid_range * 0.7, target[1] - grid_range * 0.7, z],
+                    [target[0] + grid_range * 0.7, target[1] + grid_range * 0.7, z],
+                    [target[0] - grid_range * 0.7, target[1] + grid_range * 0.7, z],
+                ];
+                let projected_corners: Vec<Option<Pos2>> = plane_corners.iter()
+                    .map(|&p| self.camera3d.project(p, screen_center, screen_size).map(|(s, _)| s))
+                    .collect();
+                // Draw frame lines
+                for i in 0..4 {
+                    let next = (i + 1) % 4;
+                    if let (Some(a), Some(b)) = (projected_corners[i], projected_corners[next]) {
+                        painter.line_segment([a, b], Stroke::new(0.5, edge_color));
+                    }
+                }
+                let _ = plane_color; // used conceptually, polygon fill not shown for performance
+            }
+
+            let label_pos = [target[0] - grid_range, target[1] - grid_range, z];
             if let Some((screen_pos, _)) = self
                 .camera3d
                 .project(label_pos, screen_center, screen_size)
