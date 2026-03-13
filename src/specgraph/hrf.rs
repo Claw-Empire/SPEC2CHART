@@ -628,7 +628,26 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     } else { t }
                 };
                 let auto_id = format!("step{}", current_step);
-                let (label, tags) = extract_tags(stripped);
+                let (raw_label_and_tags, tags) = extract_tags(stripped);
+                // Support "Title: description" colon syntax — text before ':' is the step title,
+                // text after ':' becomes the sublabel (step number auto-sublabel is suppressed).
+                let (label, step_colon_sublabel) = {
+                    // Avoid splitting on colons inside URLs (http://)
+                    let first_word_end = raw_label_and_tags.find(|c: char| c.is_whitespace())
+                        .unwrap_or(raw_label_and_tags.len());
+                    let after_first = raw_label_and_tags[first_word_end..].trim();
+                    if let Some(colon_pos) = after_first.find(':') {
+                        if colon_pos > 0 && !after_first[..colon_pos].contains(|c: char| c == '/' || c == '{') {
+                            let title = format!("{} {}", &raw_label_and_tags[..first_word_end], &after_first[..colon_pos]).trim().to_string();
+                            let desc  = after_first[colon_pos + 1..].trim().to_string();
+                            (title, if desc.is_empty() { None } else { Some(desc) })
+                        } else {
+                            (raw_label_and_tags.to_string(), None)
+                        }
+                    } else {
+                        (raw_label_and_tags.to_string(), None)
+                    }
+                };
                 // Find shape tag — look for known shape names in tags
                 let shape = tags.iter()
                     .find(|t| matches!(t.as_str(),
@@ -643,8 +662,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 if let NodeKind::Shape { label: lbl, .. } = &mut node.kind {
                     *lbl = label.trim().to_string();
                 }
-                // Add step number as sublabel if not already set
-                if node.sublabel.is_empty() {
+                // Add step number as sublabel if not already set (colon desc overrides step number)
+                if let Some(desc) = step_colon_sublabel {
+                    node.sublabel = desc;
+                } else if node.sublabel.is_empty() {
                     node.sublabel = format!("Step {}", current_step);
                 }
                 node.z_offset = s_default_z;
