@@ -57,7 +57,7 @@ impl FlowchartApp {
                 ui.painter().galley(
                     Pos2::new(rect.min.x + 10.0, rect.center().y - galley.size().y / 2.0),
                     galley,
-                    Color32::WHITE,
+                    self.theme.text_primary,
                 );
             });
     }

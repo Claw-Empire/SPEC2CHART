@@ -46,6 +46,7 @@ use std::collections::HashMap;
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
 ///   `{pinned}` — pin node to canvas position
 ///   `{x:N}` `{y:N}` — explicit canvas position (auto-included when pinned)
+///   `{frame}` — group frame container (large translucent background box)
 ///
 /// ### Supported node style tags:
 ///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/white/black)
@@ -508,6 +509,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut z_offset = 0.0f32;
     let mut node_tag: Option<NodeTag> = None;
     let mut pinned = false;
+    let mut is_frame = false;
     let mut pos_x: Option<f32> = None;
     let mut pos_y: Option<f32> = None;
     let mut fill_color: Option<[u8; 4]> = None;
@@ -541,6 +543,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             node_tag = Some(nt);
         } else if tag == "pinned" || tag == "pin" {
             pinned = true;
+        } else if tag == "frame" || tag == "group" || tag == "container" {
+            is_frame = true;
         } else if tag.starts_with("x:") {
             pos_x = tag[2..].trim().parse::<f32>().ok();
         } else if tag.starts_with("y:") {
@@ -605,6 +609,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     node.z_offset = z_offset;
     node.tag = node_tag;
     node.pinned = pinned;
+    node.is_frame = is_frame;
     // Apply explicit position (used when {pinned} {x:N} {y:N} are present)
     if let Some(x) = pos_x { node.position[0] = x; }
     if let Some(y) = pos_y { node.position[1] = y; }
@@ -826,14 +831,18 @@ fn tag_to_shape(tag: &str) -> NodeShape {
 fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
     match &node.kind {
         NodeKind::Shape { shape, label, description } => {
-            let shape_tag = match shape {
-                NodeShape::Rectangle => "",
-                NodeShape::RoundedRect => "",
-                NodeShape::Diamond => " {diamond}",
-                NodeShape::Circle => " {circle}",
-                NodeShape::Parallelogram => " {parallelogram}",
-                NodeShape::Hexagon => " {hexagon}",
-                NodeShape::Connector => " {connector}",
+            let shape_tag = if node.is_frame {
+                " {frame}"
+            } else {
+                match shape {
+                    NodeShape::Rectangle => "",
+                    NodeShape::RoundedRect => "",
+                    NodeShape::Diamond => " {diamond}",
+                    NodeShape::Circle => " {circle}",
+                    NodeShape::Parallelogram => " {parallelogram}",
+                    NodeShape::Hexagon => " {hexagon}",
+                    NodeShape::Connector => " {connector}",
+                }
             };
             let tag_tag = match node.tag {
                 Some(NodeTag::Critical) => " {critical}",

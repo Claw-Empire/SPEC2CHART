@@ -69,6 +69,22 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
         border_width: Some(node.style.border_width),
         text_color: Some(node.style.text_color),
         font_size: Some(node.style.font_size),
+        corner_radius: if node.style.corner_radius != 6.0 { Some(node.style.corner_radius) } else { None },
+        border_dashed: if node.style.border_dashed { Some(true) } else { None },
+        shadow: if node.style.shadow { Some(true) } else { None },
+        bold: if node.style.bold { Some(true) } else { None },
+        italic: if node.style.italic { Some(true) } else { None },
+        text_align: match node.style.text_align {
+            TextAlign::Center => None,
+            TextAlign::Left => Some("left".to_string()),
+            TextAlign::Right => Some("right".to_string()),
+        },
+        text_valign: match node.style.text_valign {
+            TextVAlign::Middle => None,
+            TextVAlign::Top => Some("top".to_string()),
+            TextVAlign::Bottom => Some("bottom".to_string()),
+        },
+        icon: if node.icon.is_empty() { None } else { Some(node.icon.clone()) },
     });
 
     match &node.kind {
@@ -237,6 +253,26 @@ fn apply_style(node: &mut Node, style: &Option<SpecNodeStyle>) {
         if let Some(bw) = s.border_width { node.style.border_width = bw; }
         if let Some(tc) = s.text_color { node.style.text_color = tc; }
         if let Some(fs) = s.font_size { node.style.font_size = fs; }
+        if let Some(cr) = s.corner_radius { node.style.corner_radius = cr; }
+        if let Some(bd) = s.border_dashed { node.style.border_dashed = bd; }
+        if let Some(sh) = s.shadow { node.style.shadow = sh; }
+        if let Some(bo) = s.bold { node.style.bold = bo; }
+        if let Some(it) = s.italic { node.style.italic = it; }
+        if let Some(ta) = &s.text_align {
+            node.style.text_align = match ta.as_str() {
+                "left" => TextAlign::Left,
+                "right" => TextAlign::Right,
+                _ => TextAlign::Center,
+            };
+        }
+        if let Some(tv) = &s.text_valign {
+            node.style.text_valign = match tv.as_str() {
+                "top" => TextVAlign::Top,
+                "bottom" => TextVAlign::Bottom,
+                _ => TextVAlign::Middle,
+            };
+        }
+        if let Some(ic) = &s.icon { node.icon = ic.clone(); }
     }
 }
 
@@ -265,6 +301,17 @@ fn edge_to_spec(edge: &Edge, id_map: &HashMap<NodeId, String>) -> Option<SpecEdg
         style: Some(SpecEdgeStyle {
             color: Some(edge.style.color),
             width: Some(edge.style.width),
+            dashed: if edge.style.dashed { Some(true) } else { None },
+            orthogonal: if edge.style.orthogonal { Some(true) } else { None },
+            glow: if edge.style.glow { Some(true) } else { None },
+            animated: if edge.style.animated { Some(true) } else { None },
+            arrow_head: match edge.style.arrow_head {
+                ArrowHead::Filled => None, // default
+                ArrowHead::Open => Some("open".to_string()),
+                ArrowHead::Circle => Some("circle".to_string()),
+                ArrowHead::None => Some("none".to_string()),
+            },
+            curve_bend: if edge.style.curve_bend.abs() > 0.01 { Some(edge.style.curve_bend) } else { None },
         }),
     })
 }
@@ -297,6 +344,19 @@ fn spec_to_edge(se: &SpecEdge, id_map: &HashMap<String, NodeId>) -> Result<Edge,
     if let Some(s) = &se.style {
         if let Some(color) = s.color { edge.style.color = color; }
         if let Some(width) = s.width { edge.style.width = width; }
+        if let Some(dashed) = s.dashed { edge.style.dashed = dashed; }
+        if let Some(ortho) = s.orthogonal { edge.style.orthogonal = ortho; }
+        if let Some(glow) = s.glow { edge.style.glow = glow; }
+        if let Some(animated) = s.animated { edge.style.animated = animated; }
+        if let Some(bend) = s.curve_bend { edge.style.curve_bend = bend; }
+        if let Some(ah) = &s.arrow_head {
+            edge.style.arrow_head = match ah.as_str() {
+                "open" => ArrowHead::Open,
+                "circle" => ArrowHead::Circle,
+                "none" => ArrowHead::None,
+                _ => ArrowHead::Filled,
+            };
+        }
     }
     Ok(edge)
 }

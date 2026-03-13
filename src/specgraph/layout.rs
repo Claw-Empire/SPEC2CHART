@@ -116,8 +116,10 @@ pub fn hierarchical_layout(doc: &mut FlowchartDocument) {
             .fold(0.0_f32, f32::max);
 
         for &i in layer_nodes {
-            // Only reposition nodes that haven't been explicitly placed
-            if doc.nodes[i].position == [0.0, 0.0] {
+            // Skip layout for pinned nodes or nodes with explicit non-origin positions
+            let pos = doc.nodes[i].position;
+            let has_explicit_pos = pos != [0.0, 0.0] && doc.nodes[i].pinned;
+            if !has_explicit_pos {
                 // Vertically centre the node within the tallest node in the layer
                 let node_h = doc.nodes[i].size[1];
                 let y_offset = (max_h - node_h) / 2.0;

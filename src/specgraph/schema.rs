@@ -59,6 +59,22 @@ pub struct SpecNodeStyle {
     pub border_width: Option<f32>,
     pub text_color: Option<[u8; 4]>,
     pub font_size: Option<f32>,
+    #[serde(default)]
+    pub corner_radius: Option<f32>,
+    #[serde(default)]
+    pub border_dashed: Option<bool>,
+    #[serde(default)]
+    pub shadow: Option<bool>,
+    #[serde(default)]
+    pub bold: Option<bool>,
+    #[serde(default)]
+    pub italic: Option<bool>,
+    #[serde(default)]
+    pub text_align: Option<String>,
+    #[serde(default)]
+    pub text_valign: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +105,18 @@ pub struct SpecPort {
 pub struct SpecEdgeStyle {
     pub color: Option<[u8; 4]>,
     pub width: Option<f32>,
+    #[serde(default)]
+    pub dashed: Option<bool>,
+    #[serde(default)]
+    pub orthogonal: Option<bool>,
+    #[serde(default)]
+    pub glow: Option<bool>,
+    #[serde(default)]
+    pub animated: Option<bool>,
+    #[serde(default)]
+    pub arrow_head: Option<String>,
+    #[serde(default)]
+    pub curve_bend: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

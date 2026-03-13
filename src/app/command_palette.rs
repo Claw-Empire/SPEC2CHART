@@ -32,6 +32,7 @@ enum PaletteAction {
     ToggleFocusMode,
     TogglePresentation,
     ToggleFlowAnimation,
+    ToggleDarkMode,
     SwitchToFlowchart,
     SwitchToER,
     SwitchToFigJam,
@@ -317,6 +318,7 @@ impl FlowchartApp {
             PaletteAction::ToggleFocusMode        => { self.focus_mode = !self.focus_mode; }
             PaletteAction::TogglePresentation     => { self.presentation_mode = !self.presentation_mode; }
             PaletteAction::ToggleFlowAnimation    => { self.show_flow_animation = !self.show_flow_animation; }
+            PaletteAction::ToggleDarkMode         => { self.toggle_dark_mode(ctx); }
             PaletteAction::SwitchToFlowchart      => { self.diagram_mode = DiagramMode::Flowchart; }
             PaletteAction::SwitchToER             => { self.diagram_mode = DiagramMode::ER; }
             PaletteAction::SwitchToFigJam         => { self.diagram_mode = DiagramMode::FigJam; }
@@ -349,6 +351,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "◎", label: "Focus mode",                category: "View",    action: PaletteAction::ToggleFocusMode },
         PaletteEntry { icon: "▣", label: "Presentation mode",         category: "View",    action: PaletteAction::TogglePresentation },
         PaletteEntry { icon: "≋", label: "Flow animation",            category: "View",    action: PaletteAction::ToggleFlowAnimation },
+        PaletteEntry { icon: "☀", label: "Toggle dark/light mode",   category: "View",    action: PaletteAction::ToggleDarkMode },
         PaletteEntry { icon: "·", label: "Background: dots",          category: "View",    action: PaletteAction::SetBgDots },
         PaletteEntry { icon: "—", label: "Background: lines",         category: "View",    action: PaletteAction::SetBgLines },
         PaletteEntry { icon: "#", label: "Background: crosshatch",    category: "View",    action: PaletteAction::SetBgCrosshatch },
