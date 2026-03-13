@@ -355,6 +355,27 @@ impl FlowchartApp {
                             .hint_text("# My Diagram\n\n## Nodes\n- [a] Node A\n\n## Flow\na --> b");
                         ui.add(te);
                         ui.add_space(4.0);
+                        // Inline parse preview: show node/edge count if parseable
+                        if !self.spec_paste_buf.trim().is_empty() {
+                            let preview_text = match specgraph::hrf::parse_hrf(&self.spec_paste_buf) {
+                                Ok(doc) => {
+                                    let n = doc.nodes.len();
+                                    let e = doc.edges.len();
+                                    egui::RichText::new(format!("✓ {} nodes, {} edges", n, e))
+                                        .size(9.5)
+                                        .color(egui::Color32::from_rgb(166, 227, 161))
+                                }
+                                Err(ref err) => {
+                                    let short = if err.len() > 60 { &err[..60] } else { err };
+                                    egui::RichText::new(format!("✗ {}", short))
+                                        .size(9.5)
+                                        .color(egui::Color32::from_rgb(243, 139, 168))
+                                }
+                            };
+                            ui.add_space(2.0);
+                            ui.label(preview_text);
+                            ui.add_space(2.0);
+                        }
                         let import_btn = ui.add_sized(
                             egui::vec2(ui.available_width(), 26.0),
                             egui::Button::new(egui::RichText::new("Import").size(11.5).color(self.theme.accent)),

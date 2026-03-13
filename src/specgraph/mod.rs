@@ -1,6 +1,6 @@
 mod schema;
 mod convert;
-mod hrf;
+pub mod hrf;
 pub mod layout;
 pub mod llm;
 
