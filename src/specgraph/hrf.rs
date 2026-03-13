@@ -1058,8 +1058,13 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
     if has_layer_names || has_viewport {
         out.push_str("## Config\n");
         if let Some(vp) = viewport {
-            out.push_str(&format!("bg = {}\n", vp.bg_pattern));
-            out.push_str(&format!("snap = {}\n", vp.snap));
+            // Only emit non-default values to keep the config section clean
+            if vp.bg_pattern != "dots" {
+                out.push_str(&format!("bg = {}\n", vp.bg_pattern));
+            }
+            if vp.snap {
+                out.push_str("snap = true\n");
+            }
             if (vp.grid_size - 20.0).abs() > 0.5 {
                 out.push_str(&format!("grid-size = {}\n", vp.grid_size));
             }
