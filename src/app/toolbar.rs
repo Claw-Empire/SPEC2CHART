@@ -602,6 +602,7 @@ impl FlowchartApp {
                             ("3D cam cfg", "camera = iso|top|front|side  (## Config)"),
                             ("3D auto-z", "auto-z = true  (auto-assign z from topology)"),
                             ("3D named tier", "{layer:db}  {layer:api}  {layer:frontend}  {layer:edge}"),
+                            ("Grid layout", "## Grid cols=3  (auto grid layout, 3 columns)"),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);

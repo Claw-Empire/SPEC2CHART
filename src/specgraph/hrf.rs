@@ -321,6 +321,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // ## Config section: key = value pairs
     let mut config_map: HashMap<String, String> = HashMap::new();
 
+    // ## Grid sections: collect (NodeIds, cols) for post-parse grid layout
+    let mut pending_grid_groups: Vec<(Vec<NodeId>, usize)> = Vec::new();
+
     // ## Palette section: handled via pre-expand pass (expand_palette above)
 
     // Deferred inline edges: (source_str_id, target_str_id, edge_tags)
@@ -367,6 +370,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         if trimmed.starts_with("## ") {
             seen_section = true;
             last_node_id = None;
+            // Finalise Grid section before switching away
+            if let Section::Grid { cols, nodes, .. } = &section {
+                if !nodes.is_empty() {
+                    pending_grid_groups.push((nodes.clone(), *cols));
+                }
+            }
             // Preserve original case for layer names, lowercase only for matching
             let header_raw = trimmed[3..].trim();
             let header = header_raw.to_lowercase();
@@ -379,6 +388,26 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
                 "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
                 "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
+                _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
+                    // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
+                    // Parse optional cols parameter from header
+                    let rest = if header.starts_with("grid") { header_raw[4..].trim() }
+                               else if header.starts_with("matrix") { header_raw[6..].trim() }
+                               else { header_raw[5..].trim() }; // table
+                    let cols = rest
+                        .split_whitespace()
+                        .find_map(|tok| {
+                            let v = tok.trim_start_matches("cols=")
+                                       .trim_start_matches("columns=")
+                                       .trim_start_matches("col=")
+                                       .trim_start_matches("n=")
+                                       .trim_start_matches("c=");
+                            v.parse::<usize>().ok()
+                        })
+                        .or_else(|| rest.parse::<usize>().ok())
+                        .unwrap_or(3); // default 3 columns
+                    Section::Grid { cols, default_z: 0.0, nodes: Vec::new() }
+                }
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
@@ -614,7 +643,32 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 // Note: step_count was already incremented at the start of this block
                 doc.nodes.push(node);
             }
+            Section::Grid { ref mut nodes, default_z, .. } => {
+                if trimmed.starts_with("- ") {
+                    let stripped = &trimmed[2..];
+                    let (node_part, inline_targets) = split_inline_edges(stripped);
+                    let (id, mut node) = parse_node_line(node_part, line_num)?;
+                    if node.z_offset == 0.0 && default_z != 0.0 {
+                        node.z_offset = default_z;
+                    }
+                    last_node_id = Some(node.id);
+                    let nid = node.id;
+                    id_map.insert(id.clone(), nid);
+                    for (target_id, edge_tags) in inline_targets {
+                        deferred_inline_edges.push((id.clone(), target_id, edge_tags));
+                    }
+                    nodes.push(nid);
+                    doc.nodes.push(node);
+                }
+            }
             Section::None => {}
+        }
+    }
+
+    // Finalise last section if it was a Grid
+    if let Section::Grid { cols, nodes, .. } = &section {
+        if !nodes.is_empty() {
+            pending_grid_groups.push((nodes.clone(), *cols));
         }
     }
 
@@ -756,6 +810,28 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 }
             }
             _ => {}
+        }
+    }
+
+    // Apply ## Grid section layouts — positions assigned BEFORE hierarchical_layout
+    // so that layout skips them (hierarchical_layout only moves nodes at origin [0,0]).
+    if !pending_grid_groups.is_empty() {
+        let cell_w = 220.0_f32; // cell width including gap
+        let cell_h = 140.0_f32; // cell height including gap
+        let mut start_y: f32 = 100.0; // non-zero so hierarchical_layout skips these nodes
+        for (grid_nodes, cols) in &pending_grid_groups {
+            let cols = (*cols).max(1);
+            let num_nodes = grid_nodes.len();
+            for (idx, nid) in grid_nodes.iter().enumerate() {
+                let col = (idx % cols) as f32;
+                let row = (idx / cols) as f32;
+                if let Some(node) = doc.nodes.iter_mut().find(|n| n.id == *nid) {
+                    node.position = [col * cell_w + 100.0, row * cell_h + start_y];
+                    node.pinned = true; // prevent hierarchical_layout from overriding
+                }
+            }
+            let rows_count = ((num_nodes as f32) / (cols as f32)).ceil();
+            start_y += rows_count * cell_h + 80.0;
         }
     }
 
@@ -1256,7 +1332,7 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
 // Internal types
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Section {
     None,
     /// `default_z` is applied to any node in this section that doesn't have an explicit {z:N} tag.
@@ -1269,6 +1345,9 @@ enum Section {
     /// `## Steps` — numbered list creates sequential flowchart nodes with auto edges.
     /// Tracks (last_step_id, section_z, step_count).
     Steps { default_z: f32, last_step_id: Option<NodeId>, step_count: u32 },
+    /// `## Grid [cols=N]` — nodes are laid out in a grid (cols wide).
+    /// Nodes are collected in order; positions are assigned after the section ends.
+    Grid { cols: usize, default_z: f32, nodes: Vec<NodeId> },
 }
 
 // ---------------------------------------------------------------------------
@@ -3380,5 +3459,29 @@ y ->|returns data| z {dashed}
         assert_eq!(xy.label, "sends request", "pipe label on plain edge");
         assert_eq!(yz.label, "returns data", "pipe label with {{dashed}} tag");
         assert!(yz.style.dashed, "dashed tag applies with pipe label");
+    }
+
+    #[test]
+    fn test_grid_section_layout() {
+        let input = r#"
+# Grid Test
+
+## Grid cols=3
+- [a] Alpha
+- [b] Beta
+- [c] Gamma
+- [d] Delta
+- [e] Epsilon
+"#;
+        let doc = parse_hrf(input).expect("grid parse");
+        assert_eq!(doc.nodes.len(), 5);
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Alpha").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Beta").unwrap();
+        let d = doc.nodes.iter().find(|n| n.display_label() == "Delta").unwrap();
+        // a is at col=0, row=0; b at col=1, row=0; d at col=0, row=1
+        assert!(a.position[0] < b.position[0], "a should be left of b (same row)");
+        assert_eq!(a.position[1], b.position[1], "a and b should be in same row");
+        assert_eq!(a.position[0], d.position[0], "a and d should be in same column");
+        assert!(a.position[1] < d.position[1], "d should be below a");
     }
 }
