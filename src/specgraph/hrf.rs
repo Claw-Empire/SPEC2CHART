@@ -1857,7 +1857,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let id = line[id_start + 1..id_end].trim().to_string();
     let rest = line[id_end + 1..].trim();
 
-    let (label, tags) = extract_tags(rest);
+    let (raw_label, tags) = extract_tags(rest);
+    // Process \n escape sequences in labels for multi-line node text
+    let label = raw_label.replace("\\n", "\n");
 
     let mut shape = NodeShape::RoundedRect;
     let mut z_offset = 0.0f32;
@@ -2568,7 +2570,15 @@ fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
 /// `z_tag` is pre-computed so callers can suppress it when a section already implies the z.
 fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
     match &node.kind {
-        NodeKind::Shape { shape, label, description } => {
+        NodeKind::Shape { shape, label: raw_label, description } => {
+            // Escape actual newlines in label back to \n for HRF text format
+            let label_owned;
+            let label: &str = if raw_label.contains('\n') {
+                label_owned = raw_label.replace('\n', "\\n");
+                &label_owned
+            } else {
+                raw_label.as_str()
+            };
             let shape_tag = if node.is_frame {
                 " {frame}"
             } else {
@@ -3868,6 +3878,32 @@ b -> c: stores data {dashed}
         assert_eq!(a.z_offset, 240.0, "frontend tier");
         assert_eq!(b.z_offset, 120.0, "backend tier");
         assert_eq!(c.z_offset, 0.0,   "storage tier");
+    }
+
+    #[test]
+    fn test_multiline_label_escape() {
+        let input = r#"
+# Multiline Label Test
+
+## Nodes
+- [a] First Line\nSecond Line
+- [b] Single Line
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        let a = doc.nodes.iter().find(|n| n.id != doc.nodes[1].id && n.display_label().contains('\n')).unwrap();
+        assert!(a.display_label().contains('\n'), "label should have actual newline");
+        assert_eq!(a.display_label(), "First Line\nSecond Line");
+
+        // Export and verify escape roundtrip
+        let exported = export_hrf(&doc, "Multiline Label Test");
+        assert!(exported.contains("First Line\\nSecond Line"),
+            "exported spec should escape newlines back to \\n: {}", exported);
+
+        // Re-import the exported spec and verify label is preserved
+        let doc2 = parse_hrf(&exported).expect("re-import should work");
+        let a2 = doc2.nodes.iter().find(|n| n.display_label().contains('\n')).unwrap();
+        assert_eq!(a2.display_label(), "First Line\nSecond Line",
+            "label should survive roundtrip");
     }
 
     #[test]
