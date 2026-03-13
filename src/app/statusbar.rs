@@ -11,7 +11,7 @@ impl FlowchartApp {
             return;
         }
 
-        let zoom_pct = (self.viewport.zoom * 100.0).round() as i32;
+        let zoom_pct = (self.effective_zoom() * 100.0).round() as i32;
         let sel_count = self.selection.node_ids.len();
         let edge_sel = !self.selection.edge_ids.is_empty();
         let total_nodes = self.document.nodes.len();

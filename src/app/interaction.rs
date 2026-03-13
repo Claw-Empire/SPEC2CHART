@@ -8,6 +8,24 @@ use super::theme::PORT_HIT_RADIUS;
 // ---------------------------------------------------------------------------
 
 impl FlowchartApp {
+    /// Returns the effective zoom level for display purposes.
+    /// In 2D mode this is `viewport.zoom`; in 3D mode it is derived from
+    /// the camera distance so that the status bar reflects the actual view scale.
+    pub(crate) fn effective_zoom(&self) -> f32 {
+        match self.view_mode {
+            super::ViewMode::TwoD => self.viewport.zoom,
+            super::ViewMode::ThreeD => {
+                if self.canvas_rect.width() > 0.0 {
+                    let fov_tan = (self.camera3d.fov / 2.0).tan();
+                    let visible_width = 2.0 * self.camera3d.distance * fov_tan;
+                    (self.canvas_rect.width() / visible_width).clamp(0.05, 10.0)
+                } else {
+                    self.viewport.zoom
+                }
+            }
+        }
+    }
+
     pub(crate) fn hit_test_port(&self, canvas_pos: Pos2) -> Option<Port> {
         let threshold = PORT_HIT_RADIUS / self.viewport.zoom;
         for node in self.document.nodes.iter().rev() {

@@ -392,11 +392,23 @@ impl FlowchartApp {
             ui.ctx().input(|i| i.pointer.hover_pos())
         });
 
-        // Scroll => zoom
-        let scroll_delta = ui.ctx().input(|i| i.raw_scroll_delta.y);
-        if scroll_delta != 0.0 {
-            let factor = (1.0 - scroll_delta * 0.003).clamp(0.9, 1.1);
-            self.camera3d.distance = (self.camera3d.distance * factor).clamp(100.0, 10000.0);
+        // Scroll => zoom (only when pointer is over the 3D canvas, not the sidebar).
+        // Consume both scroll fields via input_mut so they cannot leak to the sidebar.
+        if response.hovered() {
+            let scroll_delta = ui.ctx().input_mut(|i| {
+                let d = if i.raw_scroll_delta.y != 0.0 {
+                    i.raw_scroll_delta.y
+                } else {
+                    i.smooth_scroll_delta.y
+                };
+                i.raw_scroll_delta    = egui::Vec2::ZERO;
+                i.smooth_scroll_delta = egui::Vec2::ZERO;
+                d
+            });
+            if scroll_delta != 0.0 {
+                let factor = (1.0 - scroll_delta * 0.003).clamp(0.9, 1.1);
+                self.camera3d.distance = (self.camera3d.distance * factor).clamp(100.0, 10000.0);
+            }
         }
 
         // Compute z-layers
