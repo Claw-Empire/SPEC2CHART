@@ -614,6 +614,31 @@ impl FlowchartApp {
 
         self.draw_deletion_ghosts(&painter);
 
+        // Hover dim: when hovering a node with no selection, dim non-neighbor nodes
+        if let Some(hid) = hover_node_id {
+            if self.selection.is_empty() {
+                let neighbors: std::collections::HashSet<NodeId> = self.document.edges.iter()
+                    .flat_map(|e| {
+                        if e.source.node_id == hid { Some(e.target.node_id) }
+                        else if e.target.node_id == hid { Some(e.source.node_id) }
+                        else { None }
+                    })
+                    .collect();
+                for node in &self.document.nodes {
+                    if node.id == hid || neighbors.contains(&node.id) { continue; }
+                    let sp = self.viewport.canvas_to_screen(node.pos());
+                    let ss = node.size_vec() * self.viewport.zoom;
+                    let sr = Rect::from_min_size(sp, ss);
+                    if sr.expand(20.0).intersects(canvas_rect) {
+                        let cr = CornerRadius::same(node.style.corner_radius as u8);
+                        // Dim overlay using canvas bg with ~50% alpha
+                        let dim = self.theme.canvas_bg.gamma_multiply(0.55);
+                        painter.rect_filled(sr.expand(2.0), cr, dim);
+                    }
+                }
+            }
+        }
+
         // Connectivity heatmap overlay
         if self.show_heatmap && !self.document.nodes.is_empty() {
             self.draw_heatmap_overlay(&painter, canvas_rect);
