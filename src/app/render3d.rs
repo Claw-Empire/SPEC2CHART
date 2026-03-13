@@ -1691,10 +1691,13 @@ impl FlowchartApp {
                 .camera3d
                 .project(label_pos, screen_center, screen_size)
             {
+                let layer_name = self.document.layer_names.get(&layer)
+                    .map(|s| format!("  {}", s))
+                    .unwrap_or_default();
                 let lbl = if node_count > 0 {
-                    format!("z={:.0}  ×{}", z, node_count)
+                    format!("z={:.0}  ×{}{}", z, node_count, layer_name)
                 } else {
-                    format!("z={:.0}", z)
+                    format!("z={:.0}{}", z, layer_name)
                 };
                 painter.text(
                     screen_pos,

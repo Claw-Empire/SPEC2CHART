@@ -88,34 +88,44 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
+        let trimmed = line.trim();
+
+        // `//` line comments — skip entirely
+        if trimmed.starts_with("//") {
+            continue;
+        }
 
         // Title: # Something
-        if line.trim().starts_with("# ") && !line.trim().starts_with("## ") {
-            doc.title = line.trim()[2..].trim().to_string();
+        if trimmed.starts_with("# ") && !trimmed.starts_with("## ") {
+            doc.title = trimmed[2..].trim().to_string();
             continue;
         }
 
         // Section headers
-        let trimmed = line.trim();
         if trimmed.starts_with("## ") {
             seen_section = true;
             last_node_id = None;
-            let header = trimmed[3..].trim().to_lowercase();
+            // Preserve original case for layer names, lowercase only for matching
+            let header_raw = trimmed[3..].trim();
+            let header = header_raw.to_lowercase();
             section = match header.as_str() {
                 "nodes" | "node" | "components" => Section::Nodes { default_z: 0.0 },
                 "flow" | "flows" | "edges" | "connections" => Section::Flow,
                 "notes" | "note" | "stickies" => Section::Notes,
                 _ => {
-                    // Check for "Layer N" or "Layer N — description" patterns
+                    // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
                     // "layer z:120", "layer z=120" → z = 120 (explicit)
                     if header.starts_with("layer") {
-                        let after = header[5..].trim();
-                        let z = if after.is_empty() {
+                        let after_lower = header[5..].trim();
+                        let after_raw = header_raw[5..].trim();
+                        let z = if after_lower.is_empty() {
                             0.0_f32
                         } else {
-                            // Strip "— description" and parse the number
-                            let num_part = after.split('—').next().unwrap_or(after).trim();
+                            // Strip ": Name" or "— description" and parse the number
+                            let num_part = after_lower.split(':').next()
+                                .and_then(|s| { let s = s.trim(); if s.is_empty() { None } else { Some(s) } })
+                                .unwrap_or(after_lower.split('—').next().unwrap_or(after_lower).trim());
                             // Explicit "z=N" or "z:N" → use raw value
                             if num_part.starts_with("z=") || num_part.starts_with("z:") {
                                 let num_str = &num_part[2..];
@@ -129,6 +139,14 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                                 }
                             }
                         };
+                        // Store optional layer name: "Layer 1: Frontend" → "Frontend"
+                        if let Some(colon_pos) = after_raw.find(':') {
+                            let name_part = after_raw[colon_pos+1..].trim();
+                            if !name_part.is_empty() {
+                                let layer_idx = (z / 120.0).round() as i32;
+                                doc.layer_names.insert(layer_idx, name_part.to_string());
+                            }
+                        }
                         Section::Nodes { default_z: z }
                     } else {
                         Section::None
@@ -266,10 +284,14 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                 let z_spacing = 120.0_f32;
                 let idx = (section_z / z_spacing).round();
                 let is_multiple = (section_z - idx * z_spacing).abs() < 0.5;
+                let layer_key = idx as i32;
+                let name_suffix = doc.layer_names.get(&layer_key)
+                    .map(|n| format!(": {}", n))
+                    .unwrap_or_default();
                 if is_multiple {
-                    out.push_str(&format!("## Layer {}\n", idx as i32));
+                    out.push_str(&format!("## Layer {}{}\n", idx as i32, name_suffix));
                 } else {
-                    out.push_str(&format!("## Layer z={}\n", section_z));
+                    out.push_str(&format!("## Layer z={}{}\n", section_z, name_suffix));
                 }
             } else {
                 out.push_str("## Nodes\n");
@@ -1384,5 +1406,48 @@ users --> orders {c-src:1} {c-tgt:0..N}
         assert!(exported.contains("{align:right}"), "expected {{align:right}} in: {}", exported);
         assert!(exported.contains("{valign:bottom}"), "expected {{valign:bottom}} in: {}", exported);
         assert!(exported.contains("{border:3}"), "expected {{border:3}} in: {}", exported);
+    }
+
+    #[test]
+    fn test_named_layers_and_comments() {
+        let input = r#"
+# Named Layer Test
+// This is a comment and should be ignored
+## Layer 0: Database
+// Another comment
+- [db] Main DB {circle}
+
+## Layer 1: Backend
+- [api] API Service
+
+## Layer 2: Frontend
+- [web] Web App {parallelogram}
+
+## Flow
+api --> db
+web --> api
+"#;
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 3);
+
+        // Layer names should be stored
+        assert_eq!(doc.layer_names.get(&0), Some(&"Database".to_string()));
+        assert_eq!(doc.layer_names.get(&1), Some(&"Backend".to_string()));
+        assert_eq!(doc.layer_names.get(&2), Some(&"Frontend".to_string()));
+
+        // z-offsets should be correct (0=0, 1=120, 2=240)
+        let db = doc.nodes.iter().find(|n| n.display_label() == "Main DB").unwrap();
+        let api = doc.nodes.iter().find(|n| n.display_label() == "API Service").unwrap();
+        let web = doc.nodes.iter().find(|n| n.display_label() == "Web App").unwrap();
+        assert!((db.z_offset - 0.0).abs() < 1.0);
+        assert!((api.z_offset - 120.0).abs() < 1.0);
+        assert!((web.z_offset - 240.0).abs() < 1.0);
+
+        // Export should include layer names
+        let exported = export_hrf(&doc, "Named Layer Test");
+        assert!(exported.contains("## Layer 0: Database") || exported.contains("Database"),
+            "expected Database name in: {}", exported);
+        assert!(exported.contains("## Layer 1: Backend") || exported.contains("Backend"),
+            "expected Backend name in: {}", exported);
     }
 }

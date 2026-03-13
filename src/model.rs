@@ -667,6 +667,9 @@ pub struct FlowchartDocument {
     pub description: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Optional human-readable names for 3D layers, keyed by layer index (0=z0, 1=z120, etc.)
+    #[serde(default)]
+    pub layer_names: HashMap<i32, String>,
 }
 
 impl FlowchartDocument {
