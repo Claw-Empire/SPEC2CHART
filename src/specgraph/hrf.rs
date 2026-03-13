@@ -2120,6 +2120,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             }
         } else if tag == "hidden" || tag == "invisible" {
             opacity_override = Some(0.0);
+        } else if tag == "dim" || tag == "dimmed" {
+            opacity_override = Some(0.35);
+        } else if tag == "ghost" || tag == "faded" {
+            opacity_override = Some(0.18);
+        } else if tag == "muted" {
+            if opacity_override.is_none() { opacity_override = Some(0.6); }
         } else if tag == "gradient" || tag == "grad" {
             gradient = true;
         } else if tag.starts_with("gradient-angle:") || tag.starts_with("grad-angle:") || tag.starts_with("gradient:") && tag.len() > 9 && tag[9..].trim().parse::<u8>().is_ok() {
@@ -2698,7 +2704,16 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 format!(" {{border:{}}}", node.style.border_width)
             } else { String::new() };
             let opacity_tag = if (node.style.opacity - 1.0).abs() > 0.01 {
-                format!(" {{opacity:{:.0}}}", node.style.opacity * 100.0)
+                // Use friendly shorthand names for well-known opacity levels
+                let pct = (node.style.opacity * 100.0).round() as u32;
+                let friendly = match pct {
+                    0  => " {hidden}".to_string(),
+                    18 => " {ghost}".to_string(),
+                    35 => " {dim}".to_string(),
+                    60 => " {muted}".to_string(),
+                    _  => format!(" {{opacity:{}}}", pct),
+                };
+                friendly
             } else { String::new() };
             let gradient_tag = if node.style.gradient {
                 if node.style.gradient_angle > 0 {
@@ -4155,5 +4170,37 @@ auth "calls" --> db
         assert_eq!(doc.edges[1].source.node_id, auth_id);
         assert_eq!(doc.edges[1].target.node_id, db_id);
         assert_eq!(doc.edges[1].label, "calls", "edge label from quoted syntax");
+    }
+
+    #[test]
+    fn test_opacity_shorthand_tags() {
+        let input = r#"
+# Opacity Test
+
+## Nodes
+- [a] Active
+- [b] Dimmed {dim}
+- [c] Ghost {ghost}
+- [d] Muted {muted}
+- [e] Hidden {hidden}
+- [f] Custom {opacity:50}
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        let find = |label: &str| doc.nodes.iter().find(|n| n.display_label() == label).unwrap();
+
+        assert!((find("Active").style.opacity - 1.0).abs() < 0.01, "default opacity=1");
+        assert!((find("Dimmed").style.opacity - 0.35).abs() < 0.01, "dim=0.35");
+        assert!((find("Ghost").style.opacity - 0.18).abs() < 0.01, "ghost=0.18");
+        assert!((find("Muted").style.opacity - 0.6).abs() < 0.01, "muted=0.6");
+        assert!(find("Hidden").style.opacity < 0.01, "hidden=0.0");
+        assert!((find("Custom").style.opacity - 0.5).abs() < 0.01, "opacity:50 = 0.5");
+
+        // Export roundtrip — friendly names should be used for known values
+        let exported = export_hrf(&doc, "Opacity Test");
+        assert!(exported.contains("{dim}"),    "dim should export as {{dim}}");
+        assert!(exported.contains("{ghost}"),  "ghost should export as {{ghost}}");
+        assert!(exported.contains("{muted}"),  "muted should export as {{muted}}");
+        assert!(exported.contains("{hidden}"), "hidden should export as {{hidden}}");
+        assert!(exported.contains("{opacity:50}"), "50% should export as {{opacity:50}}");
     }
 }
