@@ -650,10 +650,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Apply ## Config values
     for (key, val) in &config_map {
         match key.as_str() {
-            "title" => { doc.title = val.clone(); }
+            "title" => {
+                doc.title = val.clone();
+                doc.import_hints.project_title = Some(val.clone());
+            }
             "description" | "desc" => { doc.description = val.clone(); }
             // import hints — applied by the toolbar after import
-            "bg" | "background" | "bg-pattern" => {
+            "bg" | "bg-pattern" => {
                 doc.import_hints.bg_pattern = Some(val.to_lowercase());
             }
             "snap" | "snap-to-grid" | "snap_to_grid" => {
@@ -739,8 +742,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.import_hints.canvas_bg = Some(c);
                 }
             }
-            // project title watermark
-            "title" | "project-title" | "watermark" => {
+            // project title watermark (title is handled above; these are aliases)
+            "project-title" | "watermark" => {
                 doc.import_hints.project_title = Some(val.clone());
             }
             // layer names: layer0 = Data Tier, layer 1 = Backend
@@ -1401,6 +1404,19 @@ fn parse_flow_line_chain(
     // We convert "<->" to "-->" but set a flag; convert "<--" by reversing.
     // Simplest approach: expand bidirectional into two lines by replacing `<->` with `-->`.
     // Then for `<--` lines, reverse direction.
+
+    // Normalize Unicode arrows to ASCII equivalents before further processing
+    let line_unicode_normalized: String = line
+        .replace('→', "-->")   // U+2192 RIGHTWARDS ARROW
+        .replace('⇒', "-->")   // U+21D2 RIGHTWARDS DOUBLE ARROW
+        .replace('⟶', "-->")   // U+27F6 LONG RIGHTWARDS ARROW
+        .replace('←', "<--")   // U+2190 LEFTWARDS ARROW
+        .replace('⟵', "<--")   // U+27F5 LONG LEFTWARDS ARROW
+        .replace('↔', "<->")   // U+2194 LEFT RIGHT ARROW
+        .replace('⇔', "<->")   // U+21D4 LEFT RIGHT DOUBLE ARROW
+        .replace('⟷', "<->")   // U+27F7 LONG LEFT RIGHT ARROW
+        ;
+    let line = line_unicode_normalized.as_str();
 
     // Detect dominant arrow type in this line
     let is_reverse = !line.contains("-->") && !line.contains("<->") && line.contains("<--");
@@ -3218,5 +3234,43 @@ api    -> db
         assert_eq!(api.z_offset, 120.0, "api should be at z=120");
         // db has 2 predecessors → layer 2 → z=240
         assert_eq!(db.z_offset, 240.0, "db should be at z=240");
+    }
+
+    #[test]
+    fn test_unicode_arrows_in_flow() {
+        // → ⇒ ⟶ should all create forward edges like -->
+        // ← ⟵ should create reverse edges like <--
+        // ↔ ⇔ ⟷ should create bidirectional edges like <->
+        let input = r#"
+# Unicode Arrow Test
+
+## Nodes
+- [a] Alpha
+- [b] Beta
+- [c] Gamma
+- [d] Delta
+- [e] Epsilon
+
+## Flow
+a → b
+c ⇒ d
+e ⟷ a
+"#;
+        let doc = parse_hrf(input).expect("should parse unicode arrows");
+        assert_eq!(doc.nodes.len(), 5, "5 nodes");
+        // a→b  and  c⇒d should each produce one directed edge
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Alpha").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Beta").unwrap();
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Gamma").unwrap();
+        let d = doc.nodes.iter().find(|n| n.display_label() == "Delta").unwrap();
+        let e = doc.nodes.iter().find(|n| n.display_label() == "Epsilon").unwrap();
+        let ab = doc.edges.iter().any(|e| e.source.node_id == a.id && e.target.node_id == b.id);
+        let cd = doc.edges.iter().any(|e| e.source.node_id == c.id && e.target.node_id == d.id);
+        assert!(ab, "a → b should create a→b edge");
+        assert!(cd, "c ⇒ d should create c→d edge");
+        // e⟷a should create two edges (bidirectional)
+        let ea = doc.edges.iter().any(|edge| edge.source.node_id == e.id && edge.target.node_id == a.id);
+        let ae = doc.edges.iter().any(|edge| edge.source.node_id == a.id && edge.target.node_id == e.id);
+        assert!(ea || ae, "e ⟷ a should create at least one e↔a edge");
     }
 }
