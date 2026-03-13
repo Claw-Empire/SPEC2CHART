@@ -684,7 +684,9 @@ impl FlowchartApp {
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         self.draw_search_overlay(ui, canvas_rect);
         self.draw_zoom_presets(ui, canvas_rect);
-        self.draw_minimap(&painter, canvas_rect);
+        if self.show_minimap {
+            self.draw_minimap(&painter, canvas_rect);
+        }
         if self.show_rulers {
             self.draw_side_rulers(&painter, canvas_rect, pointer_pos);
         }
@@ -692,14 +694,16 @@ impl FlowchartApp {
             self.draw_quick_notes_panel(ui, canvas_rect);
         }
 
-        // Minimap click-to-pan and drag-to-pan
-        if let Some(click_pos) = pointer_pos {
-            let (clicked, dragging) = ui.ctx().input(|i| (
-                i.pointer.primary_clicked(),
-                i.pointer.primary_down() && i.pointer.is_moving(),
-            ));
-            if clicked || dragging {
-                self.handle_minimap_click(click_pos, canvas_rect);
+        // Minimap click-to-pan and drag-to-pan (only when minimap is visible)
+        if self.show_minimap {
+            if let Some(click_pos) = pointer_pos {
+                let (clicked, dragging) = ui.ctx().input(|i| (
+                    i.pointer.primary_clicked(),
+                    i.pointer.primary_down() && i.pointer.is_moving(),
+                ));
+                if clicked || dragging {
+                    self.handle_minimap_click(click_pos, canvas_rect);
+                }
             }
         }
     }
@@ -4457,6 +4461,7 @@ impl FlowchartApp {
             Color32::from_rgba_unmultiplied(137, 180, 250, 160));
     }
 }
+
 
 /// Format a canvas coordinate for ruler labels: suppress ".0" for integers.
 fn format_coord(v: f32) -> String {

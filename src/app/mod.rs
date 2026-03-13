@@ -220,6 +220,8 @@ pub struct FlowchartApp {
     pub(crate) theme: theme::Theme,
     /// Whether dark mode is active (true = dark, false = light)
     pub(crate) dark_mode: bool,
+    /// Show minimap overlay in bottom-right corner of canvas (toggle M)
+    pub(crate) show_minimap: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -325,6 +327,7 @@ impl FlowchartApp {
             command_palette_cursor: 0,
             theme: t,
             dark_mode: true,
+            show_minimap: false,
         }
     }
 

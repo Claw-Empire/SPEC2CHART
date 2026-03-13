@@ -748,6 +748,13 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // M (no modifier) = toggle minimap overlay
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.is_none()) {
+            self.show_minimap = !self.show_minimap;
+            let msg = if self.show_minimap { "Minimap On" } else { "Minimap Off" };
+            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        }
+
         // Shift+H = distribute selected nodes horizontally (equal spacing on X)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.shift_only())
             && self.selection.node_ids.len() >= 3
