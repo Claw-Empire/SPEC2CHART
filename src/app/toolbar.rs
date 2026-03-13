@@ -474,6 +474,7 @@ impl FlowchartApp {
                         let entries: &[(&str, &str)] = &[
                             ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps"),
                             ("## Palette", "brand = #1e3a5f  →  use {fill:brand} anywhere"),
+                            ("Inline edges", "- [api] Service → db, cache {dashed}"),
                             ("## Steps", "1. Step label {diamond}  (sequential flowchart)"),
                             ("3D layers", "## Layer 0: Database / ## Layer 1: Backend"),
                             ("3D layers", "{z:N} (px) / {layer:N} (N×120px) / {3d-depth:80}"),

@@ -197,6 +197,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     // ## Palette section: handled via pre-expand pass (expand_palette above)
 
+    // Deferred inline edges: (source_str_id, target_str_id, edge_tags)
+    // Created when "- [id] Label → target1, target2" is found in ## Nodes sections.
+    let mut deferred_inline_edges: Vec<(String, String, Vec<String>)> = Vec::new();
+
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
         let trimmed = line.trim();
@@ -287,15 +291,21 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         match section {
             Section::Nodes { default_z } => {
                 if trimmed.starts_with("- ") {
-                    // New node definition
+                    // New node definition — may have inline edges: "- [id] Label → target1, target2 {tags}"
                     let stripped = &trimmed[2..];
-                    let (id, mut node) = parse_node_line(stripped, line_num)?;
+                    // Split on → or -> (outside braces) for inline edges
+                    let (node_part, inline_targets) = split_inline_edges(stripped);
+                    let (id, mut node) = parse_node_line(node_part, line_num)?;
                     // Apply section default z if node doesn't have an explicit {z:N} tag
                     if node.z_offset == 0.0 && default_z != 0.0 {
                         node.z_offset = default_z;
                     }
                     last_node_id = Some(node.id);
-                    id_map.insert(id, node.id);
+                    id_map.insert(id.clone(), node.id);
+                    // Defer inline edge creation
+                    for (target_id, edge_tags) in inline_targets {
+                        deferred_inline_edges.push((id.clone(), target_id, edge_tags));
+                    }
                     doc.nodes.push(node);
                 } else if line.starts_with("  ") || line.starts_with("\t") {
                     // Indented continuation — entity attribute or description
@@ -425,6 +435,33 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     }
 
     doc.description = preamble_lines.join("\n");
+
+    // Resolve deferred inline edges (from "- [id] Label → target1, target2" syntax)
+    for (src_id, tgt_id, edge_tags) in &deferred_inline_edges {
+        if let (Some(&src_node_id), Some(&tgt_node_id)) = (id_map.get(src_id), id_map.get(tgt_id)) {
+            let mut edge = Edge::new(
+                Port { node_id: src_node_id, side: PortSide::Right },
+                Port { node_id: tgt_node_id, side: PortSide::Left },
+            );
+            for etag in edge_tags {
+                if etag.starts_with("color:") {
+                    if let Some(c) = tag_to_edge_color(etag[6..].trim()) { edge.style.color = c; }
+                } else if etag.starts_with("note:") {
+                    edge.comment = etag[5..].trim().to_string();
+                } else {
+                    match etag.as_str() {
+                        "dashed" | "dash" => edge.style.dashed = true,
+                        "glow" | "neon" => edge.style.glow = true,
+                        "animated" | "flow" => edge.style.animated = true,
+                        "thick" | "bold" => edge.style.width = 5.0,
+                        "ortho" | "orthogonal" => edge.style.orthogonal = true,
+                        _ => {}
+                    }
+                }
+            }
+            doc.edges.push(edge);
+        }
+    }
 
     // Apply ## Config values
     for (key, val) in &config_map {
@@ -1126,6 +1163,60 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
 }
 
 /// Extract `{tag}` blocks from a string, returning the cleaned label and list of tags.
+/// Split a node line on `→` or ` -> ` (outside `{...}` tag braces).
+/// Returns `(node_part, Vec<(target_id, edge_tags)>)`.
+/// e.g. `"[api] API → db, redis {dashed}"` →
+///   `("[api] API", [("db", []), ("redis", ["dashed"])])`
+fn split_inline_edges(line: &str) -> (&str, Vec<(String, Vec<String>)>) {
+    // Find → or -> outside braces
+    let bytes = line.as_bytes();
+    let mut depth = 0usize;
+    let mut arrow_pos: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => { if depth > 0 { depth -= 1; } }
+            b'\xe2' if depth == 0 => {
+                // UTF-8 for → is [0xe2, 0x86, 0x92]
+                if bytes.get(i+1) == Some(&0x86) && bytes.get(i+2) == Some(&0x92) {
+                    arrow_pos = Some(i);
+                    break;
+                }
+            }
+            b'-' if depth == 0 => {
+                // Check for " -> " or "-> " at start
+                if bytes.get(i+1) == Some(&b'>') {
+                    // Make sure it's not inside [id] brackets
+                    arrow_pos = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let Some(pos) = arrow_pos else {
+        return (line, Vec::new());
+    };
+    let node_part = line[..pos].trim_end();
+    // Arrow length: 3 bytes for →, 2 for ->
+    let arrow_len = if bytes[pos] == b'\xe2' { 3 } else { 2 };
+    let targets_str = line[pos + arrow_len..].trim();
+    // Parse comma-separated targets, each optionally with {tags}
+    let targets = targets_str.split(',')
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() { return None; }
+            let (tgt_raw, edge_tags) = extract_tags(part);
+            let tgt = tgt_raw.trim().to_string();
+            if tgt.is_empty() { return None; }
+            Some((tgt, edge_tags))
+        })
+        .collect();
+    (node_part, targets)
+}
+
 fn extract_tags(s: &str) -> (String, Vec<String>) {
     let mut label = String::new();
     let mut tags = Vec::new();
@@ -2179,6 +2270,18 @@ b --> c
         // Step 4 should have green fill
         let step4 = doc.nodes.iter().find(|n| n.display_label().contains("Shipped")).unwrap();
         assert_ne!(step4.style.fill_color, NodeStyle::default().fill_color, "step4 fill should be green");
+    }
+
+    #[test]
+    fn test_inline_edges_in_nodes_section() {
+        let input = "## Nodes\n- [api] API Service -> db, cache\n- [db] Database\n- [cache] Redis Cache\n";
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 3, "should have 3 nodes");
+        assert_eq!(doc.edges.len(), 2, "should have 2 inline edges");
+        let api_id = doc.nodes.iter().find(|n| n.display_label() == "API Service").unwrap().id;
+        let db_id  = doc.nodes.iter().find(|n| n.display_label() == "Database").unwrap().id;
+        assert!(doc.edges.iter().any(|e| e.source.node_id == api_id && e.target.node_id == db_id),
+            "api→db edge missing");
     }
 
     #[test]
