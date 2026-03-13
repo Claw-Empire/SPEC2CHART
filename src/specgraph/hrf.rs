@@ -52,7 +52,8 @@ use std::collections::HashMap;
 ///   `{server}` `{database}` `{cloud}` `{user}` `{service}` `{queue}` `{cache}` `{internet}`
 ///   `{decision}` `{start}` `{end}` `{process}` `{task}` `{load-balancer}`
 ///   `{z:N}` — 3D layer offset (positive = closer to camera)
-///   `{layer:N}` / `{level:N}` / `{tier:N}` — 3D layer as index × 120
+///   `{layer:N}` / `{level:N}` / `{tier:N}` — 3D layer as index × 120 (N=0,1,2…)
+///   `{layer:db}` `{layer:api}` `{layer:frontend}` `{layer:edge}` `{layer:infra}` — semantic tier names
 ///   `{3d-depth:N}` / `{depth:N}` — custom extrusion thickness in 3D view (world units; default 40)
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
 ///   `{badge:text}` / `{v:text}` — text/version badge (alias for icon)
@@ -133,6 +134,27 @@ use std::collections::HashMap;
 /// ```
 /// Creates nodes with auto-generated IDs (step1, step2, …) and sequential edges between them.
 /// Supports optional `{tags}` for shape, fill, etc. Bullet (`-`) or number (`1.`) prefix is stripped.
+///
+/// ### `## Grid [cols=N]` section
+/// ```text
+/// ## Grid cols=4
+/// - [a] Feature A {fill:blue}
+/// - [b] Feature B {fill:green}
+/// - [c] Feature C {fill:red}
+/// - [d] Feature D {fill:yellow}
+/// ```
+/// Nodes are laid out in a grid (default 3 columns). Aliases: `## Matrix`, `## Table`.
+/// Accepts `cols=N` or just `## Grid 4` (bare number = column count).
+/// Nodes are pinned in place so they won't be moved by auto-layout.
+///
+/// ### Edge label syntax
+/// ```text
+/// a "label" --> b         ← prefix quoted label (original)
+/// a ->|label| b           ← Mermaid-style pipe label
+/// a -> b: label text      ← suffix colon label
+/// a → b                   ← Unicode arrow (same as -->)
+/// a ↔ b                   ← bidirectional Unicode arrow (<->)
+/// ```
 ///
 /// ### `## Groups` section
 /// ```text
