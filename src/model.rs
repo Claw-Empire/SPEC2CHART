@@ -692,6 +692,8 @@ pub struct ImportHints {
     pub camera_pitch: Option<f32>,
     /// Switch to 3D view automatically on import
     pub view_3d: Option<bool>,
+    /// Auto-fit the viewport to show all nodes after import
+    pub auto_fit: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

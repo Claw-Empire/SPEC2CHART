@@ -616,8 +616,15 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 }
             }
             "zoom" | "initial-zoom" | "scale" => {
-                if let Ok(z) = val.trim().parse::<f32>() {
-                    doc.import_hints.zoom = Some(z.clamp(0.1, 4.0));
+                match val.trim().to_lowercase().as_str() {
+                    "fit" | "auto" | "auto-fit" | "autofit" => {
+                        doc.import_hints.auto_fit = true;
+                    }
+                    _ => {
+                        if let Ok(z) = val.trim().parse::<f32>() {
+                            doc.import_hints.zoom = Some(z.clamp(0.1, 4.0));
+                        }
+                    }
                 }
             }
             // 3D camera: camera_yaw = -0.4, camera_pitch = 0.6, view = 3d
