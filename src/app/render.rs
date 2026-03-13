@@ -52,12 +52,6 @@ fn semantic_icon_for_label(label: &str) -> Option<&'static str> {
     None
 }
 
-/// Draw a gradient-filled rect using a mesh.
-/// angle_deg: 0=top→bottom, 90=left→right, 45=↘, 135=↗
-fn paint_gradient_rect(painter: &egui::Painter, rect: Rect, color_top: Color32, color_bot: Color32) {
-    paint_gradient_rect_angle(painter, rect, color_top, color_bot, 0);
-}
-
 fn paint_gradient_rect_angle(painter: &egui::Painter, rect: Rect, color_a: Color32, color_b: Color32, angle_deg: u8) {
     let mut mesh = egui::Mesh::default();
     // Assign corner colors based on direction (TL, TR, BR, BL)
@@ -1102,6 +1096,40 @@ impl FlowchartApp {
             (Some(s), Some(t)) => (s, t),
             _ => return,
         };
+
+        // Self-loop: same source and target node — draw a circular arc above the node
+        if edge.source.node_id == edge.target.node_id {
+            let is_selected = self.selection.contains_edge(&edge.id);
+            let edge_color = to_color32(edge.style.color);
+            let width = edge.style.width * self.viewport.zoom.sqrt();
+            let node_rect = {
+                let tl = self.viewport.canvas_to_screen(src_node.pos());
+                let sz = src_node.size_vec() * self.viewport.zoom;
+                Rect::from_min_size(tl, sz)
+            };
+            // Arc center offset above top-right corner
+            let arc_cx = node_rect.max.x - node_rect.width() * 0.2;
+            let arc_cy = node_rect.min.y - node_rect.height() * 0.35;
+            let radius = node_rect.width() * 0.3 + 8.0;
+            let stroke = Stroke::new(if is_selected { width * 1.4 } else { width },
+                if is_selected { SELECTION_COLOR } else { edge_color });
+            // Draw a circular arc (approximated with segments)
+            let steps = 24_usize;
+            let start_angle = std::f32::consts::FRAC_PI_2; // start from bottom
+            let end_angle = start_angle + std::f32::consts::PI * 2.0 * 0.75; // 270° arc
+            let mut prev = Pos2::new(arc_cx + radius * start_angle.cos(), arc_cy + radius * start_angle.sin());
+            for i in 1..=steps {
+                let a = start_angle + (end_angle - start_angle) * i as f32 / steps as f32;
+                let pt = Pos2::new(arc_cx + radius * a.cos(), arc_cy + radius * a.sin());
+                painter.line_segment([prev, pt], stroke);
+                prev = pt;
+            }
+            // Arrowhead at end
+            let a_prev_angle = start_angle + (end_angle - start_angle) * (steps - 1) as f32 / steps as f32;
+            let arrow_from = Pos2::new(arc_cx + radius * a_prev_angle.cos(), arc_cy + radius * a_prev_angle.sin());
+            self.draw_arrow_head(painter, arrow_from, prev, edge_color, width, edge.style.arrow_head);
+            return;
+        }
 
         let src = self
             .viewport

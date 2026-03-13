@@ -4254,7 +4254,7 @@ impl FlowchartApp {
         let h_canvas = max_y - min_y;
         let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(9.0, 13.0);
         let lbl_color = SELECTION_COLOR.gamma_multiply(0.75);
-        let bg = Color32::from_rgba_premultiplied(16, 16, 28, 180);
+        let bg = DIM_OVERLAY;
         let w_text = format!("{:.0}", w_canvas);
         let w_pos = Pos2::new(bbox.center().x, bbox.max.y + 10.0);
         let w_galley = painter.layout_no_wrap(w_text.clone(), FontId::proportional(font_sz), lbl_color);
@@ -4344,9 +4344,8 @@ impl FlowchartApp {
                 let screen_size = node.size_vec() * self.viewport.zoom;
                 let screen_rect = Rect::from_min_size(screen_pos, screen_size);
                 if !screen_rect.intersects(canvas_rect) { continue; }
-                let alpha = if focus_neighbors.contains(&node.id) { 90u8 } else { 190u8 };
-                painter.rect_filled(screen_rect, CornerRadius::same(4),
-                    Color32::from_rgba_premultiplied(16, 16, 28, alpha));
+                let dim = if focus_neighbors.contains(&node.id) { FOCUS_DIM_NEAR } else { FOCUS_DIM_FAR };
+                painter.rect_filled(screen_rect, CornerRadius::same(4), dim);
             }
         }
         if let Some(filter_tag) = self.tag_filter {
@@ -4356,8 +4355,7 @@ impl FlowchartApp {
                 let screen_size = node.size_vec() * self.viewport.zoom;
                 let screen_rect = Rect::from_min_size(screen_pos, screen_size);
                 if !screen_rect.intersects(canvas_rect) { continue; }
-                painter.rect_filled(screen_rect, CornerRadius::same(4),
-                    Color32::from_rgba_premultiplied(12, 12, 22, 175));
+                painter.rect_filled(screen_rect, CornerRadius::same(4), DIM_OVERLAY_HEAVY);
             }
         }
     }
@@ -4366,7 +4364,7 @@ impl FlowchartApp {
     fn draw_drag_ghosts(&self, painter: &egui::Painter, canvas_rect: Rect) {
         if let DragState::DraggingNode { start_positions, .. } = &self.drag {
             if start_positions.len() >= 2 {
-                let ghost_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 60));
+                let ghost_stroke = Stroke::new(1.0, GHOST_STROKE);
                 for (node_id, orig_pos) in start_positions {
                     if let Some(node) = self.document.find_node(node_id) {
                         let screen_tl = self.viewport.canvas_to_screen(*orig_pos);

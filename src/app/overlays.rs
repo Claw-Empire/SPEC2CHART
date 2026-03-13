@@ -3,7 +3,7 @@
 // Extracted from mod.rs to keep the main update() loop concise.
 // Each method draws one overlay and manages its own open/close state.
 
-use egui::{Color32, Pos2, Rect, Vec2};
+use egui::{Color32, Pos2, Vec2};
 use crate::app::{FlowchartApp, ACCENT, SURFACE0, SURFACE1, TEXT_DIM, TEXT_SECONDARY};
 use crate::model::*;
 

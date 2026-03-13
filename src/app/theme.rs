@@ -314,7 +314,6 @@ pub const FK_COLOR: Color32 = Color32::from_rgb(249, 226, 175);
 // Minimap
 pub const MINIMAP_BG: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 200);
 pub const MINIMAP_BORDER: Color32 = Color32::from_rgba_premultiplied(80, 80, 80, 180);
-pub const MINIMAP_NODE: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 220);
 pub const MINIMAP_VP_FILL: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 30);
 pub const MINIMAP_VP_STROKE: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 150);
 
