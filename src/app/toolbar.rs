@@ -361,12 +361,29 @@ impl FlowchartApp {
                                 Ok(doc) => {
                                     let n = doc.nodes.len();
                                     let e = doc.edges.len();
-                                    egui::RichText::new(format!("✓ {} nodes, {} edges", n, e))
+                                    let layers = {
+                                        let mut zs: Vec<f32> = doc.nodes.iter()
+                                            .map(|nd| nd.z_offset)
+                                            .collect();
+                                        zs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                                        zs.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+                                        zs.len()
+                                    };
+                                    let title_bit = if doc.title.is_empty() { String::new() }
+                                        else { format!("\"{}\"  ", doc.title) };
+                                    let layers_bit = if layers > 1 { format!("  {layers}L") } else { String::new() };
+                                    let named_bit = if !doc.layer_names.is_empty() {
+                                        format!("  ({} named)", doc.layer_names.len())
+                                    } else { String::new() };
+                                    egui::RichText::new(format!(
+                                        "✓ {}{} nodes, {} edges{}{}",
+                                        title_bit, n, e, layers_bit, named_bit
+                                    ))
                                         .size(9.5)
                                         .color(egui::Color32::from_rgb(166, 227, 161))
                                 }
                                 Err(ref err) => {
-                                    let short = if err.len() > 60 { &err[..60] } else { err };
+                                    let short = if err.len() > 72 { &err[..72] } else { err };
                                     egui::RichText::new(format!("✗ {}", short))
                                         .size(9.5)
                                         .color(egui::Color32::from_rgb(243, 139, 168))

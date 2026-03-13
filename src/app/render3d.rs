@@ -982,10 +982,19 @@ impl FlowchartApp {
                 Color32::from_rgb(243, 139, 168), // red
                 Color32::from_rgb(148, 226, 213), // teal
             ];
+            // Compute node count per layer index for badges
+            let mut layer_counts: std::collections::HashMap<i32, usize> =
+                std::collections::HashMap::new();
+            for node in &self.document.nodes {
+                let idx = (node.z_offset / 120.0).round() as i32;
+                *layer_counts.entry(idx).or_insert(0) += 1;
+            }
             let mut y = canvas_rect.min.y + 10.0;
             for (i, (layer_idx, name)) in sorted_layers.iter().enumerate() {
                 let color = pill_colors[i % pill_colors.len()];
-                let text = format!("L{}  {}", layer_idx, name);
+                let count = layer_counts.get(layer_idx).copied().unwrap_or(0);
+                let count_badge = if count > 0 { format!(" ×{}", count) } else { String::new() };
+                let text = format!("L{}  {}{}", layer_idx, name, count_badge);
                 let galley = painter.layout_no_wrap(
                     text.clone(),
                     FontId::proportional(10.5),
