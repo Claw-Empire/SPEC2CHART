@@ -20,14 +20,17 @@ use std::collections::HashMap;
 /// - [id] Label text {critical}              ← tag badge
 /// - [id] Label text {pinned} {x:100} {y:200} ← pinned to canvas position
 ///
-/// ## Layer 0                               ← 3D layer sections (z = 0)
-/// - [db] Database {circle}                 ← all nodes in this section get z=0
+/// ## Layer 0: Database                     ← named 3D layer section (z = 0)
+/// - [db] Database {circle}                 ← all nodes get z=0
+///   Stores all user data.                  ← indented description → tooltip
 ///
-/// ## Layer 1                               ← z = 1 × 120 = 120
-/// - [api] API Service
+/// ## Layer 1: Backend                      ← z = 1 × 120 = 120
+/// - [api] API Service {layer:1}            ← {layer:N} = z × 120 (same as section)
+///
+/// // This is a comment — ignored           ← // line comments supported
 ///
 /// ## Layer 120                             ← explicit z value (> 10 = raw z)
-/// - [frontend] Web App
+/// - [frontend] Web App {z:240}             ← {z:N} explicit raw z
 ///
 /// ## Flow
 /// id "label" --> id
@@ -563,6 +566,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
                 z_offset = z;
+            }
+        } else if tag.starts_with("layer:") {
+            // {layer:N} is a human-friendly alias for z = N * 120
+            if let Ok(v) = tag[6..].trim().parse::<f32>() {
+                z_offset = v * 120.0;
             }
         } else if tag.starts_with("fill:") {
             fill_color = tag_to_fill_color(tag[5..].trim());

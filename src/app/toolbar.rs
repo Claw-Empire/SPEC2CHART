@@ -413,15 +413,19 @@ impl FlowchartApp {
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
                         let entries: &[(&str, &str)] = &[
+                            ("Sections", "## Nodes / ## Flow / ## Notes"),
+                            ("3D layers", "## Layer 0: Database / ## Layer 1: Backend"),
+                            ("3D layers", "{z:N} (explicit px) / {layer:N} (N×120)"),
+                            ("Comments", "// this line is ignored"),
                             ("Node shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector}"),
-                            ("3D layers", "## Layer 0 / ## Layer 1 / {z:N}"),
                             ("Tags", "{critical} {warning} {ok} {info}"),
                             ("Style", "{fill:blue} {bold} {italic} {shadow} {dashed-border}"),
                             ("Size", "{w:200} {h:100} {r:8} {border:2}"),
                             ("Align", "{align:left/right} {valign:top/bottom}"),
                             ("Position", "{pinned} {x:100} {y:200}"),
-                            ("Icon", "{icon:🔒}"),
+                            ("Icon/Group", "{icon:🔒} {frame}"),
                             ("Special", "{entity} {text}"),
+                            ("Desc (indent)", "  Description line under node"),
                             ("Edge", "{dashed} {glow} {animated} {thick} {ortho}"),
                             ("Edge", "{arrow:open/circle/none} {bend:0.3}"),
                             ("Edge", "{color:blue} {from:label} {to:label}"),
