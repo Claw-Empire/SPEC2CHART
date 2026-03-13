@@ -1,33 +1,37 @@
 # Office Network Topology
 
-Network diagram showing a typical office network infrastructure.
+Network diagram showing a typical office network infrastructure with segmented VLANs.
+
+## Config
+bg = dots
+flow = TB
 
 ## Nodes
-- [internet] Internet {parallelogram} {fill:yellow}
-  External internet connection.
-- [fw] Firewall {diamond} {fill:red} {critical}
+- [internet] Internet {internet} {sublabel:ISP · 1Gbps}
+  External internet connection via ISP uplink.
+- [fw] Firewall {diamond} {fill:red} {critical} {highlight}
   Perimeter security device. All traffic filtered here.
-- [router] Core Router {hexagon} {fill:blue}
+- [router] Core Router {hexagon} {fill:blue} {sublabel:Layer 3}
   Layer 3 routing between network segments.
-- [sw_core] Core Switch {connector}
-  High-speed backbone switching (10G uplinks).
-- [sw_user] User Switch
-  Access layer for workstations (1G ports).
-- [sw_server] Server Switch
-  Dedicated server segment (10G).
-- [ap1] WiFi AP 1 {circle}
+- [sw_core] Core Switch {connector} {sublabel:10G uplinks} {highlight}
+  High-speed backbone switching.
+- [sw_user] User Switch {sublabel:1G ports}
+  Access layer for workstations.
+- [sw_server] Server Switch {sublabel:10G dedicated}
+  Dedicated server segment.
+- [ap1] WiFi AP 1 {circle} {sublabel:Floor 1}
   2.4/5GHz wireless access point, floor 1.
-- [ap2] WiFi AP 2 {circle}
+- [ap2] WiFi AP 2 {circle} {sublabel:Floor 2}
   2.4/5GHz wireless access point, floor 2.
-- [file] File Server {fill:teal}
+- [file] File Server {fill:teal} {note:Shared storage + backups}
   Shared storage and backups.
-- [db] Database Server {circle} {fill:blue}
+- [db] Database Server {circle} {fill:blue} {sublabel:PostgreSQL}
   Production database cluster.
-- [web] Web Server {fill:teal}
+- [web] Web Server {fill:teal} {sublabel:Intranet}
   Internal intranet and web services.
-- [pc1] Workstations
-  User endpoints (DHCP 192.168.1.0/24).
-- [vpn] VPN Gateway {hexagon} {fill:purple}
+- [pc1] Workstations {sublabel:DHCP 192.168.1.x}
+  User endpoints.
+- [vpn] VPN Gateway {hexagon} {fill:purple} {note:Remote staff access}
   Remote access for staff.
 
 ## Notes
@@ -39,7 +43,7 @@ Network diagram showing a typical office network infrastructure.
 internet -> fw {thick}
 fw -> router {thick}
 fw -> vpn {dashed}
-router -> sw_core {thick} {glow}
+router -> sw_core {thick}
 sw_core -> sw_user
 sw_core -> sw_server
 sw_user -> ap1
@@ -48,4 +52,4 @@ sw_user -> pc1
 sw_server -> file
 sw_server -> db
 sw_server -> web
-vpn -> sw_user {dashed}
+vpn -> sw_user {dashed} {note:tunnel}

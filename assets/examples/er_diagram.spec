@@ -2,14 +2,18 @@
 
 Entity-relationship diagram for a simple e-commerce platform.
 
+## Config
+bg = dots
+flow = LR
+
 ## Nodes
-- [users] users {entity}
+- [users] users {entity} {highlight}
   id (uuid) [PK]
   email (varchar)
   name (varchar)
   created_at (timestamp)
 
-- [orders] orders {entity}
+- [orders] orders {entity} {highlight} {note:Core transaction table}
   id (uuid) [PK]
   user_id (uuid) [FK]
   status (varchar)
@@ -30,7 +34,7 @@ Entity-relationship diagram for a simple e-commerce platform.
   quantity (int)
   unit_price (decimal)
 
-- [categories] categories {entity}
+- [categories] categories {entity} {note:Supports nested categories}
   id (uuid) [PK]
   name (varchar)
   parent_id (uuid) [FK]
