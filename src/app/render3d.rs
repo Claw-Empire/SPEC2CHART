@@ -822,9 +822,10 @@ impl FlowchartApp {
         // Nodes (back to front) with 3D shapes
         for proj in &projections {
             let node = &self.document.nodes[proj.node_idx];
+            let thickness = if node.depth_3d > 0.0 { node.depth_3d } else { CUBE_THICKNESS };
             let extrude = self.compute_extrude(
                 [node.rect().center().x, node.rect().center().y, proj.z],
-                CUBE_THICKNESS,
+                thickness,
                 screen_center,
                 screen_size,
             );

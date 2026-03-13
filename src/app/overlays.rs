@@ -280,6 +280,7 @@ impl FlowchartApp {
                 frame_color: default_frame_color(),
                 icon: String::new(),
                 sublabel: String::new(),
+                depth_3d: 0.0,
             };
             let id = node.id;
             self.document.nodes.push(node);

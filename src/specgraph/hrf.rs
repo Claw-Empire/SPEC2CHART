@@ -50,6 +50,7 @@ use std::collections::HashMap;
 ///   `{decision}` `{start}` `{end}` `{process}` `{task}` `{load-balancer}`
 ///   `{z:N}` — 3D layer offset (positive = closer to camera)
 ///   `{layer:N}` / `{level:N}` / `{tier:N}` — 3D layer as index × 120
+///   `{3d-depth:N}` / `{depth:N}` — custom extrusion thickness in 3D view (world units; default 40)
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
 ///   `{badge:text}` / `{v:text}` — text/version badge (alias for icon)
 ///   `{pinned}` — pin node to canvas position
@@ -783,10 +784,17 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut text_color: Option<[u8; 4]> = None;
     let mut tooltip_text: Option<String> = None;
     let mut sublabel_text: Option<String> = None;
+    let mut depth_3d: f32 = 0.0;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
                 z_offset = z;
+            }
+        } else if tag.starts_with("3d-depth:") || (tag.starts_with("depth:") && !tag.starts_with("depth-scale:")) {
+            // {3d-depth:N} — custom extrusion depth in 3D view (world units)
+            let colon = tag.find(':').unwrap();
+            if let Ok(d) = tag[colon+1..].trim().parse::<f32>() {
+                depth_3d = d.clamp(0.0, 400.0);
             }
         } else if tag.starts_with("layer:") || tag.starts_with("level:") || tag.starts_with("tier:") {
             // {layer:N} / {level:N} / {tier:N} are human-friendly aliases for z = N * 120
@@ -970,6 +978,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     }
     if let Some(sl) = sublabel_text {
         node.sublabel = sl;
+    }
+    if depth_3d > 0.0 {
+        node.depth_3d = depth_3d;
     }
 
     Ok((id, node))
@@ -1325,11 +1336,14 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let sublabel_tag = if !node.sublabel.is_empty() {
                 format!(" {{sublabel:{}}}", node.sublabel)
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let depth_3d_tag = if node.depth_3d > 0.0 {
+                format!(" {{3d-depth:{:.0}}}", node.depth_3d)
+            } else { String::new() };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
