@@ -432,7 +432,7 @@ impl FlowchartApp {
                             let t = self.viewport.canvas_to_screen(tn.port_position(edge.target.side));
                             let offset = 60.0 * self.viewport.zoom;
                             let (cp1, cp2) = super::interaction::control_points_for_side(s, t, edge.source.side, offset);
-                            let dim_color = Color32::from_rgba_unmultiplied(100, 100, 120, 40);
+                            let dim_color = self.theme.text_dim.gamma_multiply(0.15);
                             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
                                 [s, cp1, cp2, t], false, Color32::TRANSPARENT,
                                 Stroke::new(edge.style.width, dim_color),
@@ -456,7 +456,7 @@ impl FlowchartApp {
                             let (cp1, cp2) = super::interaction::control_points_for_side(s, t, edge.source.side, off);
                             let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
                                 [s, cp1, cp2, t], false, Color32::TRANSPARENT,
-                                Stroke::new(edge.style.width, Color32::from_rgba_unmultiplied(80, 80, 100, 20)),
+                                Stroke::new(edge.style.width, self.theme.text_dim.gamma_multiply(0.08)),
                             );
                             painter.add(bezier);
                         }
@@ -1147,7 +1147,7 @@ impl FlowchartApp {
         if self.selection.node_ids.is_empty() { return; }
 
         let threshold = 4.0 / self.viewport.zoom; // world-space tolerance
-        let guide_color = egui::Color32::from_rgba_premultiplied(100, 180, 255, 160);
+        let guide_color = self.theme.accent.gamma_multiply(0.63);
         let guide_stroke = Stroke::new(1.0, guide_color);
 
         // Collect dragged node rects
@@ -1211,10 +1211,10 @@ impl FlowchartApp {
 
         // Show measurements to nodes that overlap in one axis and are within 200 canvas-units on the other
         let threshold = 200.0;
-        let dist_color = Color32::from_rgba_unmultiplied(255, 75, 75, 220);
+        let dist_color = Color32::from_rgb(255, 75, 75).gamma_multiply(0.86);
         let line_stroke = Stroke::new(1.0, dist_color);
-        let label_bg = Color32::from_rgba_unmultiplied(255, 75, 75, 200);
-        let label_fg = Color32::WHITE;
+        let label_bg = Color32::from_rgb(255, 75, 75).gamma_multiply(0.78);
+        let label_fg = self.theme.text_primary;
 
         for node in &self.document.nodes {
             if sel.contains(&node.id) { continue; }
@@ -1478,7 +1478,7 @@ impl FlowchartApp {
                 let port_canvas = node.port_position(side);
                 let port_screen = self.viewport.canvas_to_screen(port_canvas);
                 let near = (port_screen - *current_screen).length() < 20.0;
-                let color = if near { self.theme.accent } else { Color32::from_rgba_unmultiplied(147, 153, 178, 160) };
+                let color = if near { self.theme.accent } else { self.theme.text_dim.gamma_multiply(0.63) };
                 painter.circle_filled(port_screen, if near { r * 1.8 } else { r }, color);
                 if near || self.viewport.zoom > 0.7 {
                     let offset = match side {
@@ -1506,7 +1506,7 @@ impl FlowchartApp {
                     let r = PORT_RADIUS * self.viewport.zoom.sqrt() * 2.0;
                     painter.circle_filled(port_pos, r * 1.5, self.theme.accent_select_bg);
                     painter.circle_filled(port_pos, r, self.theme.accent);
-                    painter.circle_stroke(port_pos, r, Stroke::new(2.0, Color32::WHITE));
+                    painter.circle_stroke(port_pos, r, Stroke::new(2.0, self.theme.text_primary));
                     // Port name badge
                     let side_name = match target_port.side {
                         PortSide::Top => "Top", PortSide::Bottom => "Bottom",
@@ -1516,8 +1516,10 @@ impl FlowchartApp {
                     let badge_w = side_name.len() as f32 * 5.5 + 10.0;
                     let badge_rect = Rect::from_center_size(badge_pos, Vec2::new(badge_w, 16.0));
                     painter.rect_filled(badge_rect, CornerRadius::same(4), self.theme.accent);
+                    let badge_text_col = crate::app::theme::auto_contrast_text(
+                        [self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), 255]);
                     painter.text(badge_pos, Align2::CENTER_CENTER, side_name,
-                        FontId::proportional(9.5), Color32::BLACK);
+                        FontId::proportional(9.5), crate::app::theme::to_color32(badge_text_col));
                 }
             }
         }
@@ -1582,7 +1584,7 @@ impl FlowchartApp {
                 painter.rect_filled(
                     pill_rect,
                     CornerRadius::same(16),
-                    Color32::from_rgba_premultiplied(24, 24, 37, bg_alpha),
+                    self.theme.mantle.gamma_multiply(bg_alpha as f32 / 255.0),
                 );
                 painter.rect_stroke(
                     pill_rect,
@@ -1935,7 +1937,7 @@ impl FlowchartApp {
         if let Some(ref cl) = cursor_line {
             painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, cl,
                 egui::FontId::proportional(9.5),
-                Color32::from_rgba_unmultiplied(137, 220, 235, 160)); // cyan tint
+                self.theme.accent.gamma_multiply(0.7)); // theme accent tint
         }
     }
 
@@ -2697,12 +2699,13 @@ impl FlowchartApp {
         );
 
         // Horizontal ticks
+        let major_every = if zoom < 0.5 { 10i32 } else if zoom > 2.0 { 2i32 } else { 5i32 };
         let world_start_x = ((canvas_rect.min.x - self.viewport.offset[0]) / zoom / interval).floor() * interval;
         let mut wx = world_start_x;
         while self.viewport.canvas_to_screen(Pos2::new(wx, 0.0)).x < canvas_rect.max.x {
             let sx = self.viewport.canvas_to_screen(Pos2::new(wx, 0.0)).x;
             if sx > canvas_rect.min.x + ruler_h {
-                let is_major = (wx / interval).round() as i32 % 5 == 0;
+                let is_major = (wx / interval).round() as i32 % major_every == 0;
                 let tick_h = if is_major { ruler_h } else { ruler_h * 0.5 };
                 painter.line_segment(
                     [Pos2::new(sx, canvas_rect.min.y), Pos2::new(sx, canvas_rect.min.y + tick_h)],
@@ -2727,7 +2730,7 @@ impl FlowchartApp {
         while self.viewport.canvas_to_screen(Pos2::new(0.0, wy)).y < canvas_rect.max.y {
             let sy = self.viewport.canvas_to_screen(Pos2::new(0.0, wy)).y;
             if sy > canvas_rect.min.y + ruler_h {
-                let is_major = (wy / interval).round() as i32 % 5 == 0;
+                let is_major = (wy / interval).round() as i32 % major_every == 0;
                 let tick_w = if is_major { ruler_h } else { ruler_h * 0.5 };
                 painter.line_segment(
                     [Pos2::new(canvas_rect.min.x, sy), Pos2::new(canvas_rect.min.x + tick_w, sy)],
@@ -2967,11 +2970,18 @@ impl FlowchartApp {
 
     fn draw_grid(&self, painter: &egui::Painter, canvas_rect: Rect) {
         let zoom = self.viewport.zoom;
-        let grid_screen = self.grid_size * zoom;
-
-        if grid_screen < 8.0 {
-            return;
-        }
+        // Multi-level fallback: if the grid is too dense, step up to 5x or 25x the grid interval
+        // so that some reference lines are always visible at any zoom level.
+        let raw_grid_screen = self.grid_size * zoom;
+        let (grid_screen, effective_major_every) = if raw_grid_screen >= 8.0 {
+            (raw_grid_screen, 5_i32)
+        } else if raw_grid_screen * 5.0 >= 8.0 {
+            (raw_grid_screen * 5.0, 5_i32)    // minor cells are 5× grid_size
+        } else if raw_grid_screen * 25.0 >= 8.0 {
+            (raw_grid_screen * 25.0, 5_i32)   // minor cells are 25× grid_size
+        } else {
+            return; // truly too small to show anything useful
+        };
 
         let max_dots = 5000;
         let cols = (canvas_rect.width() / grid_screen) as usize;
@@ -2986,8 +2996,8 @@ impl FlowchartApp {
         let start_x = canvas_rect.min.x + offset_x;
         let start_y = canvas_rect.min.y + offset_y;
 
-        // Major grid every 5 minor cells
-        let major_every = 5_i32;
+        // Major grid every N minor cells (adaptive based on zoom level)
+        let major_every = effective_major_every;
         let major_grid_screen = grid_screen * major_every as f32;
         let major_offset_x = self.viewport.offset[0] % major_grid_screen;
         let major_offset_y = self.viewport.offset[1] % major_grid_screen;
@@ -3388,8 +3398,8 @@ impl FlowchartApp {
         };
 
         // Draw edges first (behind nodes)
-        let edge_color_mm = Color32::from_rgba_unmultiplied(100, 110, 130, 120);
-        let edge_sel_col  = Color32::from_rgba_unmultiplied(137, 180, 250, 200);
+        let edge_color_mm = self.theme.text_dim.gamma_multiply(0.5);
+        let edge_sel_col  = self.theme.accent.gamma_multiply(0.8);
         for edge in &self.document.edges {
             let src_node = self.document.find_node(&edge.source.node_id);
             let tgt_node = self.document.find_node(&edge.target.node_id);
@@ -3413,12 +3423,17 @@ impl FlowchartApp {
             let is_selected = self.selection.contains_node(&node.id);
             // Use actual node fill color in minimap for visual accuracy
             let node_color = if node.is_frame {
-                Color32::from_rgba_unmultiplied(89, 91, 118, 50)
+                self.theme.surface1.gamma_multiply(0.3)
             } else if is_selected {
                 self.theme.accent
             } else {
-                let [r, g, b, _] = node.style.fill_color;
-                Color32::from_rgba_unmultiplied(r, g, b, 200)
+                let [r, g, b, a] = node.style.fill_color;
+                if a < 30 {
+                    // Transparent/nearly-transparent nodes: use theme minimap color
+                    self.theme.minimap_node
+                } else {
+                    Color32::from_rgba_unmultiplied(r, g, b, 200)
+                }
             };
             let cr_val = (mini_rect.width().min(mini_rect.height()) * 0.2) as u8;
             if mini_rect.area() > 2.0 {
@@ -3428,7 +3443,7 @@ impl FlowchartApp {
                     let label = node.display_label();
                     let short: String = label.chars().take(8).collect();
                     let font_size = (mini_rect.height() * 0.55).clamp(5.0, 8.0);
-                    let text_color = Color32::from_rgba_unmultiplied(220, 220, 240, 160);
+                    let text_color = self.theme.text_primary.gamma_multiply(0.65);
                     painter.text(
                         mini_rect.center(),
                         Align2::CENTER_CENTER,
@@ -3468,7 +3483,7 @@ impl FlowchartApp {
                     Align2::CENTER_CENTER,
                     &format!("{}%", zoom_pct),
                     FontId::proportional(6.5),
-                    Color32::from_rgba_unmultiplied(137, 180, 250, 180),
+                    self.theme.accent.gamma_multiply(0.7),
                 );
             }
         }
@@ -3630,7 +3645,7 @@ impl FlowchartApp {
         painter.rect_filled(
             screen_rect,
             CornerRadius::same(4),
-            Color32::from_rgba_premultiplied(20, 20, 35, 200),
+            self.theme.tooltip_bg,
         );
         painter.rect_stroke(
             screen_rect,
@@ -3749,17 +3764,17 @@ impl FlowchartApp {
 
             // Draw button
             let bg = if hovered {
-                Color32::from_rgba_premultiplied(137, 180, 250, 200)
+                self.theme.accent.gamma_multiply(0.78)
             } else {
-                Color32::from_rgba_premultiplied(50, 55, 80, 180)
+                self.theme.surface0.gamma_multiply(0.71)
             };
             let painter = ui.painter();
             painter.circle_filled(*center, btn_size / 2.0, bg);
             painter.circle_stroke(*center, btn_size / 2.0,
-                Stroke::new(1.5, Color32::from_rgba_premultiplied(137, 180, 250, 160)));
+                Stroke::new(1.5, self.theme.accent.gamma_multiply(0.63)));
             painter.text(*center, Align2::CENTER_CENTER, *label,
                 FontId::proportional(11.0),
-                if hovered { Color32::from_rgb(17, 17, 27) } else { Color32::from_rgb(137, 180, 250) });
+                if hovered { self.theme.crust } else { self.theme.accent });
 
             if clicked {
                 // Compute new node position in world space
