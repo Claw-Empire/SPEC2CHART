@@ -576,7 +576,7 @@ impl FlowchartApp {
                             ("Color", "{fill:blue/green/red/yellow/purple/teal/orange/sky/lavender/gray/none}"),
                             ("Color", "{fill:#rrggbb} {border-color:red} {text-color:white}"),
                             ("Style", "{bold} {italic} {shadow} {gradient} {dashed-border} {highlight}"),
-                            ("Opacity", "{opacity:50} (50%) or {opacity:0.5}"),
+                            ("Opacity", "{dim} {ghost} {muted} {hidden} / {opacity:50} (50%)"),
                             ("Size", "{size:200x80} or {w:200} {h:100} {r:8} {border:2}"),
                             ("Position", "{pos:100,200} (pinned) or {x:100} {y:200} {pinned}"),
                             ("Align", "{align:left/right} {valign:top/bottom}"),
@@ -609,7 +609,6 @@ impl FlowchartApp {
                             ("3D tier-color", "{tier-color} / auto-tier-color = true  (tier fill tints)"),
                             ("Grid layout", "## Grid cols=3  (auto grid layout, 3 columns)"),
                             ("Label refs", "REST API --> Database  or  \"REST API\" --> \"Database\""),
-                            ("Opacity", "{dim} {ghost} {muted} {hidden} {opacity:50}"),
                             ("Layout gap", "spacing = 120  (## Config, sets node gap in px)"),
                         ];
                         for (section, tags) in entries {
