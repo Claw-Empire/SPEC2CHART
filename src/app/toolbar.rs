@@ -388,6 +388,26 @@ impl FlowchartApp {
                     });
                 }
                 ui.add_space(2.0);
+                // Example specs row
+                ui.label(egui::RichText::new("Load Example:").size(9.5).color(self.theme.text_dim));
+                ui.add_space(2.0);
+                let example_specs: &[(&str, &str)] = &[
+                    ("Flow", include_str!("../../assets/examples/flowchart.spec")),
+                    ("3D Arch", include_str!("../../assets/examples/architecture_3d.spec")),
+                    ("ER", include_str!("../../assets/examples/er_diagram.spec")),
+                    ("Network", include_str!("../../assets/examples/network.spec")),
+                ];
+                ui.horizontal_wrapped(|ui| {
+                    for (name, spec_text) in example_specs {
+                        if ui.add(egui::Button::new(
+                            egui::RichText::new(*name).size(10.5).color(self.theme.accent)
+                        ).fill(self.theme.surface0)).clicked() {
+                            self.spec_paste_buf = spec_text.to_string();
+                            self.show_spec_paste_area = true;
+                        }
+                    }
+                });
+                ui.add_space(2.0);
                 // Spec cheatsheet toggle
                 if ui
                     .add_sized(
