@@ -42,8 +42,10 @@ fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::
         } else if trimmed.starts_with("//") {
             // Comment lines
             job.append(line, 0.0, fmt(c_comment));
-        } else if trimmed.contains("-->") || trimmed.contains("->") || trimmed.contains("<--") || trimmed.contains("<->") {
-            // Edge / flow lines — colour tags inline
+        } else if trimmed.contains("-->") || trimmed.contains("->") || trimmed.contains("<--") || trimmed.contains("<->")
+                 || trimmed.contains('→') || trimmed.contains('⇒') || trimmed.contains('←') || trimmed.contains('↔')
+                 || trimmed.contains('⟶') || trimmed.contains('⟵') || trimmed.contains('⇔') || trimmed.contains('⟷') {
+            // Edge / flow lines — colour tags inline (including Unicode arrow variants)
             append_line_with_tags(&mut job, line, c_arrow, c_tag, &font);
         } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
             // Node definition lines
@@ -65,8 +67,8 @@ fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::
     ui.fonts(|f| f.layout_job(job))
 }
 
-/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`
-/// and inline `// ...` trailing comments in comment_color.
+/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`,
+/// `"quoted strings"` in string_color, and inline `// ...` comments in comment_color.
 fn append_line_with_tags(
     job: &mut egui::text::LayoutJob,
     line: &str,
@@ -76,9 +78,11 @@ fn append_line_with_tags(
 ) {
     use egui::text::TextFormat;
     let c_comment = Color32::from_rgb(108, 112, 134);
+    let c_string  = Color32::from_rgb(249, 226, 175); // yellow — "quoted labels"
     let fmt_base    = TextFormat { font_id: font.clone(), color: base_color, ..Default::default() };
     let fmt_tag     = TextFormat { font_id: font.clone(), color: tag_color,  ..Default::default() };
     let fmt_comment = TextFormat { font_id: font.clone(), color: c_comment,  ..Default::default() };
+    let fmt_string  = TextFormat { font_id: font.clone(), color: c_string,   ..Default::default() };
 
     // Split off inline comment (// not preceded by ':' to preserve URLs)
     let (code_part, comment_part) = {
@@ -97,25 +101,51 @@ fn append_line_with_tags(
 
     let mut remaining = code_part;
     while !remaining.is_empty() {
-        if let Some(open) = remaining.find('{') {
-            // Append the part before the tag
-            if open > 0 {
-                job.append(&remaining[..open], 0.0, fmt_base.clone());
+        // Priority: {tag} > "string" — scan for whichever comes first
+        let tag_pos    = remaining.find('{');
+        let string_pos = remaining.find('"');
+        match (tag_pos, string_pos) {
+            (Some(t), Some(s)) if s < t => {
+                // Quoted string comes first
+                if s > 0 { job.append(&remaining[..s], 0.0, fmt_base.clone()); }
+                remaining = &remaining[s..];
+                // Find closing quote
+                if let Some(end) = remaining[1..].find('"') {
+                    job.append(&remaining[..end + 2], 0.0, fmt_string.clone());
+                    remaining = &remaining[end + 2..];
+                } else {
+                    job.append(remaining, 0.0, fmt_string.clone());
+                    break;
+                }
             }
-            remaining = &remaining[open..];
-            // Find closing brace
-            if let Some(close) = remaining.find('}') {
-                job.append(&remaining[..close + 1], 0.0, fmt_tag.clone());
-                remaining = &remaining[close + 1..];
-            } else {
-                // No closing brace — rest of line is a tag
-                job.append(remaining, 0.0, fmt_tag.clone());
-                remaining = "";
+            (Some(t), _) => {
+                // Tag comes first (or there's no string)
+                if t > 0 { job.append(&remaining[..t], 0.0, fmt_base.clone()); }
+                remaining = &remaining[t..];
+                if let Some(close) = remaining.find('}') {
+                    job.append(&remaining[..close + 1], 0.0, fmt_tag.clone());
+                    remaining = &remaining[close + 1..];
+                } else {
+                    job.append(remaining, 0.0, fmt_tag.clone());
+                    break;
+                }
+            }
+            (None, Some(s)) => {
+                // Only a quoted string remains
+                if s > 0 { job.append(&remaining[..s], 0.0, fmt_base.clone()); }
+                remaining = &remaining[s..];
+                if let Some(end) = remaining[1..].find('"') {
+                    job.append(&remaining[..end + 2], 0.0, fmt_string.clone());
+                    remaining = &remaining[end + 2..];
+                } else {
+                    job.append(remaining, 0.0, fmt_string.clone());
+                    break;
+                }
+            }
+            (None, None) => {
+                job.append(remaining, 0.0, fmt_base.clone());
                 break;
             }
-        } else {
-            job.append(remaining, 0.0, fmt_base.clone());
-            break;
         }
     }
     // Append inline comment part (if any) in comment color
