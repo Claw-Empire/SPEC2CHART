@@ -334,7 +334,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "config" | "settings" | "meta" => Section::Config,
                 "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
                 "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
-                "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None },
+                "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
@@ -514,7 +514,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             Section::Steps { .. } => {
                 // Handled below to allow mutation of section state
                 if trimmed.is_empty() { continue; }
-                let (s_default_z, s_last_id) = if let Section::Steps { default_z, last_step_id } = section {
+                // Extract step state with &mut for count update
+                let current_step = if let Section::Steps { step_count, .. } = &mut section {
+                    *step_count += 1;
+                    *step_count
+                } else { continue; };
+                let (s_default_z, s_last_id) = if let Section::Steps { default_z, last_step_id, .. } = section {
                     (default_z, last_step_id)
                 } else { continue; };
                 // Strip leading numbering or bullet
@@ -527,8 +532,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         &t[2..]
                     } else { t }
                 };
-                let step_idx = doc.nodes.len() + 1;
-                let auto_id = format!("step{}", step_idx);
+                let auto_id = format!("step{}", current_step);
                 let (label, tags) = extract_tags(stripped);
                 // Find shape tag — look for known shape names in tags
                 let shape = tags.iter()
@@ -543,6 +547,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 let mut node = Node::new(shape, egui::Pos2::ZERO);
                 if let NodeKind::Shape { label: lbl, .. } = &mut node.kind {
                     *lbl = label.trim().to_string();
+                }
+                // Add step number as sublabel if not already set
+                if node.sublabel.is_empty() {
+                    node.sublabel = format!("Step {}", current_step);
                 }
                 node.z_offset = s_default_z;
                 if let Some(fc) = fill { node.style.fill_color = fc; }
@@ -559,6 +567,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 if let Section::Steps { last_step_id, .. } = &mut section {
                     *last_step_id = Some(node_id);
                 }
+                // Note: step_count was already incremented at the start of this block
                 doc.nodes.push(node);
             }
             Section::None => {}
@@ -1132,8 +1141,8 @@ enum Section {
     Config,
     Palette,
     /// `## Steps` — numbered list creates sequential flowchart nodes with auto edges.
-    /// Tracks (last_step_id, section_z, step_shape).
-    Steps { default_z: f32, last_step_id: Option<NodeId> },
+    /// Tracks (last_step_id, section_z, step_count).
+    Steps { default_z: f32, last_step_id: Option<NodeId>, step_count: u32 },
 }
 
 // ---------------------------------------------------------------------------
