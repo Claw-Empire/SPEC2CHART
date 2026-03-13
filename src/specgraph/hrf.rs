@@ -782,6 +782,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut border_color: Option<[u8; 4]> = None;
     let mut text_color: Option<[u8; 4]> = None;
     let mut tooltip_text: Option<String> = None;
+    let mut sublabel_text: Option<String> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -864,6 +865,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag.starts_with("tooltip:") || tag.starts_with("tip:") || tag.starts_with("desc:") {
             let prefix = if tag.starts_with("tooltip:") { 8 } else if tag.starts_with("tip:") { 4 } else { 5 };
             tooltip_text = Some(tag[prefix..].trim().to_string());
+        } else if tag.starts_with("sublabel:") || tag.starts_with("sub:") || tag.starts_with("subtitle:") || tag.starts_with("caption:") {
+            let prefix = if tag.starts_with("sublabel:") { 9 }
+                else if tag.starts_with("sub:") { 4 }
+                else if tag.starts_with("subtitle:") { 9 }
+                else { 8 }; // caption:
+            sublabel_text = Some(tag[prefix..].trim().to_string());
         } else if tag.starts_with("border-color:") || tag.starts_with("stroke:") {
             let v = if tag.starts_with("border-color:") { &tag[13..] } else { &tag[7..] };
             border_color = tag_to_fill_color(v.trim());
@@ -960,6 +967,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         if let NodeKind::Shape { description, .. } = &mut node.kind {
             if description.is_empty() { *description = tt; }
         }
+    }
+    if let Some(sl) = sublabel_text {
+        node.sublabel = sl;
     }
 
     Ok((id, node))
@@ -1312,11 +1322,14 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     format!(" {{text-color:#{:02x}{:02x}{:02x}}}", tc[0], tc[1], tc[2])
                 }
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let sublabel_tag = if !node.sublabel.is_empty() {
+                format!(" {{sublabel:{}}}", node.sublabel)
+            } else { String::new() };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));

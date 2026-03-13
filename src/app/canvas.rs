@@ -1650,9 +1650,11 @@ impl FlowchartApp {
         };
 
         let font = egui::FontId::proportional(11.0);
+        let note_font = egui::FontId::proportional(10.5);
         let pad = 8.0;
-        let w = 220.0_f32;
-        let h = 26.0_f32;
+        let w = 240.0_f32;
+        let has_note = !edge.comment.is_empty();
+        let h = if has_note { 44.0_f32 } else { 26.0_f32 };
         let mut tx = mouse.x + 12.0;
         let mut ty = mouse.y - h - 6.0;
         if tx + w > canvas_rect.max.x { tx = mouse.x - w - 12.0; }
@@ -1660,7 +1662,17 @@ impl FlowchartApp {
         let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), Vec2::new(w, h));
         painter.rect_filled(bg_rect, egui::CornerRadius::same(4), self.theme.tooltip_bg);
         painter.rect_stroke(bg_rect, egui::CornerRadius::same(4), egui::Stroke::new(1.0, self.theme.tooltip_border), egui::StrokeKind::Outside);
-        painter.text(Pos2::new(tx + pad, ty + h / 2.0), Align2::LEFT_CENTER, &line, font, self.theme.text_secondary);
+        painter.text(Pos2::new(tx + pad, ty + 13.0), Align2::LEFT_CENTER, &line, font, self.theme.text_secondary);
+        if has_note {
+            let note_y = ty + 30.0;
+            painter.text(
+                Pos2::new(tx + pad, note_y),
+                Align2::LEFT_CENTER,
+                &format!("💬 {}", edge.comment),
+                note_font,
+                self.theme.text_dim,
+            );
+        }
     }
 
     fn draw_node_tooltip(&self, painter: &egui::Painter, hover_pos: Option<Pos2>, canvas_rect: Rect) {
