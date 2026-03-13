@@ -473,7 +473,9 @@ impl FlowchartApp {
 
         // F = fit selection (or all if nothing selected)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.is_none()) {
-            if !self.selection.is_empty() {
+            if self.view_mode == super::ViewMode::ThreeD {
+                self.fit_3d_to_content(ctx);
+            } else if !self.selection.is_empty() {
                 self.zoom_to_selection();
             } else {
                 self.fit_to_content();
@@ -1253,5 +1255,30 @@ impl FlowchartApp {
             format!("New node → chained {dir} (Enter to continue)"),
             std::time::Instant::now(),
         ));
+    }
+
+    /// Zoom the 3D camera to fit all nodes (adjusts distance only, resets to iso view).
+    pub(crate) fn fit_3d_to_content(&mut self, ctx: &egui::Context) {
+        if self.document.nodes.is_empty() { return; }
+        // Find bounding box of all nodes in world XY
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for node in &self.document.nodes {
+            min_x = min_x.min(node.position[0]);
+            min_y = min_y.min(node.position[1]);
+            max_x = max_x.max(node.position[0] + node.size[0]);
+            max_y = max_y.max(node.position[1] + node.size[1]);
+        }
+        let cx = (min_x + max_x) * 0.5;
+        let cy = (min_y + max_y) * 0.5;
+        let span = ((max_x - min_x).max(max_y - min_y)) * 1.4;
+        self.camera3d.target = [cx, cy, 0.0];
+        let now = ctx.input(|i| i.time);
+        self.camera3d.animate_to(-0.4, 0.6, now, 0.4);
+        self.camera3d.distance = span.max(400.0).min(8000.0);
+        ctx.request_repaint();
+        self.status_message = Some(("3D Fit".to_string(), std::time::Instant::now()));
     }
 }

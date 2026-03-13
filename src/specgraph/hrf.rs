@@ -83,6 +83,14 @@ use std::collections::HashMap;
 ///   `{to:label}` — target endpoint label
 ///   `{c-src:1}` — source cardinality (1 / 0..1 / 1..N / 0..N)
 ///   `{c-tgt:0..N}` — target cardinality (1 / 0..1 / 1..N / 0..N)
+///
+/// ### `## Groups` section
+/// ```text
+/// ## Groups
+/// - [grp_id] Group Label {fill:blue}
+///   node_id1, node_id2, node_id3
+/// ```
+/// Creates a frame node bounding all listed member nodes (after auto-layout).
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     let mut doc = FlowchartDocument::default();
     let mut id_map: HashMap<String, NodeId> = HashMap::new();
@@ -93,6 +101,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     // Track the last node added in Nodes section for multi-line descriptions
     let mut last_node_id: Option<NodeId> = None;
+
+    // ## Groups section: (group_id, label, fill_color, member_ids)
+    let mut groups: Vec<(String, String, Option<[u8;4]>, Vec<String>)> = Vec::new();
 
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
@@ -120,6 +131,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "nodes" | "node" | "components" => Section::Nodes { default_z: 0.0 },
                 "flow" | "flows" | "edges" | "connections" => Section::Flow,
                 "notes" | "note" | "stickies" => Section::Notes,
+                "groups" | "group" | "clusters" => Section::Groups,
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
@@ -222,6 +234,31 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.nodes.push(node);
                 }
             }
+            Section::Groups => {
+                // Format: - [group_id] Group Name {fill:blue}
+                //           member1, member2, member3
+                if trimmed.starts_with("- ") || trimmed.starts_with("- [") {
+                    let stripped = if trimmed.starts_with("- ") { &trimmed[2..] } else { trimmed };
+                    if stripped.contains('[') {
+                        let id_start = stripped.find('[').unwrap();
+                        let id_end = stripped.find(']').unwrap_or(stripped.len());
+                        let gid = stripped[id_start+1..id_end].trim().to_string();
+                        let rest = stripped[id_end+1..].trim();
+                        let (label, tags) = extract_tags(rest);
+                        let fill = tags.iter()
+                            .find(|t| t.starts_with("fill:"))
+                            .and_then(|t| tag_to_fill_color(t[5..].trim()));
+                        groups.push((gid, label, fill, Vec::new()));
+                    }
+                } else if !trimmed.is_empty() && !groups.is_empty() {
+                    // Continuation: comma-separated member IDs
+                    let last = groups.last_mut().unwrap();
+                    for part in trimmed.split(',') {
+                        let id = part.trim().to_string();
+                        if !id.is_empty() { last.3.push(id); }
+                    }
+                }
+            }
             Section::None => {}
         }
     }
@@ -230,6 +267,42 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     // Auto-layout: topological / hierarchical placement
     super::layout::hierarchical_layout(&mut doc);
+
+    // Create frame nodes for each group (after layout so positions are known)
+    for (gid, label, fill_color, member_ids) in groups {
+        if member_ids.is_empty() { continue; }
+        let pad = 24.0_f32;
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for mid in &member_ids {
+            if let Some(&nid) = id_map.get(mid) {
+                if let Some(node) = doc.nodes.iter().find(|n| n.id == nid) {
+                    let x1 = node.position[0];
+                    let y1 = node.position[1];
+                    let x2 = x1 + node.size[0];
+                    let y2 = y1 + node.size[1];
+                    min_x = min_x.min(x1);
+                    min_y = min_y.min(y1);
+                    max_x = max_x.max(x2);
+                    max_y = max_y.max(y2);
+                }
+            }
+        }
+        if min_x == f32::INFINITY { continue; }
+        let mut frame = Node::new_frame(egui::Pos2::new(min_x - pad, min_y - pad));
+        frame.size = [max_x - min_x + pad * 2.0, max_y - min_y + pad * 2.0];
+        if let NodeKind::Shape { label: ref mut l, .. } = frame.kind {
+            *l = label;
+        }
+        if let Some(fc) = fill_color {
+            frame.style.fill_color = fc;
+        }
+        // Insert at the beginning so frames appear behind other nodes
+        doc.nodes.insert(0, frame);
+        let _ = gid; // frame has a new id; group-id is not tracked after creation
+    }
 
     Ok(doc)
 }
@@ -418,6 +491,7 @@ enum Section {
     Nodes { default_z: f32 },
     Flow,
     Notes,
+    Groups,
 }
 
 // ---------------------------------------------------------------------------
@@ -1755,5 +1829,43 @@ a --> b
         // Export should round-trip hex colors
         let exported = export_hrf(&doc, "Hex Test");
         assert!(exported.contains("{fill:#ff6600}"), "hex in export: {}", exported);
+    }
+
+    #[test]
+    fn test_groups_section_creates_frame() {
+        let input = r#"
+# Group Test
+
+## Nodes
+- [a] Alpha
+- [b] Beta
+- [c] Gamma
+
+## Flow
+a --> b
+b --> c
+
+## Groups
+- [g1] Backend Cluster {fill:blue}
+  a, b
+"#;
+        let doc = parse_hrf(input).unwrap();
+
+        // Should have 4 nodes: a, b, c + 1 frame
+        assert_eq!(doc.nodes.len(), 4, "expected 4 nodes (3 + 1 frame): {:?}",
+            doc.nodes.iter().map(|n| n.display_label()).collect::<Vec<_>>());
+
+        // The frame should be first (inserted at index 0)
+        assert!(doc.nodes[0].is_frame, "first node should be a frame");
+        assert_eq!(doc.nodes[0].display_label(), "Backend Cluster");
+
+        // Frame should bound the two member nodes
+        let frame = &doc.nodes[0];
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Alpha").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Beta").unwrap();
+        assert!(frame.position[0] <= a.position[0].min(b.position[0]),
+            "frame left should be <= member left");
+        assert!(frame.position[1] <= a.position[1].min(b.position[1]),
+            "frame top should be <= member top");
     }
 }
