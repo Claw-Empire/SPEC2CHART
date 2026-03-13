@@ -640,6 +640,24 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
+        // 3D camera preset shortcuts (only in 3D mode, no modifiers)
+        if !any_text_focused && matches!(self.view_mode, super::ViewMode::ThreeD) {
+            // 1=Iso, 2=Top, 3=Front, 4=Side
+            let cam_presets: &[(Key, f32, f32, &str)] = &[
+                (Key::Num1, -0.6,  0.5,  "Camera: Isometric"),
+                (Key::Num2,  0.0,  1.55, "Camera: Top"),
+                (Key::Num3,  0.0,  0.05, "Camera: Front"),
+                (Key::Num4,  1.57, 0.05, "Camera: Side"),
+            ];
+            for &(key, yaw, pitch, msg) in cam_presets {
+                if ctx.input(|i| i.key_pressed(key) && i.modifiers.is_none()) {
+                    self.camera3d.yaw = yaw;
+                    self.camera3d.pitch = pitch;
+                    self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                }
+            }
+        }
+
         // O = toggle overview (bird's eye) mode
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::O) && i.modifiers.is_none()) {
             if let Some(saved) = self.saved_viewport.take() {
