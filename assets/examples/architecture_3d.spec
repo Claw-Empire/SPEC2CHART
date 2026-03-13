@@ -5,9 +5,7 @@ Use the 3D view (toggle with Tab) to see the layers separated in space.
 
 ## Config
 bg = dots
-view = 3d
-camera_yaw = -0.4
-camera_pitch = 0.6
+camera = iso
 layer0 = Data Tier
 layer1 = App Tier
 layer2 = Frontend

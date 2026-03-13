@@ -637,6 +637,23 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     _ => {}
                 }
             }
+            // camera = iso | top | front | side  (named presets)
+            "camera" | "camera-preset" | "cam" => {
+                // Match preset names to (yaw, pitch) — same values as toolbar buttons
+                let maybe_preset: Option<(f32, f32)> = match val.to_lowercase().trim() {
+                    "iso" | "isometric" | "default"    => Some((-0.6, 0.5)),
+                    "top" | "overhead" | "bird"        => Some((0.0,  1.55)),
+                    "front" | "elevation"              => Some((0.0,  0.05)),
+                    "side" | "right" | "left"          => Some((1.57, 0.05)),
+                    _ => None,
+                };
+                if let Some((yaw, pitch)) = maybe_preset {
+                    doc.import_hints.camera_yaw   = Some(yaw);
+                    doc.import_hints.camera_pitch = Some(pitch);
+                    // Named camera preset implies 3D view
+                    doc.import_hints.view_3d = Some(true);
+                }
+            }
             "flow" | "layout" | "direction" | "layout-dir" | "layout_dir" => {
                 let dir = match val.to_uppercase().as_str() {
                     "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => "LR",
