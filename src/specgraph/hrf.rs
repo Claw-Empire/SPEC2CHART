@@ -559,8 +559,22 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     Ok(doc)
 }
 
+/// Viewport settings serialized into `## Config` during HRF export.
+pub struct ViewportExportConfig<'a> {
+    /// "dots", "lines", "crosshatch", or "none"
+    pub bg_pattern: &'a str,
+    pub snap: bool,
+    pub grid_size: f32,
+}
+
 /// Export a FlowchartDocument to Human-Readable Format.
+/// Pass `viewport` to include a `## Config` section with viewport settings.
 pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
+    export_hrf_ex(doc, title, None)
+}
+
+/// Export with an optional viewport config section.
+pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&ViewportExportConfig<'_>>) -> String {
     let mut out = String::new();
     let display_title = if doc.title.is_empty() { title } else { &doc.title };
     out.push_str(&format!("# {}\n\n", display_title));
@@ -727,6 +741,28 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                     format!(" {{z:{}}}", node.z_offset)
                 } else { String::new() };
                 out.push_str(&format!("- {}{}{}\n", text, color_tag, z_tag));
+            }
+        }
+        out.push('\n');
+    }
+
+    // ## Config section — include layer names and viewport hints
+    let has_layer_names = !doc.layer_names.is_empty();
+    let has_viewport = viewport.is_some();
+    if has_layer_names || has_viewport {
+        out.push_str("## Config\n");
+        if let Some(vp) = viewport {
+            out.push_str(&format!("bg = {}\n", vp.bg_pattern));
+            out.push_str(&format!("snap = {}\n", vp.snap));
+            if (vp.grid_size - 20.0).abs() > 0.5 {
+                out.push_str(&format!("grid-size = {}\n", vp.grid_size));
+            }
+        }
+        if has_layer_names {
+            let mut sorted_layers: Vec<(&i32, &String)> = doc.layer_names.iter().collect();
+            sorted_layers.sort_by_key(|&(k, _)| k);
+            for (idx, name) in sorted_layers {
+                out.push_str(&format!("layer{} = {}\n", *idx, name));
             }
         }
         out.push('\n');

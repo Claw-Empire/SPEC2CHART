@@ -279,7 +279,18 @@ impl FlowchartApp {
                             let is_hrf = path.extension()
                                 .map_or(false, |ext| ext == "spec" || ext == "md");
                             let result = if is_hrf {
-                                Ok(specgraph::export_hrf(&self.document, "Untitled Diagram"))
+                                let bg_str = match self.bg_pattern {
+                                    super::BgPattern::Dots => "dots",
+                                    super::BgPattern::Lines => "lines",
+                                    super::BgPattern::Crosshatch => "crosshatch",
+                                    super::BgPattern::None => "none",
+                                };
+                                let vp = specgraph::hrf::ViewportExportConfig {
+                                    bg_pattern: bg_str,
+                                    snap: self.snap_to_grid,
+                                    grid_size: self.grid_size,
+                                };
+                                Ok(specgraph::hrf::export_hrf_ex(&self.document, "Untitled Diagram", Some(&vp)))
                             } else {
                                 specgraph::export_yaml(&self.document, "Untitled Diagram")
                             };
@@ -321,7 +332,18 @@ impl FlowchartApp {
                         .on_hover_text("Copy diagram as HRF spec (Cmd+Shift+S)")
                         .clicked()
                     {
-                        let hrf = specgraph::export_hrf(&self.document, "Untitled Diagram");
+                        let bg_str = match self.bg_pattern {
+                            super::BgPattern::Dots => "dots",
+                            super::BgPattern::Lines => "lines",
+                            super::BgPattern::Crosshatch => "crosshatch",
+                            super::BgPattern::None => "none",
+                        };
+                        let vp = specgraph::hrf::ViewportExportConfig {
+                            bg_pattern: bg_str,
+                            snap: self.snap_to_grid,
+                            grid_size: self.grid_size,
+                        };
+                        let hrf = specgraph::hrf::export_hrf_ex(&self.document, "Untitled Diagram", Some(&vp));
                         ui.ctx().copy_text(hrf);
                         self.status_message = Some((
                             "Spec copied to clipboard".to_string(),
