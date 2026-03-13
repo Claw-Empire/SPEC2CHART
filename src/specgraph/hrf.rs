@@ -93,6 +93,15 @@ use std::collections::HashMap;
 ///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
 ///   `{note:text}` / `{comment:text}` — annotation shown as tooltip when hovering the edge
 ///
+/// ### `## Palette` section
+/// ```text
+/// ## Palette
+/// primary = #1e6f5c
+/// warning = #f28b30
+/// accent  = blue
+/// ```
+/// Named color aliases for use in `{fill:primary}`, `{color:warning}`, `{border-color:accent}`.
+///
 /// ### `## Steps` section
 /// ```text
 /// ## Steps
@@ -110,7 +119,66 @@ use std::collections::HashMap;
 ///   node_id1, node_id2, node_id3
 /// ```
 /// Creates a frame node bounding all listed member nodes (after auto-layout).
+/// Pre-scan `## Palette` sections and return a palette map + pre-expanded input string
+/// where `{fill:name}` and `{color:name}` are replaced with `{fill:#hex}` / `{color:#hex}`.
+fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
+    let mut palette: HashMap<String, [u8; 4]> = HashMap::new();
+    let mut in_palette = false;
+    // First pass: collect palette entries
+    for line in input.lines() {
+        let t = line.trim();
+        if t.starts_with("## ") {
+            let h = t[3..].trim().to_lowercase();
+            in_palette = matches!(h.as_str(), "palette" | "colors" | "colour" | "colours" | "theme");
+            continue;
+        }
+        if in_palette && !t.is_empty() {
+            let sep = if t.contains('=') { '=' } else if t.contains(':') { ':' } else { continue; };
+            if let Some(pos) = t.find(sep) {
+                let name = t[..pos].trim().to_lowercase();
+                let val = t[pos+1..].trim();
+                if let Some(color) = tag_to_fill_color(val) {
+                    palette.insert(name, color);
+                }
+            }
+        }
+    }
+    if palette.is_empty() {
+        return (input.to_string(), palette);
+    }
+    // Second pass: expand {fill:name} / {color:name} / {border-color:name} in non-palette lines
+    let mut out = String::with_capacity(input.len() + 128);
+    let mut in_pal = false;
+    for line in input.lines() {
+        let t = line.trim();
+        if t.starts_with("## ") {
+            let h = t[3..].trim().to_lowercase();
+            in_pal = matches!(h.as_str(), "palette" | "colors" | "colour" | "colours" | "theme");
+            out.push_str(line); out.push('\n');
+            continue;
+        }
+        if in_pal { out.push_str(line); out.push('\n'); continue; }
+        // Replace palette references inside {fill:name} tags
+        let mut expanded = line.to_string();
+        for (name, color) in &palette {
+            let hex = format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]);
+            // Replace all occurrences of {fill:name}, {color:name}, {border-color:name}
+            for prefix in &["fill:", "color:", "border-color:", "stroke:"] {
+                let search = format!("{{{}{}}}", prefix, name);
+                let replace = format!("{{{}{}}}", prefix, hex);
+                expanded = expanded.replace(&search, &replace);
+            }
+        }
+        out.push_str(&expanded); out.push('\n');
+    }
+    (out, palette)
+}
+
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
+    // Pre-expand palette color names
+    let (expanded_input, _palette_map) = expand_palette(input);
+    let input = expanded_input.as_str();
+
     let mut doc = FlowchartDocument::default();
     let mut id_map: HashMap<String, NodeId> = HashMap::new();
 
@@ -126,6 +194,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     // ## Config section: key = value pairs
     let mut config_map: HashMap<String, String> = HashMap::new();
+
+    // ## Palette section: handled via pre-expand pass (expand_palette above)
 
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
@@ -155,6 +225,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "notes" | "note" | "stickies" => Section::Notes,
                 "groups" | "group" | "clusters" => Section::Groups,
                 "config" | "settings" | "meta" => Section::Config,
+                "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
                 "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None },
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
@@ -295,6 +366,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         config_map.insert(key, val);
                     }
                 }
+            }
+            Section::Palette => {
+                // Colors pre-expanded by expand_palette(); skip these lines
             }
             Section::Steps { .. } => {
                 // Handled below to allow mutation of section state
@@ -601,6 +675,7 @@ enum Section {
     Notes,
     Groups,
     Config,
+    Palette,
     /// `## Steps` — numbered list creates sequential flowchart nodes with auto edges.
     /// Tracks (last_step_id, section_z, step_shape).
     Steps { default_z: f32, last_step_id: Option<NodeId> },
@@ -2104,5 +2179,31 @@ b --> c
         // Step 4 should have green fill
         let step4 = doc.nodes.iter().find(|n| n.display_label().contains("Shipped")).unwrap();
         assert_ne!(step4.style.fill_color, NodeStyle::default().fill_color, "step4 fill should be green");
+    }
+
+    #[test]
+    fn test_palette_section_expands_colors() {
+        let input = r#"
+## Palette
+brand   = #1e3a5f
+danger  = red
+success = #166534
+
+## Nodes
+- [a] Service {fill:brand}
+- [b] Error State {fill:danger}
+- [c] Healthy {fill:success}
+"#;
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 3);
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Service").unwrap();
+        // brand = #1e3a5f → [30, 58, 95, 255]
+        assert_eq!(a.style.fill_color, [30, 58, 95, 255], "brand color mismatch: {:?}", a.style.fill_color);
+        // danger = red → should be non-default red color
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Error State").unwrap();
+        assert_ne!(b.style.fill_color, NodeStyle::default().fill_color, "danger fill should be red");
+        // success = #166534 → [22, 101, 52, 255]
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Healthy").unwrap();
+        assert_eq!(c.style.fill_color, [22, 101, 52, 255], "success color mismatch: {:?}", c.style.fill_color);
     }
 }
