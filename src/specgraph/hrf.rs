@@ -414,6 +414,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     let mut doc = FlowchartDocument::default();
     let mut id_map: HashMap<String, NodeId> = HashMap::new();
+    // label_map: slugified display label → NodeId for natural-language flow references
+    let mut label_map: HashMap<String, NodeId> = HashMap::new();
 
     let mut section = Section::None;
     let mut preamble_lines: Vec<String> = Vec::new();
@@ -592,6 +594,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     }
                     last_node_id = Some(node.id);
                     id_map.insert(id.clone(), node.id);
+                    label_map.insert(slugify(node.display_label(), 0), node.id);
                     // Detect {group:name} tag for inline group assignment
                     {
                         let (_, tags) = extract_tags(node_part);
@@ -642,7 +645,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         vec![trimmed.to_string()]
                     };
                     for expanded_line in &lines_to_parse {
-                        let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, line_num)?;
+                        let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, &label_map, line_num)?;
                         for edge in edges {
                             doc.edges.push(edge);
                         }
@@ -774,6 +777,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 if let Some(fc) = fill { node.style.fill_color = fc; }
                 let node_id = node.id;
                 id_map.insert(auto_id, node_id);
+                label_map.insert(slugify(node.display_label(), 0), node_id);
                 if let Some(prev_id) = s_last_id {
                     let e = Edge::new(
                         Port { node_id: prev_id, side: PortSide::Right },
@@ -799,6 +803,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     last_node_id = Some(node.id);
                     let nid = node.id;
                     id_map.insert(id.clone(), nid);
+                    label_map.insert(slugify(node.display_label(), 0), nid);
                     for (target_id, edge_tags) in inline_targets {
                         deferred_inline_edges.push((id.clone(), target_id, edge_tags));
                     }
@@ -1646,6 +1651,7 @@ fn expand_multi_source(line: &str) -> Option<Vec<String>> {
 fn parse_flow_line_chain(
     line: &str,
     id_map: &HashMap<String, NodeId>,
+    label_map: &HashMap<String, NodeId>,
     line_num: usize,
 ) -> Result<Vec<Edge>, String> {
     // Normalize arrow variants to "-->":
@@ -1781,14 +1787,19 @@ fn parse_flow_line_chain(
             colon_label
         };
 
-        let source_node_id = id_map.get(&from_id).ok_or_else(|| {
-            let hint = suggest_id(&from_id, id_map.keys().map(|s| s.as_str()));
-            format!("Line {}: unknown node id '{}'{}", line_num + 1, from_id, hint)
-        })?;
-        let target_node_id = id_map.get(&to_id).ok_or_else(|| {
-            let hint = suggest_id(&to_id, id_map.keys().map(|s| s.as_str()));
-            format!("Line {}: unknown node id '{}'{}", line_num + 1, to_id, hint)
-        })?;
+        let source_node_id = id_map.get(&from_id)
+            .or_else(|| label_map.get(&slugify(&from_id, 0)))
+            .ok_or_else(|| {
+                let hint = suggest_id(&from_id, id_map.keys().map(|s| s.as_str()));
+                format!("Line {}: unknown node id '{}'{}", line_num + 1, from_id, hint)
+            })?;
+        let target_node_id = id_map.get(&to_id)
+            .or_else(|| label_map.get(&slugify(&to_id, 0)))
+            .or_else(|| label_map.get(&slugify(to_id_raw.trim(), 0)))
+            .ok_or_else(|| {
+                let hint = suggest_id(&to_id, id_map.keys().map(|s| s.as_str()));
+                format!("Line {}: unknown node id '{}'{}", line_num + 1, to_id, hint)
+            })?;
 
         // For reverse arrows (<--), swap source and target
         let (actual_source_id, actual_target_id) = if is_reverse {
@@ -4063,5 +4074,41 @@ view = 3d
         let g = find("Eta");
         assert_eq!(g.tag, Some(crate::model::NodeTag::Info), "in-progress -> Info badge");
         assert!((g.progress - 0.5).abs() < 0.01, "in-progress -> progress=0.5, got {}", g.progress);
+    }
+
+    #[test]
+    fn test_natural_language_flow_references() {
+        // Nodes can be referenced in the Flow section by their display label
+        // (slugified and matched as fallback when the direct id lookup fails).
+        let input = r#"
+# Label Reference Test
+
+## Nodes
+- [auth] Authentication Service
+- [db] PostgreSQL Database
+- [cache] Redis Cache
+
+## Flow
+Authentication Service --> PostgreSQL Database
+authentication_service --> redis_cache
+auth --> db
+"#;
+        let doc = parse_hrf(input).expect("should parse without errors");
+        // There should be 3 edges (one per flow line)
+        assert_eq!(doc.edges.len(), 3, "expected 3 edges from label-based lookup, got {}", doc.edges.len());
+
+        let auth_id = doc.nodes.iter().find(|n| n.display_label() == "Authentication Service").unwrap().id;
+        let db_id   = doc.nodes.iter().find(|n| n.display_label() == "PostgreSQL Database").unwrap().id;
+        let cache_id = doc.nodes.iter().find(|n| n.display_label() == "Redis Cache").unwrap().id;
+
+        // First edge: label ref -> label ref
+        assert_eq!(doc.edges[0].source.node_id, auth_id);
+        assert_eq!(doc.edges[0].target.node_id, db_id);
+        // Second edge: slug ref -> slug ref
+        assert_eq!(doc.edges[1].source.node_id, auth_id);
+        assert_eq!(doc.edges[1].target.node_id, cache_id);
+        // Third edge: explicit id -> explicit id (still works)
+        assert_eq!(doc.edges[2].source.node_id, auth_id);
+        assert_eq!(doc.edges[2].target.node_id, db_id);
     }
 }
