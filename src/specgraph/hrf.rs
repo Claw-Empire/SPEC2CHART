@@ -36,6 +36,7 @@ use std::collections::HashMap;
 ///   `{z:N}` — 3D layer offset (positive = closer to camera)
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
 ///   `{pinned}` — pin node to canvas position
+///   `{x:N}` `{y:N}` — explicit canvas position (auto-included when pinned)
 ///
 /// ### Supported node style tags:
 ///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/white/black)
@@ -221,7 +222,9 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                         Some(NodeTag::Info) => " {info}",
                         None => "",
                     };
-                    let pin_tag = if node.pinned { " {pinned}" } else { "" };
+                    let pin_tag = if node.pinned {
+                        format!(" {{pinned}} {{x:{:.0}}} {{y:{:.0}}}", node.position[0], node.position[1])
+                    } else { String::new() };
                     let fill_tag = fill_color_name(node.style.fill_color)
                         .map(|n| format!(" {{fill:{}}}", n))
                         .unwrap_or_default();
@@ -531,6 +534,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut z_offset = 0.0f32;
     let mut node_tag: Option<NodeTag> = None;
     let mut pinned = false;
+    let mut pos_x: Option<f32> = None;
+    let mut pos_y: Option<f32> = None;
     let mut fill_color: Option<[u8; 4]> = None;
     let mut width_override: Option<f32> = None;
     let mut height_override: Option<f32> = None;
@@ -562,6 +567,10 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             node_tag = Some(nt);
         } else if tag == "pinned" || tag == "pin" {
             pinned = true;
+        } else if tag.starts_with("x:") {
+            pos_x = tag[2..].trim().parse::<f32>().ok();
+        } else if tag.starts_with("y:") {
+            pos_y = tag[2..].trim().parse::<f32>().ok();
         } else if tag.starts_with("border:") {
             border_width = tag[7..].trim().parse::<f32>().ok();
         } else if tag.starts_with("align:") {
@@ -622,6 +631,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     node.z_offset = z_offset;
     node.tag = node_tag;
     node.pinned = pinned;
+    // Apply explicit position (used when {pinned} {x:N} {y:N} are present)
+    if let Some(x) = pos_x { node.position[0] = x; }
+    if let Some(y) = pos_y { node.position[1] = y; }
     if let Some(fc) = fill_color {
         node.style.fill_color = fc;
         // Auto-contrast: pick light or dark text based on fill luminance
@@ -1146,6 +1158,39 @@ b "next" --> c
         assert!(exported.contains("## Nodes"));
         assert!(exported.contains("## Flow"));
         assert!(exported.contains("-->"));
+    }
+
+    #[test]
+    fn test_pinned_position_roundtrip() {
+        // When a node is pinned its position should survive export/import
+        let input = r#"
+# Pin Test
+
+## Nodes
+- [a] Fixed Node {pinned} {x:250} {y:180}
+- [b] Free Node
+"#;
+        let doc = parse_hrf(input).unwrap();
+        let a = &doc.nodes[0];
+        assert!(a.pinned);
+        assert!((a.position[0] - 250.0).abs() < 1.0, "x mismatch: {}", a.position[0]);
+        assert!((a.position[1] - 180.0).abs() < 1.0, "y mismatch: {}", a.position[1]);
+
+        let b = &doc.nodes[1];
+        assert!(!b.pinned);
+
+        // Round-trip: exported spec must contain position tags
+        let exported = export_hrf(&doc, "Pin Test");
+        assert!(exported.contains("{pinned}"), "missing pinned in: {}", exported);
+        assert!(exported.contains("{x:250}"), "missing x tag in: {}", exported);
+        assert!(exported.contains("{y:180}"), "missing y tag in: {}", exported);
+
+        // Re-import should preserve position
+        let doc2 = parse_hrf(&exported).unwrap();
+        let a2 = &doc2.nodes[0];
+        assert!(a2.pinned);
+        assert!((a2.position[0] - 250.0).abs() < 1.0);
+        assert!((a2.position[1] - 180.0).abs() < 1.0);
     }
 
     #[test]

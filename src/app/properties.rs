@@ -258,7 +258,7 @@ impl FlowchartApp {
                         .size(11.0)
                         .monospace()
                         .color(self.theme.accent)
-                        .background_color(Color32::from_rgba_unmultiplied(137, 180, 250, 25));
+                        .background_color(self.theme.accent_faint);
                     ui.label(key_text);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(egui::RichText::new(*action).size(11.0).color(self.theme.text_dim));
@@ -423,7 +423,7 @@ impl FlowchartApp {
                                 painter.circle_stroke(
                                     r.center(),
                                     size / 2.0,
-                                    Stroke::new(2.0, Color32::WHITE),
+                                    Stroke::new(2.0, self.theme.text_primary),
                                 );
                             }
                             if response.clicked() {
@@ -652,7 +652,7 @@ impl FlowchartApp {
                             let (r, painter) = ui.allocate_painter(egui::vec2(16.0, 16.0), egui::Sense::click());
                             painter.rect_filled(r.rect, egui::CornerRadius::same(3), c);
                             painter.rect_stroke(r.rect, egui::CornerRadius::same(3),
-                                egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255,255,255,30)),
+                                egui::Stroke::new(1.0, theme.surface1),
                                 egui::StrokeKind::Inside);
                             if r.clicked() { recent_color_pick = Some(*col); }
                             r.on_hover_text(format!("#{:02X}{:02X}{:02X}", col[0], col[1], col[2]));
@@ -904,7 +904,7 @@ impl FlowchartApp {
                         let (r, painter) = ui.allocate_painter(egui::vec2(18.0, 18.0), egui::Sense::click());
                         painter.rect_filled(r.rect, egui::CornerRadius::same(3), c);
                         painter.rect_stroke(r.rect, egui::CornerRadius::same(3),
-                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255,255,255,50)),
+                            egui::Stroke::new(1.0, theme.surface1),
                             egui::StrokeKind::Inside);
                         if r.clicked() { node.frame_color = *col; }
                         r.on_hover_text(*name);
@@ -979,9 +979,10 @@ impl FlowchartApp {
                 ("Y", format!("{:.0}", node.position[1])),
                 ("W", format!("{:.0}", node.size[0])),
                 ("H", format!("{:.0}", node.size[1])),
+                ("Z", format!("{:.0}", node.z_offset)),
                 ("In", in_deg.to_string()),
                 ("Out", out_deg.to_string()),
-                ("Layer", z_idx.to_string()),
+                ("Stk", z_idx.to_string()),
             ];
             egui::Grid::new("node_stats_grid")
                 .num_columns(4)
