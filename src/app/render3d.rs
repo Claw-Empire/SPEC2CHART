@@ -6,7 +6,6 @@ use super::interaction::{control_points_for_side, cubic_bezier_point};
 use super::theme::PORT_RADIUS;
 use super::{DragState, ResizeHandle, Tool};
 
-const GROUND_GRID_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 35);
 const Z_SPACING: f32 = 120.0;
 const CUBE_THICKNESS: f32 = 40.0;
 
@@ -860,7 +859,7 @@ impl FlowchartApp {
                         painter.circle_stroke(
                             screen_port,
                             r * 1.3,
-                            Stroke::new(2.0, Color32::WHITE),
+                            Stroke::new(2.0, self.theme.text_primary),
                         );
                     } else {
                         painter.circle_filled(screen_port, r, self.theme.port_fill);
@@ -916,7 +915,12 @@ impl FlowchartApp {
                     Align2::CENTER_CENTER,
                     msg,
                     FontId::proportional(12.0),
-                    Color32::from_rgba_premultiplied(166, 227, 161, alpha),
+                    Color32::from_rgba_premultiplied(
+                        self.theme.toast_success.r(),
+                        self.theme.toast_success.g(),
+                        self.theme.toast_success.b(),
+                        alpha,
+                    ),
                 );
                 ui.ctx().request_repaint();
             }
@@ -979,13 +983,14 @@ impl FlowchartApp {
         // Selection glow
         if is_selected {
             let glow_rect = screen_rect.expand(4.0 * scale);
+            let sc = self.theme.selection_color;
             painter.rect_filled(
                 glow_rect,
                 CornerRadius::same(6),
                 Color32::from_rgba_premultiplied(
-                    137,
-                    180,
-                    250,
+                    sc.r(),
+                    sc.g(),
+                    sc.b(),
                     (50.0 * opacity) as u8,
                 ),
             );
@@ -997,7 +1002,12 @@ impl FlowchartApp {
         painter.rect_filled(
             shadow_rect,
             CornerRadius::same(4),
-            Color32::from_rgba_premultiplied(0, 0, 0, (40.0 * opacity) as u8),
+            Color32::from_rgba_premultiplied(
+                self.theme.shadow_light.r(),
+                self.theme.shadow_light.g(),
+                self.theme.shadow_light.b(),
+                (self.theme.shadow_light.a() as f32 * opacity) as u8,
+            ),
         );
 
         match &node.kind {
@@ -1337,15 +1347,16 @@ impl FlowchartApp {
             }
             NodeKind::Text { .. } => {
                 if is_selected {
+                    let sc = self.theme.selection_color;
                     painter.rect_stroke(
                         screen_rect,
                         CornerRadius::same(2),
                         Stroke::new(
                             1.0,
                             Color32::from_rgba_premultiplied(
-                                137,
-                                180,
-                                250,
+                                sc.r(),
+                                sc.g(),
+                                sc.b(),
                                 (100.0 * opacity) as u8,
                             ),
                         ),
@@ -1384,15 +1395,16 @@ impl FlowchartApp {
                 screen_rect.min.y + 4.0 * scale,
             );
             let badge_size = (8.0 * scale).max(6.0);
+            let ac = self.theme.accent;
             painter.text(
                 badge_pos,
                 Align2::RIGHT_TOP,
                 format!("z{}", z_layer),
                 FontId::monospace(badge_size),
                 Color32::from_rgba_premultiplied(
-                    137,
-                    180,
-                    250,
+                    ac.r(),
+                    ac.g(),
+                    ac.b(),
                     (180.0 * opacity) as u8,
                 ),
             );
@@ -1480,28 +1492,94 @@ impl FlowchartApp {
             offset,
         );
 
-        let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
-            [src_screen, cp1, cp2, tgt_screen],
-            false,
-            Color32::TRANSPARENT,
-            Stroke::new(width, edge_color),
-        );
-        painter.add(bezier);
+        // Glow halo (drawn first, behind edge)
+        if edge.style.glow && !is_selected {
+            let glow_color = Color32::from_rgba_premultiplied(
+                edge.style.color[0], edge.style.color[1], edge.style.color[2],
+                (alpha as f32 * 0.24) as u8,
+            );
+            let glow = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src_screen, cp1, cp2, tgt_screen], false, Color32::TRANSPARENT,
+                Stroke::new(width + 8.0, glow_color),
+            );
+            painter.add(glow);
+        }
 
-        // Arrow head
+        // Main edge stroke
+        if edge.style.dashed || edge.style.animated {
+            // Dashed/animated: sample bezier and draw alternating segments
+            let dash = 8.0 * avg_scale.sqrt();
+            let gap = 5.0 * avg_scale.sqrt();
+            let steps = 60usize;
+            let pts: Vec<Pos2> = (0..=steps)
+                .map(|i| {
+                    let t = i as f32 / steps as f32;
+                    cubic_bezier_point(src_screen, cp1, cp2, tgt_screen, t)
+                })
+                .collect();
+            // Animated offset
+            let time_offset = if edge.style.animated {
+                let t = painter.ctx().input(|i| i.time) as f32;
+                painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+                (t * 40.0) % (dash + gap)
+            } else { 0.0 };
+
+            let mut dist = -time_offset;
+            let mut drawing = true;
+            let mut seg_start = pts[0];
+            for i in 1..pts.len() {
+                let d = (pts[i] - pts[i - 1]).length();
+                dist += d;
+                let threshold = if drawing { dash } else { gap };
+                if dist >= threshold {
+                    if drawing {
+                        painter.line_segment([seg_start, pts[i]], Stroke::new(width, edge_color));
+                    }
+                    seg_start = pts[i];
+                    dist = 0.0;
+                    drawing = !drawing;
+                }
+            }
+            if drawing {
+                painter.line_segment([seg_start, *pts.last().unwrap()], Stroke::new(width, edge_color));
+            }
+        } else {
+            let bezier = egui::epaint::CubicBezierShape::from_points_stroke(
+                [src_screen, cp1, cp2, tgt_screen],
+                false,
+                Color32::TRANSPARENT,
+                Stroke::new(width, edge_color),
+            );
+            painter.add(bezier);
+        }
+
+        // Arrow head (respects ArrowHead variant)
         let dir = (tgt_screen - cp2).normalized();
         if dir.length() > 0.01 {
-            let arrow_len = 8.0;
-            let arrow_width = 5.0;
+            let arrow_len = 8.0 * avg_scale.sqrt();
+            let arrow_width = 5.0 * avg_scale.sqrt();
             let perp = Vec2::new(-dir.y, dir.x);
             let tip = tgt_screen;
             let left = tip - dir * arrow_len + perp * arrow_width;
             let right = tip - dir * arrow_len - perp * arrow_width;
-            painter.add(egui::Shape::convex_polygon(
-                vec![tip, left, right],
-                edge_color,
-                Stroke::new(width * 0.5, edge_color),
-            ));
+            match edge.style.arrow_head {
+                ArrowHead::Filled => {
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![tip, left, right],
+                        edge_color,
+                        Stroke::new(width * 0.5, edge_color),
+                    ));
+                }
+                ArrowHead::Open => {
+                    painter.line_segment([left, tip], Stroke::new(width, edge_color));
+                    painter.line_segment([right, tip], Stroke::new(width, edge_color));
+                }
+                ArrowHead::Circle => {
+                    let center = tip - dir * arrow_len * 0.5;
+                    painter.circle_filled(center, arrow_width * 0.8, edge_color);
+                }
+                ArrowHead::None => {} // no arrow
+            }
         }
 
         // Edge label
@@ -1510,13 +1588,38 @@ impl FlowchartApp {
                 cubic_bezier_point(src_screen, cp1, cp2, tgt_screen, 0.5);
             let font_size = (12.0 * avg_scale).clamp(7.0, 16.0);
             if font_size >= 7.0 {
+                let text_color = self.theme.text_primary.gamma_multiply(opacity);
+                // Label background pill
+                let galley = painter.layout_no_wrap(
+                    edge.label.clone(),
+                    FontId::proportional(font_size),
+                    text_color,
+                );
+                let text_rect = egui::Rect::from_center_size(mid, galley.size()).expand2(Vec2::new(4.0, 2.0));
+                painter.rect_filled(text_rect, egui::CornerRadius::same(4), self.theme.edge_label_bg);
                 painter.text(
                     mid,
                     Align2::CENTER_CENTER,
                     &edge.label,
                     FontId::proportional(font_size),
-                    Color32::from_rgba_premultiplied(205, 214, 244, alpha),
+                    text_color,
                 );
+            }
+        }
+
+        // Source/target endpoint labels (3D)
+        let ep_font_size = (10.0 * avg_scale).clamp(6.0, 13.0);
+        if ep_font_size >= 6.0 {
+            let text_col = self.theme.text_secondary.gamma_multiply(opacity);
+            if !edge.source_label.is_empty() {
+                let near_src = cubic_bezier_point(src_screen, cp1, cp2, tgt_screen, 0.08);
+                painter.text(near_src + Vec2::new(0.0, -8.0 * avg_scale), Align2::CENTER_BOTTOM,
+                    &edge.source_label, FontId::proportional(ep_font_size), text_col);
+            }
+            if !edge.target_label.is_empty() {
+                let near_tgt = cubic_bezier_point(src_screen, cp1, cp2, tgt_screen, 0.92);
+                painter.text(near_tgt + Vec2::new(0.0, -8.0 * avg_scale), Align2::CENTER_BOTTOM,
+                    &edge.target_label, FontId::proportional(ep_font_size), text_col);
             }
         }
     }
@@ -1557,7 +1660,7 @@ impl FlowchartApp {
             ) {
                 painter.line_segment(
                     [s1, s2],
-                    Stroke::new(0.5, GROUND_GRID_COLOR),
+                    Stroke::new(0.5, self.theme.grid_color),
                 );
             }
         }
@@ -1574,26 +1677,57 @@ impl FlowchartApp {
             ) {
                 painter.line_segment(
                     [s1, s2],
-                    Stroke::new(0.5, GROUND_GRID_COLOR),
+                    Stroke::new(0.5, self.theme.grid_color),
                 );
             }
         }
 
         for layer in 1..=max_layer {
             let z = layer as f32 * Z_SPACING;
+            let node_count = z_layers.values().filter(|&&l| l == layer).count();
             let label_pos =
                 [target[0] - grid_range, target[1] - grid_range, z];
             if let Some((screen_pos, _)) = self
                 .camera3d
                 .project(label_pos, screen_center, screen_size)
             {
+                let lbl = if node_count > 0 {
+                    format!("z={:.0}  ×{}", z, node_count)
+                } else {
+                    format!("z={:.0}", z)
+                };
                 painter.text(
                     screen_pos,
                     Align2::LEFT_CENTER,
-                    format!("Layer {}", layer),
+                    lbl,
                     FontId::proportional(9.0),
-                    Color32::from_rgba_premultiplied(137, 180, 250, 60),
+                    self.theme.accent.gamma_multiply(0.28),
                 );
+            }
+        }
+
+        // Origin axis indicators — short colored lines at the world origin
+        let origin = [target[0], target[1], 0.0];
+        let axis_len = 60.0;
+        let x_end = [origin[0] + axis_len, origin[1], 0.0];
+        let y_end = [origin[0], origin[1] + axis_len, 0.0];
+        let z_end = [origin[0], origin[1], axis_len];
+
+        if let Some((o_s, _)) = self.camera3d.project(origin, screen_center, screen_size) {
+            // X axis — red
+            if let Some((x_s, _)) = self.camera3d.project(x_end, screen_center, screen_size) {
+                painter.line_segment([o_s, x_s], Stroke::new(1.5, Color32::from_rgba_premultiplied(220, 80, 80, 120)));
+                painter.text(x_s, Align2::LEFT_CENTER, "X", FontId::proportional(8.0), Color32::from_rgba_premultiplied(220, 80, 80, 100));
+            }
+            // Y axis — green
+            if let Some((y_s, _)) = self.camera3d.project(y_end, screen_center, screen_size) {
+                painter.line_segment([o_s, y_s], Stroke::new(1.5, Color32::from_rgba_premultiplied(80, 200, 80, 120)));
+                painter.text(y_s, Align2::LEFT_CENTER, "Y", FontId::proportional(8.0), Color32::from_rgba_premultiplied(80, 200, 80, 100));
+            }
+            // Z axis — blue (accent)
+            if let Some((z_s, _)) = self.camera3d.project(z_end, screen_center, screen_size) {
+                painter.line_segment([o_s, z_s], Stroke::new(1.5, self.theme.accent.gamma_multiply(0.47)));
+                painter.text(z_s, Align2::LEFT_CENTER, "Z", FontId::proportional(8.0), self.theme.accent.gamma_multiply(0.39));
             }
         }
     }

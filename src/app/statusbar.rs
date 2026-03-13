@@ -2,7 +2,7 @@
 
 use egui::{Align, Color32, Frame, Layout, Margin, RichText, TopBottomPanel};
 
-use super::{DiagramMode, FlowchartApp, Tool};
+use super::{DiagramMode, FlowchartApp, Tool, ViewMode};
 
 impl FlowchartApp {
     pub(crate) fn draw_status_bar(&mut self, ctx: &egui::Context) {
@@ -61,6 +61,14 @@ impl FlowchartApp {
                     separator(ui, surface1);
                     ui.add_space(8.0);
                     label(ui, mode_label, text_secondary);
+                    // 3D indicator
+                    if matches!(self.view_mode, ViewMode::ThreeD) {
+                        ui.add_space(6.0);
+                        let cam_yaw = self.camera3d.yaw.to_degrees().round() as i32;
+                        let cam_pitch = self.camera3d.pitch.to_degrees().round() as i32;
+                        pill(ui, &format!("3D  {}° {}°", cam_yaw, cam_pitch),
+                            self.theme.accent, self.theme.accent_glow);
+                    }
 
                     // Selection info
                     if sel_count > 0 || edge_sel {
@@ -75,6 +83,23 @@ impl FlowchartApp {
                             "1 edge".to_string()
                         };
                         label(ui, &sel_text, text_primary);
+                        // Show endpoints for selected edge
+                        if sel_count == 0 && edge_sel {
+                            if let Some(eid) = self.selection.edge_ids.iter().next() {
+                                if let Some(edge) = self.document.find_edge(eid) {
+                                    let src_name = self.document.find_node(&edge.source.node_id)
+                                        .map(|n| n.display_label().to_string())
+                                        .unwrap_or_default();
+                                    let tgt_name = self.document.find_node(&edge.target.node_id)
+                                        .map(|n| n.display_label().to_string())
+                                        .unwrap_or_default();
+                                    if !src_name.is_empty() || !tgt_name.is_empty() {
+                                        ui.add_space(6.0);
+                                        label(ui, &format!("{} → {}", src_name, tgt_name), text_dim);
+                                    }
+                                }
+                            }
+                        }
 
                         // Geometry info for selected node(s)
                         if sel_count == 1 {
