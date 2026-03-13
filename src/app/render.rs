@@ -110,6 +110,13 @@ impl FlowchartApp {
             let base_r = (screen_rect.width().max(screen_rect.height()) * 0.35).clamp(3.0, 10.0);
             let dot_r = (base_r * hub_scale).clamp(3.0, 14.0);
             let center = screen_rect.center();
+            // Highlight ring: amber pulsing even in LOD0
+            if node.highlight {
+                let time = painter.ctx().input(|i| i.time);
+                let breath = ((time * std::f64::consts::PI).sin() as f32) * 0.3 + 0.7;
+                painter.circle_filled(center, dot_r + 3.5, Color32::from_rgba_unmultiplied(255, 185, 0, (breath * 55.0) as u8));
+                painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+            }
             // Ring for selection
             if is_selected {
                 painter.circle_filled(center, dot_r + 3.0, self.theme.accent_glow);
@@ -130,10 +137,12 @@ impl FlowchartApp {
                     NodeKind::Text { content } => content.as_str(),
                 };
                 let short: String = label_str.chars().take(12).collect();
+                // Append ⭐ for highlighted nodes, 💬 for nodes with comments
+                let suffix = if node.highlight { " ⭐" } else if !node.comment.is_empty() { " 💬" } else { "" };
                 painter.text(
                     center + Vec2::new(dot_r + 2.0, 0.0),
                     Align2::LEFT_CENTER,
-                    &short,
+                    &format!("{}{}", short, suffix),
                     FontId::proportional(6.5),
                     to_color32(node.style.text_color).gamma_multiply(0.8),
                 );
