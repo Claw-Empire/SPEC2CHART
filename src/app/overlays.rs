@@ -631,6 +631,19 @@ impl FlowchartApp {
                         ],
                     ),
                     (
+                        "3D View",
+                        &[
+                            ("Tab", "Toggle 2D / 3D view"),
+                            ("1", "Camera: Isometric (3D mode)"),
+                            ("2", "Camera: Top-down (3D mode)"),
+                            ("3", "Camera: Front elevation (3D mode)"),
+                            ("4", "Camera: Right side (3D mode)"),
+                            ("Drag (3D)", "Orbit camera"),
+                            ("Right-drag (3D)", "Pan camera"),
+                            ("Scroll (3D)", "Zoom camera"),
+                        ],
+                    ),
+                    (
                         "Help",
                         &[
                             ("F1 / ?", "This shortcuts panel"),
