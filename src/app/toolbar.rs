@@ -610,6 +610,7 @@ impl FlowchartApp {
                             ("Grid layout", "## Grid cols=3  (auto grid layout, 3 columns)"),
                             ("Label refs", "REST API --> Database  or  \"REST API\" --> \"Database\""),
                             ("Opacity", "{dim} {ghost} {muted} {hidden} {opacity:50}"),
+                            ("Layout gap", "spacing = 120  (## Config, sets node gap in px)"),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);

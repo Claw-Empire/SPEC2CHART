@@ -89,9 +89,11 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
         }
     }
 
-    // Layout constants
-    const GAP_MAIN: f32 = 80.0;  // gap along the main axis (between layers)
-    const GAP_CROSS: f32 = 60.0; // gap along the cross axis (between nodes in a layer)
+    // Layout constants — use config values when non-zero, else defaults
+    let gap_main_default = 80.0_f32;
+    let gap_cross_default = 60.0_f32;
+    let GAP_MAIN: f32 = if doc.layout_gap_main > 0.0 { doc.layout_gap_main } else { gap_main_default };
+    let GAP_CROSS: f32 = if doc.layout_gap_cross > 0.0 { doc.layout_gap_cross } else { gap_cross_default };
     const START: f32 = 100.0;
 
     // Determine if this is an LR/RL layout (horizontal main axis)

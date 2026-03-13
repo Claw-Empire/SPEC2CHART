@@ -957,6 +957,19 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 doc.import_hints.project_title = Some(val.clone());
             }
             // layer names: layer0 = Data Tier, layer 1 = Backend
+            // layout spacing: spacing=120 or gap=80 or gap-main=80 gap-cross=50
+            "spacing" | "gap" | "node-spacing" | "node_spacing" => {
+                if let Ok(v) = val.parse::<f32>() {
+                    doc.layout_gap_main = v;
+                    doc.layout_gap_cross = v * 0.75; // cross is 3/4 of main by default
+                }
+            }
+            "gap-main" | "gap_main" | "layer-spacing" | "layer_spacing" | "main-gap" => {
+                if let Ok(v) = val.parse::<f32>() { doc.layout_gap_main = v; }
+            }
+            "gap-cross" | "gap_cross" | "cross-gap" | "node-gap" | "node_gap" => {
+                if let Ok(v) = val.parse::<f32>() { doc.layout_gap_cross = v; }
+            }
             _ if key.starts_with("layer") => {
                 let num_part = key.trim_start_matches("layer").trim();
                 if let Ok(idx) = num_part.trim_matches(|c: char| !c.is_ascii_digit())

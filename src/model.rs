@@ -727,6 +727,12 @@ pub struct FlowchartDocument {
     /// Layout direction: "TB" (default), "LR", "RL", "BT".
     #[serde(default)]
     pub layout_dir: String,
+    /// Gap between layout layers along the main axis (default 80.0).
+    #[serde(default)]
+    pub layout_gap_main: f32,
+    /// Gap between nodes within a layer along the cross axis (default 60.0).
+    #[serde(default)]
+    pub layout_gap_cross: f32,
 }
 
 impl FlowchartDocument {
