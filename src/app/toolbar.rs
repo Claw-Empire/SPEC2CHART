@@ -472,9 +472,10 @@ impl FlowchartApp {
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
                         let entries: &[(&str, &str)] = &[
-                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups"),
+                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps"),
+                            ("## Steps", "1. Step label {diamond}  (sequential flowchart)"),
                             ("3D layers", "## Layer 0: Database / ## Layer 1: Backend"),
-                            ("3D layers", "{z:N} (px) / {layer:N} (N×120px)"),
+                            ("3D layers", "{z:N} (px) / {layer:N} (N×120px) / {3d-depth:80}"),
                             ("Comments", "// this line is ignored"),
                             ("Shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector}"),
                             ("Semantic presets", "{server} {database} {cloud} {user} {service}"),
@@ -488,6 +489,8 @@ impl FlowchartApp {
                             ("Align", "{align:left/right} {valign:top/bottom}"),
                             ("Icon/Frame", "{icon:🔒} {frame}"),
                             ("Tooltip", "{tooltip:description text}  (or indent lines below)"),
+                            ("Sublabel", "{sublabel:v2 · running}  (small text below node)"),
+                            ("Edge note", "a -> b {note:this path is deprecated}"),
                             ("Special", "{entity} {text} {locked} {url:https://...}"),
                             ("Edge flow", "{dashed} {glow} {animated} {thick} {ortho}"),
                             ("Edge style", "{arrow:open/circle/none} {bend:0.3} {weight:2}"),

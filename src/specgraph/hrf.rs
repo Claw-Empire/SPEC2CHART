@@ -93,6 +93,16 @@ use std::collections::HashMap;
 ///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
 ///   `{note:text}` / `{comment:text}` — annotation shown as tooltip when hovering the edge
 ///
+/// ### `## Steps` section
+/// ```text
+/// ## Steps
+/// 1. User submits form {diamond}
+/// 2. Validate data
+/// 3. Save to database {fill:green}
+/// ```
+/// Creates nodes with auto-generated IDs (step1, step2, …) and sequential edges between them.
+/// Supports optional `{tags}` for shape, fill, etc. Bullet (`-`) or number (`1.`) prefix is stripped.
+///
 /// ### `## Groups` section
 /// ```text
 /// ## Groups
@@ -145,6 +155,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "notes" | "note" | "stickies" => Section::Notes,
                 "groups" | "group" | "clusters" => Section::Groups,
                 "config" | "settings" | "meta" => Section::Config,
+                "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None },
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
@@ -284,6 +295,56 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         config_map.insert(key, val);
                     }
                 }
+            }
+            Section::Steps { .. } => {
+                // Handled below to allow mutation of section state
+                if trimmed.is_empty() { continue; }
+                let (s_default_z, s_last_id) = if let Section::Steps { default_z, last_step_id } = section {
+                    (default_z, last_step_id)
+                } else { continue; };
+                // Strip leading numbering or bullet
+                let stripped = {
+                    let t = trimmed;
+                    if t.starts_with(|c: char| c.is_ascii_digit()) {
+                        let end = t.find(|c: char| c == '.' || c == ')').map(|i| i + 1).unwrap_or(0);
+                        if end > 0 && t[end..].starts_with(' ') { t[end..].trim_start() } else { t }
+                    } else if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") {
+                        &t[2..]
+                    } else { t }
+                };
+                let step_idx = doc.nodes.len() + 1;
+                let auto_id = format!("step{}", step_idx);
+                let (label, tags) = extract_tags(stripped);
+                // Find shape tag — look for known shape names in tags
+                let shape = tags.iter()
+                    .find(|t| matches!(t.as_str(),
+                        "diamond" | "circle" | "rectangle" | "rounded_rect" | "parallelogram"
+                        | "hexagon" | "connector" | "text" | "entity" | "decision" | "start" | "end"))
+                    .map(|t| tag_to_shape(t))
+                    .unwrap_or(NodeShape::RoundedRect);
+                let fill = tags.iter()
+                    .find(|t| t.starts_with("fill:"))
+                    .and_then(|t| tag_to_fill_color(t[5..].trim()));
+                let mut node = Node::new(shape, egui::Pos2::ZERO);
+                if let NodeKind::Shape { label: lbl, .. } = &mut node.kind {
+                    *lbl = label.trim().to_string();
+                }
+                node.z_offset = s_default_z;
+                if let Some(fc) = fill { node.style.fill_color = fc; }
+                let node_id = node.id;
+                id_map.insert(auto_id, node_id);
+                if let Some(prev_id) = s_last_id {
+                    let e = Edge::new(
+                        Port { node_id: prev_id, side: PortSide::Right },
+                        Port { node_id: node_id, side: PortSide::Left },
+                    );
+                    doc.edges.push(e);
+                }
+                // Update the section's last_step_id
+                if let Section::Steps { last_step_id, .. } = &mut section {
+                    *last_step_id = Some(node_id);
+                }
+                doc.nodes.push(node);
             }
             Section::None => {}
         }
@@ -540,6 +601,9 @@ enum Section {
     Notes,
     Groups,
     Config,
+    /// `## Steps` — numbered list creates sequential flowchart nodes with auto edges.
+    /// Tracks (last_step_id, section_z, step_shape).
+    Steps { default_z: f32, last_step_id: Option<NodeId> },
 }
 
 // ---------------------------------------------------------------------------
@@ -2010,5 +2074,35 @@ b --> c
             "frame left should be <= member left");
         assert!(frame.position[1] <= a.position[1].min(b.position[1]),
             "frame top should be <= member top");
+    }
+
+    #[test]
+    fn test_steps_section_creates_sequential_flow() {
+        let input = r#"
+# Order Process
+
+## Steps
+1. Customer places order
+2. Payment validation {diamond}
+3. Warehouse picks items
+4. Shipped to customer {fill:green}
+"#;
+        let doc = parse_hrf(input).unwrap();
+        // Should have 4 nodes
+        assert_eq!(doc.nodes.len(), 4, "expected 4 step nodes");
+        // Should have 3 edges connecting them in sequence
+        assert_eq!(doc.edges.len(), 3, "expected 3 sequential edges");
+        // Labels should be set correctly
+        let labels: Vec<&str> = doc.nodes.iter().map(|n| n.display_label()).collect();
+        assert!(labels.iter().any(|l| l.contains("Customer places order")), "label mismatch: {:?}", labels);
+        assert!(labels.iter().any(|l| l.contains("Payment validation")), "label mismatch: {:?}", labels);
+        // Step 2 should be diamond shape
+        let step2 = doc.nodes.iter().find(|n| n.display_label().contains("Payment validation")).unwrap();
+        if let NodeKind::Shape { shape, .. } = step2.kind {
+            assert_eq!(shape, NodeShape::Diamond);
+        }
+        // Step 4 should have green fill
+        let step4 = doc.nodes.iter().find(|n| n.display_label().contains("Shipped")).unwrap();
+        assert_ne!(step4.style.fill_color, NodeStyle::default().fill_color, "step4 fill should be green");
     }
 }
