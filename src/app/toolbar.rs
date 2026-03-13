@@ -519,6 +519,7 @@ impl FlowchartApp {
                     ("µSvc", include_str!("../../assets/examples/microservices.spec")),
                     ("Dashboard", include_str!("../../assets/examples/project_dashboard.spec")),
                     ("Auto3D", include_str!("../../assets/examples/auto3d.spec")),
+                    ("Showcase", include_str!("../../assets/examples/feature_showcase.spec")),
                     ("ER", include_str!("../../assets/examples/er_diagram.spec")),
                     ("Network", include_str!("../../assets/examples/network.spec")),
                 ];
