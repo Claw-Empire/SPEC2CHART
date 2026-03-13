@@ -13,8 +13,6 @@ pub(crate) mod export_mermaid;
 pub(crate) mod camera;
 pub(crate) mod interaction;
 
-pub(crate) use theme::*;
-
 use egui::{CentralPanel, Color32, CornerRadius, Pos2, Rect, Stroke, Vec2};
 use crate::history::UndoStack;
 use crate::model::*;
@@ -389,11 +387,11 @@ impl FlowchartApp {
         ctx.set_visuals(visuals);
     }
 
-    pub(crate) fn draw_section_header(ui: &mut egui::Ui, label: &str) {
-        ui.label(egui::RichText::new(label).size(11.0).color(TEXT_SECONDARY).strong());
+    pub(crate) fn draw_section_header(&self, ui: &mut egui::Ui, label: &str) {
+        ui.label(egui::RichText::new(label).size(11.0).color(self.theme.text_secondary).strong());
     }
 
-    pub(crate) fn draw_divider(ui: &mut egui::Ui) {
+    pub(crate) fn draw_divider(&self, ui: &mut egui::Ui) {
         let rect = ui.available_rect_before_wrap();
         let y = rect.min.y;
         ui.painter().line_segment(
@@ -401,7 +399,7 @@ impl FlowchartApp {
                 Pos2::new(rect.min.x, y),
                 Pos2::new(rect.max.x, y),
             ],
-            Stroke::new(0.5, DIVIDER_COLOR),
+            Stroke::new(0.5, self.theme.divider_color),
         );
         ui.add_space(1.0);
     }

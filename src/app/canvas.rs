@@ -4,7 +4,7 @@ use egui::{
 use crate::model::*;
 use super::{FlowchartApp, DragState, Tool, ResizeHandle};
 use super::interaction::{control_points_for_side, cubic_bezier_point};
-use super::theme::*;
+use super::theme::{PORT_RADIUS, to_color32};
 
 impl FlowchartApp {
     pub(crate) fn draw_canvas(&mut self, ui: &mut egui::Ui) {
@@ -2069,7 +2069,7 @@ impl FlowchartApp {
                         egui::vec2(text_size.x + 12.0, text_size.y + 6.0),
                     );
                     painter.rect_filled(bg_rect, CornerRadius::same(4), Color32::from_rgba_premultiplied(20, 20, 35, 210));
-                    painter.rect_stroke(bg_rect, CornerRadius::same(4), Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
+                    painter.rect_stroke(bg_rect, CornerRadius::same(4), Stroke::new(1.0, self.theme.surface1), StrokeKind::Outside);
                     painter.text(
                         badge_pos,
                         egui::Align2::CENTER_CENTER,
@@ -2234,7 +2234,7 @@ impl FlowchartApp {
         // Draw bar background via painter
         let painter = ui.painter();
         painter.rect_filled(bar_rect, CornerRadius::same(6), self.theme.tooltip_bg);
-        painter.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
+        painter.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, self.theme.surface1), StrokeKind::Outside);
 
         // Draw buttons using ui.put()
         let pad = 4.0;
@@ -2680,7 +2680,7 @@ impl FlowchartApp {
         if interval_screen < 20.0 { return; }
 
         let ruler_h = 12.0_f32;
-        let ruler_color = SURFACE0;
+        let ruler_color = self.theme.surface0;
         let tick_color = self.theme.text_dim;
         let label_font = egui::FontId::proportional(8.5);
 
@@ -2750,7 +2750,7 @@ impl FlowchartApp {
         // Corner box
         painter.rect_filled(
             Rect::from_min_size(canvas_rect.min, Vec2::splat(ruler_h)),
-            egui::CornerRadius::ZERO, SURFACE1,
+            egui::CornerRadius::ZERO, self.theme.surface1,
         );
     }
 
@@ -2955,11 +2955,11 @@ impl FlowchartApp {
         // Ruler border lines
         painter.line_segment(
             [Pos2::new(h_ruler.min.x, h_ruler.max.y), Pos2::new(h_ruler.max.x, h_ruler.max.y)],
-            Stroke::new(0.5, SURFACE1),
+            Stroke::new(0.5, self.theme.surface1),
         );
         painter.line_segment(
             [Pos2::new(v_ruler.max.x, v_ruler.min.y), Pos2::new(v_ruler.max.x, v_ruler.max.y)],
-            Stroke::new(0.5, SURFACE1),
+            Stroke::new(0.5, self.theme.surface1),
         );
     }
 
@@ -3151,7 +3151,7 @@ impl FlowchartApp {
                 painter.line_segment(
                     [Pos2::new(overlay_rect.min.x + 12.0, top + input_h),
                      Pos2::new(overlay_rect.max.x - 12.0, top + input_h)],
-                    Stroke::new(0.5, SURFACE1),
+                    Stroke::new(0.5, self.theme.surface1),
                 );
             }
         }
@@ -3938,7 +3938,6 @@ impl FlowchartApp {
     /// Shows quick-toggle buttons for common edge styles.
     fn draw_floating_edge_bar(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
         use super::interaction::{control_points_for_side, cubic_bezier_point};
-        use super::theme::*;
 
         // Only show when exactly one edge is selected and we're not editing its label
         if self.selection.edge_ids.len() != 1 || self.inline_edge_edit.is_some() {
@@ -4007,7 +4006,7 @@ impl FlowchartApp {
 
                 // --- Phase 2: draw (immutable painter borrow, no more ui mutations) ---
                 let painter = ui.painter();
-                painter.rect_filled(bar_rect, CornerRadius::same(14), SURFACE1);
+                painter.rect_filled(bar_rect, CornerRadius::same(14), self.theme.surface1);
                 painter.rect_stroke(bar_rect, CornerRadius::same(14),
                     Stroke::new(1.0, self.theme.minimap_border), StrokeKind::Outside);
                 // Connector stem to edge midpoint
@@ -4254,7 +4253,7 @@ impl FlowchartApp {
         let h_canvas = max_y - min_y;
         let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(9.0, 13.0);
         let lbl_color = self.theme.selection_color.gamma_multiply(0.75);
-        let bg = DIM_OVERLAY;
+        let bg = self.theme.dim_overlay;
         let w_text = format!("{:.0}", w_canvas);
         let w_pos = Pos2::new(bbox.center().x, bbox.max.y + 10.0);
         let w_galley = painter.layout_no_wrap(w_text.clone(), FontId::proportional(font_sz), lbl_color);
@@ -4344,7 +4343,7 @@ impl FlowchartApp {
                 let screen_size = node.size_vec() * self.viewport.zoom;
                 let screen_rect = Rect::from_min_size(screen_pos, screen_size);
                 if !screen_rect.intersects(canvas_rect) { continue; }
-                let dim = if focus_neighbors.contains(&node.id) { FOCUS_DIM_NEAR } else { FOCUS_DIM_FAR };
+                let dim = if focus_neighbors.contains(&node.id) { self.theme.focus_dim_near } else { self.theme.focus_dim_far };
                 painter.rect_filled(screen_rect, CornerRadius::same(4), dim);
             }
         }
@@ -4355,7 +4354,7 @@ impl FlowchartApp {
                 let screen_size = node.size_vec() * self.viewport.zoom;
                 let screen_rect = Rect::from_min_size(screen_pos, screen_size);
                 if !screen_rect.intersects(canvas_rect) { continue; }
-                painter.rect_filled(screen_rect, CornerRadius::same(4), DIM_OVERLAY_HEAVY);
+                painter.rect_filled(screen_rect, CornerRadius::same(4), self.theme.dim_overlay_heavy);
             }
         }
     }
@@ -4364,7 +4363,7 @@ impl FlowchartApp {
     fn draw_drag_ghosts(&self, painter: &egui::Painter, canvas_rect: Rect) {
         if let DragState::DraggingNode { start_positions, .. } = &self.drag {
             if start_positions.len() >= 2 {
-                let ghost_stroke = Stroke::new(1.0, GHOST_STROKE);
+                let ghost_stroke = Stroke::new(1.0, self.theme.ghost_stroke);
                 for (node_id, orig_pos) in start_positions {
                     if let Some(node) = self.document.find_node(node_id) {
                         let screen_tl = self.viewport.canvas_to_screen(*orig_pos);

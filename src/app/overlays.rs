@@ -4,7 +4,7 @@
 // Each method draws one overlay and manages its own open/close state.
 
 use egui::{Color32, Pos2, Vec2};
-use crate::app::{FlowchartApp, ACCENT, SURFACE0, SURFACE1, TEXT_DIM, TEXT_SECONDARY};
+use crate::app::FlowchartApp;
 use crate::model::*;
 
 impl FlowchartApp {
@@ -38,19 +38,19 @@ impl FlowchartApp {
                     f.layout_no_wrap(
                         text.clone(),
                         egui::FontId::proportional(18.0),
-                        Color32::from_rgba_premultiplied(205, 214, 244, alpha),
+                        Color32::from_rgba_premultiplied(self.theme.text_primary.r(), self.theme.text_primary.g(), self.theme.text_primary.b(), alpha),
                     )
                 });
                 let size = galley.size() + Vec2::new(20.0, 10.0);
                 let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                let bg = Color32::from_rgba_premultiplied(30, 30, 46, alpha.saturating_sub(30));
+                let bg = Color32::from_rgba_premultiplied(self.theme.canvas_bg.r(), self.theme.canvas_bg.g(), self.theme.canvas_bg.b(), alpha.saturating_sub(30));
                 ui.painter().rect_filled(rect, egui::CornerRadius::same(8), bg);
                 ui.painter().rect_stroke(
                     rect,
                     egui::CornerRadius::same(8),
                     egui::Stroke::new(
                         1.0,
-                        Color32::from_rgba_premultiplied(137, 180, 250, alpha / 2),
+                        Color32::from_rgba_premultiplied(self.theme.accent.r(), self.theme.accent.g(), self.theme.accent.b(), alpha / 2),
                     ),
                     egui::StrokeKind::Outside,
                 );
@@ -101,7 +101,7 @@ impl FlowchartApp {
                     ui.label(
                         egui::RichText::new(format!("{count} match(es)"))
                             .size(10.5)
-                            .color(TEXT_DIM),
+                            .color(self.theme.text_dim),
                     );
                 }
                 ui.add_space(4.0);
@@ -226,14 +226,14 @@ impl FlowchartApp {
             .collapsible(false)
             .fixed_pos(picker_pos)
             .frame(egui::Frame {
-                fill: SURFACE0,
+                fill: self.theme.surface0,
                 inner_margin: egui::Margin::same(8),
-                stroke: egui::Stroke::new(1.0, SURFACE1),
+                stroke: egui::Stroke::new(1.0, self.theme.surface1),
                 corner_radius: egui::CornerRadius::same(8),
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                ui.label(egui::RichText::new("Insert node").size(10.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Insert node").size(10.0).color(self.theme.text_dim));
                 ui.add_space(4.0);
                 for (label, kind) in shapes {
                     if ui
@@ -306,15 +306,15 @@ impl FlowchartApp {
             .collapsible(false)
             .fixed_pos(pos)
             .frame(egui::Frame {
-                fill: SURFACE0,
+                fill: self.theme.surface0,
                 inner_margin: egui::Margin::same(6),
-                stroke: egui::Stroke::new(1.0, ACCENT),
+                stroke: egui::Stroke::new(1.0, self.theme.accent),
                 corner_radius: egui::CornerRadius::same(6),
                 ..Default::default()
             })
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Edge label").size(10.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("Edge label").size(10.0).color(self.theme.text_dim));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let char_count = self
                             .document
@@ -324,7 +324,7 @@ impl FlowchartApp {
                         let count_color = if char_count > 45 {
                             Color32::from_rgb(243, 139, 168)
                         } else {
-                            TEXT_DIM
+                            self.theme.text_dim
                         };
                         ui.label(
                             egui::RichText::new(format!("{}/50", char_count))
@@ -359,17 +359,17 @@ impl FlowchartApp {
                         egui::RichText::new("Enter")
                             .monospace()
                             .size(9.5)
-                            .color(ACCENT.gamma_multiply(0.7)),
+                            .color(self.theme.accent.gamma_multiply(0.7)),
                     );
-                    ui.label(egui::RichText::new("save").size(9.5).color(TEXT_DIM));
-                    ui.label(egui::RichText::new("·").size(9.5).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("save").size(9.5).color(self.theme.text_dim));
+                    ui.label(egui::RichText::new("·").size(9.5).color(self.theme.text_dim));
                     ui.label(
                         egui::RichText::new("Esc")
                             .monospace()
                             .size(9.5)
-                            .color(ACCENT.gamma_multiply(0.7)),
+                            .color(self.theme.accent.gamma_multiply(0.7)),
                     );
-                    ui.label(egui::RichText::new("cancel").size(9.5).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("cancel").size(9.5).color(self.theme.text_dim));
                 });
             });
         if close_editor {
@@ -550,7 +550,7 @@ impl FlowchartApp {
                             ui.label(
                                 egui::RichText::new(*section)
                                     .size(10.0)
-                                    .color(TEXT_DIM)
+                                    .color(self.theme.text_dim)
                                     .strong(),
                             );
                             egui::Grid::new(format!("sc_{}", section))
@@ -562,13 +562,13 @@ impl FlowchartApp {
                                         ui.label(
                                             egui::RichText::new(*key)
                                                 .monospace()
-                                                .color(ACCENT)
+                                                .color(self.theme.accent)
                                                 .size(11.5),
                                         );
                                         ui.label(
                                             egui::RichText::new(*desc)
                                                 .size(11.5)
-                                                .color(TEXT_SECONDARY),
+                                                .color(self.theme.text_secondary),
                                         );
                                         ui.end_row();
                                     }

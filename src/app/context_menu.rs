@@ -3,7 +3,7 @@
 use egui::{Pos2, Vec2};
 use crate::model::*;
 use super::FlowchartApp;
-use super::theme::*;
+use super::theme::{BULK_COLORS, NODE_COLORS, EDGE_COLORS, to_color32, auto_contrast_text};
 
 impl FlowchartApp {
     /// Dispatch context menu based on what was right-clicked.
@@ -36,7 +36,7 @@ impl FlowchartApp {
     fn context_menu_multi(&mut self, ui: &mut egui::Ui) {
         let n_sel = self.selection.node_ids.len();
         ui.label(egui::RichText::new(format!("{} nodes", n_sel))
-            .size(11.0).color(TEXT_DIM).strong());
+            .size(11.0).color(self.theme.text_dim).strong());
         ui.separator();
 
         // Bulk color row
@@ -113,7 +113,7 @@ impl FlowchartApp {
         self.selection.select_node(node_id);
 
         // Quick-color row
-        ui.label(egui::RichText::new("Fill").size(9.5).color(TEXT_DIM));
+        ui.label(egui::RichText::new("Fill").size(9.5).color(self.theme.text_dim));
         let mut color_pick: Option<[u8; 4]> = None;
         ui.horizontal_wrapped(|ui| {
             for (color, name) in NODE_COLORS {
@@ -218,7 +218,7 @@ impl FlowchartApp {
 
     fn context_menu_edge(&mut self, ui: &mut egui::Ui, edge_id: EdgeId) {
         self.selection.select_edge(edge_id);
-        ui.label(egui::RichText::new("Edge").size(11.0).color(TEXT_DIM));
+        ui.label(egui::RichText::new("Edge").size(11.0).color(self.theme.text_dim));
         ui.separator();
 
         // Color presets
@@ -236,15 +236,15 @@ impl FlowchartApp {
         });
 
         // Thickness presets
-        ui.label(egui::RichText::new("Thickness").size(9.5).color(TEXT_DIM));
+        ui.label(egui::RichText::new("Thickness").size(9.5).color(self.theme.text_dim));
         ui.horizontal(|ui| {
             for (w, label, tip) in [(1.0_f32, "─", "Thin"), (2.5, "━", "Normal"), (5.0, "▬", "Thick"), (9.0, "█", "Bold")] {
                 let is_cur = self.document.find_edge(&edge_id)
                     .map(|e| (e.style.width - w).abs() < 0.5)
                     .unwrap_or(false);
                 let btn = egui::Button::new(
-                    egui::RichText::new(label).size(14.0).color(if is_cur { ACCENT } else { TEXT_SECONDARY })
-                ).fill(if is_cur { SURFACE1 } else { SURFACE0 })
+                    egui::RichText::new(label).size(14.0).color(if is_cur { self.theme.accent } else { self.theme.text_secondary })
+                ).fill(if is_cur { self.theme.surface1 } else { self.theme.surface0 })
                  .min_size(egui::Vec2::new(36.0, 28.0));
                 if ui.add(btn).on_hover_text(tip).clicked() {
                     if let Some(e) = self.document.find_edge_mut(&edge_id) { e.style.width = w; }
@@ -261,8 +261,8 @@ impl FlowchartApp {
                 .unwrap_or_default();
             let tog = |ui: &mut egui::Ui, active: bool, label: &str, tip: &str| {
                 ui.add(egui::Button::new(egui::RichText::new(label).size(11.0)
-                    .color(if active { ACCENT } else { TEXT_DIM }))
-                    .fill(if active { SURFACE1 } else { SURFACE0 })
+                    .color(if active { self.theme.accent } else { self.theme.text_dim }))
+                    .fill(if active { self.theme.surface1 } else { self.theme.surface0 })
                     .min_size(egui::Vec2::new(44.0, 24.0)))
                     .on_hover_text(tip).clicked()
             };
@@ -307,7 +307,7 @@ impl FlowchartApp {
     // ── Empty canvas ─────────────────────────────────────────────────────
 
     fn context_menu_canvas(&mut self, ui: &mut egui::Ui, canvas_pos: Pos2) {
-        ui.label(egui::RichText::new("Canvas").size(10.0).color(TEXT_DIM));
+        ui.label(egui::RichText::new("Canvas").size(10.0).color(self.theme.text_dim));
         ui.separator();
 
         // Add node submenu

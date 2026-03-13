@@ -3,7 +3,7 @@ use crate::model::*;
 use super::FlowchartApp;
 use super::camera::compute_z_layers;
 use super::interaction::{control_points_for_side, cubic_bezier_point};
-use super::theme::*;
+use super::theme::PORT_RADIUS;
 use super::{DragState, ResizeHandle, Tool};
 
 const GROUND_GRID_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 35);
@@ -806,10 +806,10 @@ impl FlowchartApp {
                         [src_screen, cp1, cp2, *current_screen],
                         false,
                         Color32::TRANSPARENT,
-                        Stroke::new(2.5, ACCENT),
+                        Stroke::new(2.5, self.theme.accent),
                     );
                     painter.add(bezier);
-                    painter.circle_filled(*current_screen, 5.0, ACCENT);
+                    painter.circle_filled(*current_screen, 5.0, self.theme.accent);
                 }
             }
         }
@@ -856,18 +856,18 @@ impl FlowchartApp {
                     let hovered = pointer_pos
                         .map_or(false, |m| (m - screen_port).length() < r * 3.0);
                     if hovered {
-                        painter.circle_filled(screen_port, r * 1.3, ACCENT);
+                        painter.circle_filled(screen_port, r * 1.3, self.theme.accent);
                         painter.circle_stroke(
                             screen_port,
                             r * 1.3,
                             Stroke::new(2.0, Color32::WHITE),
                         );
                     } else {
-                        painter.circle_filled(screen_port, r, PORT_FILL);
+                        painter.circle_filled(screen_port, r, self.theme.port_fill);
                         painter.circle_stroke(
                             screen_port,
                             r,
-                            Stroke::new(1.5, SELECTION_COLOR),
+                            Stroke::new(1.5, self.theme.selection_color),
                         );
                     }
                 }
@@ -901,7 +901,7 @@ impl FlowchartApp {
             Align2::CENTER_CENTER,
             instructions,
             FontId::proportional(11.0),
-            TEXT_DIM,
+            self.theme.text_dim,
         );
 
         // Status toast
@@ -964,7 +964,7 @@ impl FlowchartApp {
         };
 
         let border_color = if is_selected {
-            SELECTION_COLOR
+            self.theme.selection_color
         } else {
             let c = node.style.border_color;
             Color32::from_rgba_premultiplied(c[0], c[1], c[2], alpha)
@@ -1290,7 +1290,7 @@ impl FlowchartApp {
                     painter.rect_stroke(
                         screen_rect,
                         corner,
-                        Stroke::new(2.0 * scale.sqrt(), SELECTION_COLOR),
+                        Stroke::new(2.0 * scale.sqrt(), self.theme.selection_color),
                         StrokeKind::Outside,
                     );
                 }
@@ -1465,7 +1465,7 @@ impl FlowchartApp {
         let alpha = (opacity * 255.0) as u8;
 
         let edge_color = if is_selected {
-            SELECTION_COLOR
+            self.theme.selection_color
         } else {
             let c = edge.style.color;
             Color32::from_rgba_premultiplied(c[0], c[1], c[2], alpha)

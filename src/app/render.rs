@@ -2,7 +2,7 @@ use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, StrokeKind
 use crate::model::*;
 use super::FlowchartApp;
 use super::interaction::{control_points_for_side, cubic_bezier_point};
-use super::theme::*;
+use super::theme::{PORT_RADIUS, to_color32};
 
 /// Infer a semantic watermark icon from node label keywords.
 /// Returns a single emoji/symbol that represents the node's conceptual type.
@@ -990,7 +990,7 @@ impl FlowchartApp {
                             Pos2::new(screen_rect.min.x + 4.0, row_y),
                             Pos2::new(screen_rect.max.x - 4.0, row_y),
                         ],
-                        Stroke::new(0.5, ROW_DIVIDER),
+                        Stroke::new(0.5, self.theme.row_divider),
                     );
                 }
 

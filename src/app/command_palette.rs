@@ -3,7 +3,6 @@
 use egui::{Align2, Color32, Frame, Key, Margin, RichText, Stroke, Vec2};
 
 use super::{BgPattern, DiagramMode, FlowchartApp};
-use crate::app::theme::{ACCENT, MANTLE, SURFACE0, SURFACE1, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY};
 use crate::model::NodeId;
 
 struct PaletteEntry {
@@ -97,6 +96,14 @@ impl FlowchartApp {
             self.show_command_palette = false;
         }
 
+        let mantle = self.theme.mantle;
+        let surface0 = self.theme.surface0;
+        let surface1 = self.theme.surface1;
+        let text_dim = self.theme.text_dim;
+        let text_primary = self.theme.text_primary;
+        let text_secondary = self.theme.text_secondary;
+        let accent = self.theme.accent;
+
         egui::Window::new("##cmd_palette")
             .title_bar(false)
             .resizable(false)
@@ -105,26 +112,26 @@ impl FlowchartApp {
             .fixed_size([480.0, 360.0])
             .frame(
                 Frame::NONE
-                    .fill(MANTLE)
-                    .stroke(Stroke::new(1.0, SURFACE1))
+                    .fill(mantle)
+                    .stroke(Stroke::new(1.0, surface1))
                     .corner_radius(egui::CornerRadius::same(10))
                     .inner_margin(Margin::same(0)),
             )
             .show(ctx, |ui| {
                 // ── Search input ─────────────────────────────────────────
                 Frame::NONE
-                    .fill(SURFACE0)
+                    .fill(surface0)
                     .inner_margin(Margin { left: 14, right: 14, top: 10, bottom: 10 })
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("⌘").size(13.0).color(TEXT_DIM));
+                            ui.label(RichText::new("⌘").size(13.0).color(text_dim));
                             ui.add_space(6.0);
                             let resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.command_palette_query)
                                     .desired_width(f32::INFINITY)
                                     .hint_text("Type an action…")
                                     .frame(false)
-                                    .text_color(TEXT_PRIMARY)
+                                    .text_color(text_primary)
                                     .font(egui::FontId::proportional(14.0)),
                             );
                             // Auto-focus input
@@ -148,7 +155,7 @@ impl FlowchartApp {
                             ui.label(
                                 RichText::new(entry.category)
                                     .size(9.5)
-                                    .color(TEXT_DIM)
+                                    .color(text_dim)
                                     .strong(),
                             );
                             last_cat = entry.category;
@@ -157,7 +164,7 @@ impl FlowchartApp {
                         let is_sel = i == self.command_palette_cursor;
 
                         let row = Frame::NONE
-                            .fill(if is_sel { SURFACE0 } else { Color32::TRANSPARENT })
+                            .fill(if is_sel { surface0 } else { Color32::TRANSPARENT })
                             .corner_radius(egui::CornerRadius::same(5))
                             .inner_margin(Margin { left: 10, right: 10, top: 4, bottom: 4 })
                             .show(ui, |ui| {
@@ -168,13 +175,13 @@ impl FlowchartApp {
                                         ui.label(
                                             RichText::new(entry.icon)
                                                 .size(13.0)
-                                                .color(if is_sel { ACCENT } else { TEXT_DIM }),
+                                                .color(if is_sel { accent } else { text_dim }),
                                         );
                                         ui.add_space(6.0);
                                         ui.label(
                                             RichText::new(entry.label)
                                                 .size(13.0)
-                                                .color(if is_sel { TEXT_PRIMARY } else { TEXT_SECONDARY }),
+                                                .color(if is_sel { text_primary } else { text_secondary }),
                                         );
                                     },
                                 );
@@ -191,7 +198,7 @@ impl FlowchartApp {
                     if matches.is_empty() {
                         ui.add_space(20.0);
                         ui.vertical_centered(|ui| {
-                            ui.label(RichText::new("No matching actions").size(13.0).color(TEXT_DIM));
+                            ui.label(RichText::new("No matching actions").size(13.0).color(text_dim));
                         });
                     }
                     ui.add_space(4.0);

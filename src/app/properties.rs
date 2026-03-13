@@ -1,7 +1,7 @@
 use egui::{Color32, CornerRadius, FontId, Pos2, Rect, SidePanel, Stroke};
 use crate::model::*;
 use super::FlowchartApp;
-use super::theme::*;
+use super::theme::{PROPERTIES_WIDTH, to_color32};
 
 impl FlowchartApp {
     pub(crate) fn draw_properties_panel(&mut self, ctx: &egui::Context) {
@@ -11,16 +11,16 @@ impl FlowchartApp {
                 .resizable(false)
                 .exact_width(28.0)
                 .frame(egui::Frame {
-                    fill: MANTLE,
+                    fill: self.theme.mantle,
                     inner_margin: egui::Margin::same(0),
-                    stroke: Stroke::new(1.0, SURFACE1),
+                    stroke: Stroke::new(1.0, self.theme.surface1),
                     ..Default::default()
                 })
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(8.0);
                         let btn = egui::Button::new(
-                            egui::RichText::new("◀").size(11.0).color(TEXT_DIM)
+                            egui::RichText::new("◀").size(11.0).color(self.theme.text_dim)
                         ).fill(egui::Color32::TRANSPARENT).frame(false);
                         if ui.add(btn).on_hover_text("Expand properties").clicked() {
                             self.properties_collapsed = false;
@@ -34,16 +34,16 @@ impl FlowchartApp {
             .resizable(false)
             .exact_width(PROPERTIES_WIDTH)
             .frame(egui::Frame {
-                fill: MANTLE,
+                fill: self.theme.mantle,
                 inner_margin: egui::Margin { left: 6, right: 10, top: 10, bottom: 8 },
-                stroke: Stroke::new(1.0, SURFACE1),
+                stroke: Stroke::new(1.0, self.theme.surface1),
                 ..Default::default()
             })
             .show(ctx, |ui| {
                 // Header with collapse button
                 ui.horizontal(|ui| {
                     let btn = egui::Button::new(
-                        egui::RichText::new("▶").size(10.0).color(TEXT_DIM)
+                        egui::RichText::new("▶").size(10.0).color(self.theme.text_dim)
                     ).fill(egui::Color32::TRANSPARENT).frame(false);
                     if ui.add(btn).on_hover_text("Collapse properties").clicked() {
                         self.properties_collapsed = true;
@@ -52,7 +52,7 @@ impl FlowchartApp {
                     ui.label(
                         egui::RichText::new("Properties")
                             .size(14.0)
-                            .color(TEXT_PRIMARY)
+                            .color(self.theme.text_primary)
                             .strong(),
                     );
                 });
@@ -87,18 +87,18 @@ impl FlowchartApp {
         if n_nodes == 0 {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {
-                ui.label(egui::RichText::new("\u{25CB}").size(32.0).color(SURFACE1));
+                ui.label(egui::RichText::new("\u{25CB}").size(32.0).color(self.theme.surface1));
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new("Canvas is empty").size(15.0).color(TEXT_SECONDARY));
+                ui.label(egui::RichText::new("Canvas is empty").size(15.0).color(self.theme.text_secondary));
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new("Double-click anywhere\nor press R, C, or D to add a shape").size(12.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Double-click anywhere\nor press R, C, or D to add a shape").size(12.0).color(self.theme.text_dim));
             });
             return;
         }
 
         // Graph statistics
         ui.add_space(8.0);
-        Self::draw_section_header(ui, "Graph Overview");
+        self.draw_section_header(ui, "Graph Overview");
         ui.add_space(6.0);
 
         let stats: &[(&str, String)] = &[
@@ -107,9 +107,9 @@ impl FlowchartApp {
         ];
         for (label, val) in stats {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(*label).size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new(*label).size(11.0).color(self.theme.text_dim));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(val).size(11.0).strong().color(TEXT_SECONDARY));
+                    ui.label(egui::RichText::new(val).size(11.0).strong().color(self.theme.text_secondary));
                 });
             });
         }
@@ -129,15 +129,15 @@ impl FlowchartApp {
             .collect();
 
         if !orphans.is_empty() {
-            Self::draw_section_header(ui, "Unconnected");
+            self.draw_section_header(ui, "Unconnected");
             ui.add_space(4.0);
             for name in &orphans {
-                ui.label(egui::RichText::new(format!("· {}", name)).size(11.5).color(TEXT_DIM));
+                ui.label(egui::RichText::new(format!("· {}", name)).size(11.5).color(self.theme.text_dim));
             }
             if orphans.len() == 5 && self.document.nodes.iter().filter(|n| {
                 !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id)
             }).count() > 5 {
-                ui.label(egui::RichText::new("…and more").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("…and more").size(11.0).color(self.theme.text_dim));
             }
             ui.add_space(8.0);
         }
@@ -147,7 +147,7 @@ impl FlowchartApp {
             .filter(|n| n.tag.is_some())
             .collect();
         if !tagged.is_empty() {
-            Self::draw_section_header(ui, "Tags");
+            self.draw_section_header(ui, "Tags");
             ui.add_space(4.0);
             let mut counts = [0usize; 4];
             for n in &tagged {
@@ -171,7 +171,7 @@ impl FlowchartApp {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("● {}", name)).size(11.5).color(*c));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new(counts[i].to_string()).size(11.5).color(TEXT_DIM));
+                            ui.label(egui::RichText::new(counts[i].to_string()).size(11.5).color(self.theme.text_dim));
                         });
                     });
                 }
@@ -183,15 +183,15 @@ impl FlowchartApp {
         let undo_count = self.history.undo_steps();
         let redo_count = self.history.redo_steps();
         if undo_count > 0 || redo_count > 0 {
-            Self::draw_section_header(ui, "History");
+            self.draw_section_header(ui, "History");
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(format!("↩ {} undo", undo_count)).size(11.0).color(
-                    if undo_count > 0 { TEXT_SECONDARY } else { TEXT_DIM }
+                    if undo_count > 0 { self.theme.text_secondary } else { self.theme.text_dim }
                 ));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(egui::RichText::new(format!("{} ↪ redo", redo_count)).size(11.0).color(
-                        if redo_count > 0 { TEXT_SECONDARY } else { TEXT_DIM }
+                        if redo_count > 0 { self.theme.text_secondary } else { self.theme.text_dim }
                     ));
                 });
             });
@@ -201,21 +201,21 @@ impl FlowchartApp {
             let bar_response = ui.allocate_exact_size(egui::Vec2::new(ui.available_width(), 6.0), egui::Sense::hover());
             let bar = bar_response.0;
             let painter = ui.painter();
-            painter.rect_filled(bar, CornerRadius::same(3), SURFACE0);
+            painter.rect_filled(bar, CornerRadius::same(3), self.theme.surface0);
             painter.rect_filled(
                 Rect::from_min_size(bar.min, egui::Vec2::new(bar.width() * undo_frac, bar.height())),
                 CornerRadius::same(3),
-                ACCENT.gamma_multiply(0.7),
+                self.theme.accent.gamma_multiply(0.7),
             );
             ui.add_space(8.0);
         }
 
         ui.add_space(8.0);
-        Self::draw_divider(ui);
+        self.draw_divider(ui);
         ui.add_space(8.0);
 
         // Keyboard shortcuts reference
-        Self::draw_section_header(ui, "Shortcuts");
+        self.draw_section_header(ui, "Shortcuts");
         ui.add_space(6.0);
 
         let shortcut_groups: &[(&str, &[(&str, &str)])] = &[
@@ -250,18 +250,18 @@ impl FlowchartApp {
         ];
 
         for (group_name, shortcuts) in shortcut_groups {
-            ui.label(egui::RichText::new(*group_name).size(11.5).color(TEXT_SECONDARY).strong());
+            ui.label(egui::RichText::new(*group_name).size(11.5).color(self.theme.text_secondary).strong());
             ui.add_space(4.0);
             for (key, action) in *shortcuts {
                 ui.horizontal(|ui| {
                     let key_text = egui::RichText::new(*key)
                         .size(11.0)
                         .monospace()
-                        .color(ACCENT)
+                        .color(self.theme.accent)
                         .background_color(Color32::from_rgba_unmultiplied(137, 180, 250, 25));
                     ui.label(key_text);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(*action).size(11.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new(*action).size(11.0).color(self.theme.text_dim));
                     });
                 });
             }
@@ -270,6 +270,7 @@ impl FlowchartApp {
     }
 
     fn draw_node_properties(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme.clone();
         let node_id = *self.selection.node_ids.iter().next().unwrap();
         let mut applied_quick_style: Option<&'static str> = None;
         if let Some(node) = self.document.find_node_mut(&node_id) {
@@ -288,7 +289,7 @@ impl FlowchartApp {
                 NodeKind::Text { .. } => "Text",
             };
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(kind_name).size(13.0).strong().color(ACCENT));
+                ui.label(egui::RichText::new(kind_name).size(13.0).strong().color(theme.accent));
             });
             ui.add_space(12.0);
 
@@ -297,10 +298,10 @@ impl FlowchartApp {
                 NodeKind::Shape {
                     label, description, ..
                 } => {
-                    Self::draw_section_header(ui, "Content");
+                    ui.label(egui::RichText::new("Content").size(11.0).color(theme.text_secondary).strong());
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("Label").size(11.0).color(theme.text_dim));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.small_button("⎘").on_hover_text("Copy label to clipboard").clicked() {
                                 ui.ctx().copy_text(label.clone());
@@ -334,7 +335,7 @@ impl FlowchartApp {
                     // Node icon badge field
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Icon").size(11.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("Icon").size(11.0).color(theme.text_dim));
                         ui.add(
                             egui::TextEdit::singleline(&mut node.icon)
                                 .hint_text("emoji…")
@@ -362,7 +363,7 @@ impl FlowchartApp {
                         }
                     });
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Description").size(11.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("Description").size(11.0).color(theme.text_dim));
                     ui.add_space(2.0);
                     ui.add(
                         egui::TextEdit::multiline(description)
@@ -373,7 +374,7 @@ impl FlowchartApp {
                     // Comment field (also accessible via Cmd+M)
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("💬 Comment").size(11.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("💬 Comment").size(11.0).color(theme.text_dim));
                         if ui.small_button("Edit…").on_hover_text("Cmd+M").clicked() {
                             self.comment_editing = Some(node_id);
                         }
@@ -389,9 +390,9 @@ impl FlowchartApp {
                     }
                 }
                 NodeKind::StickyNote { text, color } => {
-                    Self::draw_section_header(ui, "Content");
+                    ui.label(egui::RichText::new("Content").size(11.0).color(theme.text_secondary).strong());
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Text").size(11.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("Text").size(11.0).color(theme.text_dim));
                     ui.add_space(2.0);
                     let text_response = ui.add(
                         egui::TextEdit::multiline(text)
@@ -405,7 +406,7 @@ impl FlowchartApp {
                     }
                     ui.add_space(12.0);
 
-                    Self::draw_section_header(ui, "Color");
+                    ui.label(egui::RichText::new("Color").size(11.0).color(theme.text_secondary).strong());
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         for sc in &StickyColor::ALL {
@@ -434,9 +435,9 @@ impl FlowchartApp {
                     });
                 }
                 NodeKind::Entity { name, attributes } => {
-                    Self::draw_section_header(ui, "Content");
+                    ui.label(egui::RichText::new("Content").size(11.0).color(theme.text_secondary).strong());
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Name").size(11.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("Name").size(11.0).color(theme.text_dim));
                     ui.add_space(2.0);
                     let name_response = ui.add(
                         egui::TextEdit::singleline(name)
@@ -449,16 +450,16 @@ impl FlowchartApp {
                     }
                     ui.add_space(12.0);
 
-                    Self::draw_section_header(ui, "Attributes");
+                    ui.label(egui::RichText::new("Attributes").size(11.0).color(theme.text_secondary).strong());
                     ui.add_space(4.0);
 
                     let mut to_remove: Option<usize> = None;
                     for (i, attr) in attributes.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
                             let pk_text = if attr.is_primary_key {
-                                egui::RichText::new("PK").size(10.5).strong().color(ACCENT)
+                                egui::RichText::new("PK").size(10.5).strong().color(theme.accent)
                             } else {
-                                egui::RichText::new("PK").size(10.5).color(TEXT_DIM)
+                                egui::RichText::new("PK").size(10.5).color(theme.text_dim)
                             };
                             if ui
                                 .add(egui::Button::new(pk_text).min_size(egui::vec2(28.0, 20.0)))
@@ -473,9 +474,9 @@ impl FlowchartApp {
                                 egui::RichText::new("FK")
                                     .size(10.5)
                                     .strong()
-                                    .color(FK_COLOR)
+                                    .color(theme.fk_color)
                             } else {
-                                egui::RichText::new("FK").size(10.5).color(TEXT_DIM)
+                                egui::RichText::new("FK").size(10.5).color(theme.text_dim)
                             };
                             if ui
                                 .add(egui::Button::new(fk_text).min_size(egui::vec2(28.0, 20.0)))
@@ -501,7 +502,7 @@ impl FlowchartApp {
                             if ui
                                 .add(
                                     egui::Button::new(
-                                        egui::RichText::new("x").size(10.0).color(TEXT_DIM),
+                                        egui::RichText::new("x").size(10.0).color(theme.text_dim),
                                     )
                                     .min_size(egui::vec2(18.0, 18.0)),
                                 )
@@ -519,7 +520,7 @@ impl FlowchartApp {
                     ui.add_space(4.0);
                     if ui
                         .add(egui::Button::new(
-                            egui::RichText::new("+ Add Attribute").size(11.0).color(ACCENT),
+                            egui::RichText::new("+ Add Attribute").size(11.0).color(theme.accent),
                         ))
                         .clicked()
                     {
@@ -533,9 +534,9 @@ impl FlowchartApp {
                     }
                 }
                 NodeKind::Text { content } => {
-                    Self::draw_section_header(ui, "Content");
+                    ui.label(egui::RichText::new("Content").size(11.0).color(theme.text_secondary).strong());
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Content").size(11.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("Content").size(11.0).color(theme.text_dim));
                     ui.add_space(2.0);
                     let text_response = ui.add(
                         egui::TextEdit::multiline(content)
@@ -556,7 +557,7 @@ impl FlowchartApp {
             }
 
             // Quick style presets — complete style preset in one click
-            Self::draw_section_header(ui, "Quick Styles");
+            ui.label(egui::RichText::new("Quick Styles").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
             // (label, fill, border, text, shadow, bold)
             let quick_styles: &[(&str, [u8;4], [u8;4], [u8;4], bool, bool)] = &[
@@ -596,7 +597,7 @@ impl FlowchartApp {
             ui.add_space(10.0);
 
             // Color theme presets
-            Self::draw_section_header(ui, "Color Themes");
+            ui.label(egui::RichText::new("Color Themes").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
             // Each entry: (name, fill_rgba, border_rgba, text_rgba)
             let themes: &[(&str, [u8;4], [u8;4], [u8;4])] = &[
@@ -637,7 +638,7 @@ impl FlowchartApp {
             let mut recent_color_pick: Option<[u8; 4]> = None;
             let mut style_changed = false;
             egui::CollapsingHeader::new(
-                egui::RichText::new("Style").size(11.0).color(TEXT_SECONDARY).strong()
+                egui::RichText::new("Style").size(11.0).color(theme.text_secondary).strong()
             )
             .default_open(true)
             .id_salt("prop_style")
@@ -645,7 +646,7 @@ impl FlowchartApp {
                 ui.add_space(4.0);
                 if !recent_colors_snapshot.is_empty() {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(egui::RichText::new("Recent:").size(11.0).color(TEXT_DIM));
+                        ui.label(egui::RichText::new("Recent:").size(11.0).color(theme.text_dim));
                         for col in &recent_colors_snapshot {
                             let c = to_color32(*col);
                             let (r, painter) = ui.allocate_painter(egui::vec2(16.0, 16.0), egui::Sense::click());
@@ -665,7 +666,7 @@ impl FlowchartApp {
                 }
             ui.horizontal(|ui| {
                 let mut c = to_color32(node.style.fill_color);
-                ui.label(egui::RichText::new("Fill").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Fill").size(11.0).color(theme.text_dim));
                 if ui.color_edit_button_srgba(&mut c).changed() {
                     node.style.fill_color = c.to_array();
                     // Track recent color
@@ -676,13 +677,13 @@ impl FlowchartApp {
                 }
                 ui.add_space(8.0);
                 let mut b = to_color32(node.style.border_color);
-                ui.label(egui::RichText::new("Border").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Border").size(11.0).color(theme.text_dim));
                 if ui.color_edit_button_srgba(&mut b).changed() {
                     node.style.border_color = b.to_array();
                 }
                 ui.add_space(8.0);
                 let mut t = to_color32(node.style.text_color);
-                ui.label(egui::RichText::new("Text").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Text").size(11.0).color(theme.text_dim));
                 if ui.color_edit_button_srgba(&mut t).changed() {
                     node.style.text_color = t.to_array();
                 }
@@ -701,27 +702,27 @@ impl FlowchartApp {
             ui.horizontal(|ui| {
                 ui.add(egui::Slider::new(&mut node.style.border_width, 0.0..=10.0).text("Border"));
                 ui.add_space(8.0);
-                ui.checkbox(&mut node.style.border_dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
+                ui.checkbox(&mut node.style.border_dashed, egui::RichText::new("Dashed").size(11.0).color(theme.text_dim));
                 ui.add_space(8.0);
-                ui.checkbox(&mut node.style.gradient, egui::RichText::new("Gradient").size(11.0).color(TEXT_DIM));
+                ui.checkbox(&mut node.style.gradient, egui::RichText::new("Gradient").size(11.0).color(theme.text_dim));
                 if node.style.gradient {
                     for (angle, icon, tip) in [(0u8,"↓","Top→Bottom"),(90u8,"→","Left→Right"),(45u8,"↘","Diagonal ↘"),(135u8,"↗","Diagonal ↗")] {
                         let active = node.style.gradient_angle == angle;
-                        let btn = egui::Button::new(egui::RichText::new(icon).size(11.0).color(if active { ACCENT } else { TEXT_DIM }))
-                            .fill(if active { SURFACE1 } else { Color32::TRANSPARENT });
+                        let btn = egui::Button::new(egui::RichText::new(icon).size(11.0).color(if active { theme.accent } else { theme.text_dim }))
+                            .fill(if active { theme.surface1 } else { Color32::TRANSPARENT });
                         if ui.add(btn).on_hover_text(tip).clicked() { node.style.gradient_angle = angle; }
                     }
                 }
                 ui.add_space(8.0);
-                ui.checkbox(&mut node.style.shadow, egui::RichText::new("Shadow").size(11.0).color(TEXT_DIM))
+                ui.checkbox(&mut node.style.shadow, egui::RichText::new("Shadow").size(11.0).color(theme.text_dim))
                     .on_hover_text("Render a soft drop shadow beneath the node");
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add(egui::Slider::new(&mut node.style.font_size, 8.0..=48.0).text("Font"));
                 ui.add_space(6.0);
-                let b_col = if node.style.bold { ACCENT } else { TEXT_DIM };
-                let i_col = if node.style.italic { ACCENT } else { TEXT_DIM };
+                let b_col = if node.style.bold { theme.accent } else { theme.text_dim };
+                let i_col = if node.style.italic { theme.accent } else { theme.text_dim };
                 if ui.button(egui::RichText::new("B").strong().color(b_col)).on_hover_text("Bold").clicked() {
                     node.style.bold = !node.style.bold;
                 }
@@ -737,8 +738,8 @@ impl FlowchartApp {
                 ] {
                     let active = node.style.text_align == align;
                     let btn = egui::Button::new(
-                        egui::RichText::new(icon).size(12.0).color(if active { ACCENT } else { TEXT_DIM })
-                    ).fill(if active { SURFACE1 } else { Color32::TRANSPARENT });
+                        egui::RichText::new(icon).size(12.0).color(if active { theme.accent } else { theme.text_dim })
+                    ).fill(if active { theme.surface1 } else { Color32::TRANSPARENT });
                     if ui.add(btn).on_hover_text(tip).clicked() {
                         node.style.text_align = align;
                     }
@@ -752,8 +753,8 @@ impl FlowchartApp {
                 ] {
                     let active = node.style.text_valign == valign;
                     let btn = egui::Button::new(
-                        egui::RichText::new(icon).size(12.0).color(if active { ACCENT } else { TEXT_DIM })
-                    ).fill(if active { SURFACE1 } else { Color32::TRANSPARENT });
+                        egui::RichText::new(icon).size(12.0).color(if active { theme.accent } else { theme.text_dim })
+                    ).fill(if active { theme.surface1 } else { Color32::TRANSPARENT });
                     if ui.add(btn).on_hover_text(tip).clicked() {
                         node.style.text_valign = valign;
                     }
@@ -783,7 +784,7 @@ impl FlowchartApp {
 
             // Dimensions (collapsible)
             egui::CollapsingHeader::new(
-                egui::RichText::new("Dimensions").size(11.0).color(TEXT_SECONDARY).strong()
+                egui::RichText::new("Dimensions").size(11.0).color(theme.text_secondary).strong()
             )
             .default_open(true)
             .id_salt("prop_dimensions")
@@ -824,10 +825,10 @@ impl FlowchartApp {
                 ui.add_space(4.0);
                 // Position inline
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("X").size(11.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("X").size(11.0).color(theme.text_dim));
                     ui.add(egui::DragValue::new(&mut node.position[0]).speed(1.0).suffix(" px"));
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Y").size(11.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("Y").size(11.0).color(theme.text_dim));
                     ui.add(egui::DragValue::new(&mut node.position[1]).speed(1.0).suffix(" px"));
                 });
             });
@@ -844,20 +845,20 @@ impl FlowchartApp {
 
         // Tag
         ui.add_space(8.0);
-        Self::draw_section_header(ui, "Tag");
+        ui.label(egui::RichText::new("Tag").size(11.0).color(theme.text_secondary).strong());
         ui.add_space(4.0);
         if let Some(node) = self.document.find_node_mut(&node_id) {
             ui.horizontal_wrapped(|ui| {
                 let none_selected = node.tag.is_none();
                 let none_btn = egui::Button::new(
-                    egui::RichText::new("None").size(11.0).color(if none_selected { ACCENT } else { TEXT_DIM })
-                ).fill(if none_selected { ACCENT_GLOW } else { Color32::TRANSPARENT }).corner_radius(4.0);
+                    egui::RichText::new("None").size(11.0).color(if none_selected { theme.accent } else { theme.text_dim })
+                ).fill(if none_selected { theme.accent_glow } else { Color32::TRANSPARENT }).corner_radius(4.0);
                 if ui.add(none_btn).clicked() { node.tag = None; }
                 for variant in [crate::model::NodeTag::Critical, crate::model::NodeTag::Warning, crate::model::NodeTag::Ok, crate::model::NodeTag::Info] {
                     let selected = node.tag == Some(variant);
                     let c = to_color32(variant.color());
-                    let text_c = if selected { ACCENT } else { TEXT_PRIMARY };
-                    let bg = if selected { ACCENT_GLOW } else { Color32::TRANSPARENT };
+                    let text_c = if selected { theme.accent } else { theme.text_primary };
+                    let bg = if selected { theme.accent_glow } else { Color32::TRANSPARENT };
                     let btn = egui::Button::new(
                         egui::RichText::new(variant.label()).size(11.0).color(text_c)
                     ).fill(bg).corner_radius(4.0);
@@ -877,10 +878,10 @@ impl FlowchartApp {
         if let Some(node) = self.document.find_node_mut(&node_id) {
             if node.is_frame {
                 ui.add_space(8.0);
-                Self::draw_section_header(ui, "Frame");
+                ui.label(egui::RichText::new("Frame").size(11.0).color(theme.text_secondary).strong());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Fill").size(11.0).color(super::theme::TEXT_DIM));
+                    ui.label(egui::RichText::new("Fill").size(11.0).color(theme.text_dim));
                     let mut fc = egui::Color32::from_rgba_unmultiplied(
                         node.frame_color[0], node.frame_color[1],
                         node.frame_color[2], node.frame_color[3],
@@ -942,7 +943,7 @@ impl FlowchartApp {
 
         // Layer order controls (need node_id outside the borrow)
         ui.add_space(12.0);
-        Self::draw_section_header(ui, "Layer Order");
+        ui.label(egui::RichText::new("Layer Order").size(11.0).color(theme.text_secondary).strong());
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             if ui.button("⬆ Front").on_hover_text("Bring to front").clicked() {
@@ -965,9 +966,9 @@ impl FlowchartApp {
 
         // Node statistics footer
         ui.add_space(16.0);
-        Self::draw_divider(ui);
+        self.draw_divider(ui);
         ui.add_space(8.0);
-        Self::draw_section_header(ui, "Node Info");
+        ui.label(egui::RichText::new("Node Info").size(11.0).color(theme.text_secondary).strong());
         ui.add_space(4.0);
         if let Some(node) = self.document.find_node(&node_id) {
             let in_deg = self.document.edges.iter().filter(|e| e.target.node_id == node_id).count();
@@ -987,8 +988,8 @@ impl FlowchartApp {
                 .spacing([4.0, 2.0])
                 .show(ui, |ui| {
                     for (i, (label, val)) in stats.iter().enumerate() {
-                        ui.label(egui::RichText::new(*label).size(9.5).color(TEXT_DIM));
-                        ui.label(egui::RichText::new(val).size(10.0).strong().color(TEXT_SECONDARY));
+                        ui.label(egui::RichText::new(*label).size(9.5).color(theme.text_dim));
+                        ui.label(egui::RichText::new(val).size(10.0).strong().color(theme.text_secondary));
                         if (i + 1) % 2 == 0 { ui.end_row(); }
                     }
                 });
@@ -1001,14 +1002,15 @@ impl FlowchartApp {
     }
 
     fn draw_edge_properties(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme.clone();
         let edge_id = *self.selection.edge_ids.iter().next().unwrap();
         if let Some(edge) = self.document.find_edge_mut(&edge_id) {
-            ui.label(egui::RichText::new("Edge").size(13.0).strong().color(ACCENT));
+            ui.label(egui::RichText::new("Edge").size(13.0).strong().color(theme.accent));
             ui.add_space(12.0);
 
-            Self::draw_section_header(ui, "Content");
+            ui.label(egui::RichText::new("Content").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("Label").size(11.0).color(TEXT_DIM));
+            ui.label(egui::RichText::new("Label").size(11.0).color(theme.text_dim));
             ui.add_space(2.0);
             ui.add(
                 egui::TextEdit::singleline(&mut edge.label)
@@ -1017,7 +1019,7 @@ impl FlowchartApp {
             );
             ui.add_space(12.0);
 
-            Self::draw_section_header(ui, "Relationship");
+            ui.label(egui::RichText::new("Relationship").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
 
             let rel_presets: &[(&str, &str, Cardinality, Cardinality, &str)] = &[
@@ -1075,9 +1077,9 @@ impl FlowchartApp {
             for (label, symbol, src, tgt, tooltip) in rel_presets {
                 let is_selected =
                     edge.source_cardinality == *src && edge.target_cardinality == *tgt;
-                let text_color = if is_selected { ACCENT } else { TEXT_PRIMARY };
+                let text_color = if is_selected { theme.accent } else { theme.text_primary };
                 let bg = if is_selected {
-                    ACCENT_GLOW
+                    theme.accent_glow
                 } else {
                     Color32::TRANSPARENT
                 };
@@ -1097,7 +1099,7 @@ impl FlowchartApp {
 
                 if resp.hovered() && !is_selected {
                     let hover_rect = resp.rect;
-                    ui.painter().rect_filled(hover_rect, 4.0, TEXT_HOVER_BG);
+                    ui.painter().rect_filled(hover_rect, 4.0, theme.text_hover_bg);
                 }
 
                 let clicked = resp.clicked();
@@ -1110,10 +1112,10 @@ impl FlowchartApp {
             ui.add_space(8.0);
 
             // Text labels
-            Self::draw_section_header(ui, "Text Labels");
+            ui.label(egui::RichText::new("Text Labels").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Source").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Source").size(11.0).color(theme.text_dim));
                 ui.add(
                     egui::TextEdit::singleline(&mut edge.source_label)
                         .desired_width(60.0)
@@ -1122,7 +1124,7 @@ impl FlowchartApp {
             });
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Target").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Target").size(11.0).color(theme.text_dim));
                 ui.add(
                     egui::TextEdit::singleline(&mut edge.target_label)
                         .desired_width(60.0)
@@ -1131,21 +1133,21 @@ impl FlowchartApp {
             });
             ui.add_space(12.0);
 
-            Self::draw_section_header(ui, "Style");
+            ui.label(egui::RichText::new("Style").size(11.0).color(theme.text_secondary).strong());
             ui.horizontal(|ui| {
                 let mut c = to_color32(edge.style.color);
-                ui.label(egui::RichText::new("Color").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("Color").size(11.0).color(theme.text_dim));
                 if ui.color_edit_button_srgba(&mut c).changed() {
                     edge.style.color = c.to_array();
                 }
                 ui.add_space(8.0);
-                ui.checkbox(&mut edge.style.dashed, egui::RichText::new("Dashed").size(11.0).color(TEXT_DIM));
+                ui.checkbox(&mut edge.style.dashed, egui::RichText::new("Dashed").size(11.0).color(theme.text_dim));
                 ui.add_space(8.0);
-                ui.checkbox(&mut edge.style.orthogonal, egui::RichText::new("Orthogonal").size(11.0).color(TEXT_DIM));
+                ui.checkbox(&mut edge.style.orthogonal, egui::RichText::new("Orthogonal").size(11.0).color(theme.text_dim));
                 ui.add_space(8.0);
-                ui.checkbox(&mut edge.style.glow, egui::RichText::new("Glow").size(11.0).color(TEXT_DIM));
+                ui.checkbox(&mut edge.style.glow, egui::RichText::new("Glow").size(11.0).color(theme.text_dim));
                 ui.add_space(8.0);
-                ui.checkbox(&mut edge.style.animated, egui::RichText::new("Flow ▶").size(11.0).color(TEXT_DIM))
+                ui.checkbox(&mut edge.style.animated, egui::RichText::new("Flow ▶").size(11.0).color(theme.text_dim))
                     .on_hover_text("Animate dashes to show data flow direction");
             });
             ui.horizontal(|ui| {
@@ -1170,7 +1172,7 @@ impl FlowchartApp {
             });
             ui.add_space(8.0);
 
-            Self::draw_section_header(ui, "Arrow Head");
+            ui.label(egui::RichText::new("Arrow Head").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 for (variant, label, tooltip) in [
@@ -1180,8 +1182,8 @@ impl FlowchartApp {
                     (ArrowHead::None,    "— None",    "No arrowhead"),
                 ] {
                     let selected = edge.style.arrow_head == variant;
-                    let text_color = if selected { ACCENT } else { TEXT_PRIMARY };
-                    let bg = if selected { ACCENT_GLOW } else { Color32::TRANSPARENT };
+                    let text_color = if selected { theme.accent } else { theme.text_primary };
+                    let bg = if selected { theme.accent_glow } else { Color32::TRANSPARENT };
                     let btn = egui::Button::new(
                         egui::RichText::new(label).size(11.0).color(text_color)
                     ).fill(bg).corner_radius(4.0);
@@ -1194,11 +1196,12 @@ impl FlowchartApp {
     }
 
     fn draw_multi_selection_tools(&mut self, ui: &mut egui::Ui, sel_nodes: usize, total: usize) {
+        let theme = self.theme.clone();
         let sel_edges = self.selection.edge_ids.len();
         ui.label(
             egui::RichText::new(format!("{} items selected", total))
                 .size(13.0)
-                .color(TEXT_SECONDARY),
+                .color(theme.text_secondary),
         );
         ui.add_space(8.0);
 
@@ -1207,12 +1210,12 @@ impl FlowchartApp {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
             let (src, tgt) = (ids[0], ids[1]);
             let path_len = self.bfs_path_length(src, tgt);
-            Self::draw_section_header(ui, "Path Analysis");
+            self.draw_section_header(ui, "Path Analysis");
             ui.add_space(4.0);
             if let Some(hops) = path_len {
-                ui.label(egui::RichText::new(format!("Shortest path: {} hop(s)", hops)).size(11.0).color(TEXT_SECONDARY));
+                ui.label(egui::RichText::new(format!("Shortest path: {} hop(s)", hops)).size(11.0).color(theme.text_secondary));
             } else {
-                ui.label(egui::RichText::new("No path between nodes").size(11.0).color(TEXT_DIM));
+                ui.label(egui::RichText::new("No path between nodes").size(11.0).color(theme.text_dim));
             }
             ui.add_space(6.0);
             // Quick connect button
@@ -1241,7 +1244,7 @@ impl FlowchartApp {
                     self.history.push(&self.document);
                 }
                 if already_connected {
-                    ui.label(egui::RichText::new("(already connected)").size(10.0).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("(already connected)").size(10.0).color(theme.text_dim));
                 }
             });
             ui.add_space(8.0);
@@ -1250,7 +1253,7 @@ impl FlowchartApp {
 
         // Batch edge style when edges are selected
         if sel_edges >= 1 {
-            Self::draw_section_header(ui, "Batch Edge Style");
+            self.draw_section_header(ui, "Batch Edge Style");
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if ui.small_button("Solid").clicked() {
@@ -1301,7 +1304,7 @@ impl FlowchartApp {
         if sel_nodes < 2 { return; }
 
         // Batch tag for multi-node selection
-        Self::draw_section_header(ui, "Batch Tag");
+        self.draw_section_header(ui, "Batch Tag");
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             let tags: &[(Option<NodeTag>, &str)] = &[
@@ -1325,7 +1328,7 @@ impl FlowchartApp {
         });
         ui.add_space(8.0);
 
-        Self::draw_section_header(ui, "Batch Color");
+        self.draw_section_header(ui, "Batch Color");
         ui.add_space(4.0);
         let palette: &[([u8;4], &str)] = &[
             ([137, 180, 250, 220], "Blue"),
@@ -1353,7 +1356,7 @@ impl FlowchartApp {
         });
         ui.add_space(12.0);
 
-        Self::draw_section_header(ui, "Align");
+        self.draw_section_header(ui, "Align");
         ui.add_space(6.0);
 
         // Row 1: horizontal alignment

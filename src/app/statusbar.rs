@@ -3,13 +3,20 @@
 use egui::{Align, Color32, Frame, Layout, Margin, RichText, TopBottomPanel};
 
 use super::{DiagramMode, FlowchartApp, Tool};
-use crate::app::theme::{ACCENT, MANTLE, SURFACE1, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY};
 
 impl FlowchartApp {
     pub(crate) fn draw_status_bar(&mut self, ctx: &egui::Context) {
         if self.presentation_mode {
             return;
         }
+
+        let accent = self.theme.accent;
+        let mantle = self.theme.mantle;
+        let surface1 = self.theme.surface1;
+        let text_dim = self.theme.text_dim;
+        let text_primary = self.theme.text_primary;
+        let text_secondary = self.theme.text_secondary;
+        let accent_glow = self.theme.accent_glow;
 
         let zoom_pct = (self.effective_zoom() * 100.0).round() as i32;
         let sel_count = self.selection.node_ids.len();
@@ -41,24 +48,24 @@ impl FlowchartApp {
             .exact_height(22.0)
             .frame(
                 Frame::NONE
-                    .fill(MANTLE)
+                    .fill(mantle)
                     .inner_margin(Margin { left: 12, right: 12, top: 0, bottom: 0 })
-                    .stroke(egui::Stroke::new(0.5, SURFACE1)),
+                    .stroke(egui::Stroke::new(0.5, surface1)),
             )
             .show(ctx, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     // Tool
-                    pill(ui, tool_label, ACCENT);
+                    pill(ui, tool_label, accent, accent_glow);
                     ui.add_space(8.0);
                     // Mode
-                    separator(ui);
+                    separator(ui, surface1);
                     ui.add_space(8.0);
-                    label(ui, mode_label, TEXT_SECONDARY);
+                    label(ui, mode_label, text_secondary);
 
                     // Selection info
                     if sel_count > 0 || edge_sel {
                         ui.add_space(8.0);
-                        separator(ui);
+                        separator(ui, surface1);
                         ui.add_space(8.0);
                         let sel_text = if sel_count > 0 && edge_sel {
                             format!("{} node{} + 1 edge", sel_count, if sel_count == 1 { "" } else { "s" })
@@ -67,7 +74,7 @@ impl FlowchartApp {
                         } else {
                             "1 edge".to_string()
                         };
-                        label(ui, &sel_text, TEXT_PRIMARY);
+                        label(ui, &sel_text, text_primary);
 
                         // Geometry info for selected node(s)
                         if sel_count == 1 {
@@ -77,7 +84,7 @@ impl FlowchartApp {
                                 let pos = node.pos();
                                 ui.add_space(6.0);
                                 let pos_text = format!("({},{}) {}×{}", pos.x.round() as i32, pos.y.round() as i32, node.size[0].round() as i32, node.size[1].round() as i32);
-                                label(ui, &pos_text, TEXT_DIM);
+                                label(ui, &pos_text, text_dim);
                             }
                         } else if sel_count > 1 {
                             // Bounding box of selection
@@ -96,7 +103,7 @@ impl FlowchartApp {
                                 ui.add_space(6.0);
                                 let bw = (bb_max.x - bb_min.x).round() as i32;
                                 let bh = (bb_max.y - bb_min.y).round() as i32;
-                                label(ui, &format!("bbox {}×{}", bw, bh), TEXT_DIM);
+                                label(ui, &format!("bbox {}×{}", bw, bh), text_dim);
                             }
                             // Distance between exactly 2 selected nodes
                             if sel_count == 2 {
@@ -109,7 +116,7 @@ impl FlowchartApp {
                                     let c2 = n2.rect().center();
                                     let dist = ((c2.x - c1.x).powi(2) + (c2.y - c1.y).powi(2)).sqrt();
                                     ui.add_space(6.0);
-                                    label(ui, &format!("↔ {:.0}", dist), ACCENT.gamma_multiply(0.8));
+                                    label(ui, &format!("↔ {:.0}", dist), accent.gamma_multiply(0.8));
                                 }
                             }
                         }
@@ -119,32 +126,32 @@ impl FlowchartApp {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         // Cursor coords
                         if let Some((cx, cy)) = cursor_canvas {
-                            label(ui, &format!("{cx}, {cy}"), TEXT_DIM);
+                            label(ui, &format!("{cx}, {cy}"), text_dim);
                             ui.add_space(4.0);
-                            label(ui, "↗", TEXT_DIM);
+                            label(ui, "↗", text_dim);
                             ui.add_space(8.0);
                         }
-                        separator(ui);
+                        separator(ui, surface1);
                         ui.add_space(8.0);
                         // Zoom
                         let zoom_text = format!("{zoom_pct}%");
-                        label(ui, &zoom_text, if zoom_pct == 100 { TEXT_SECONDARY } else { ACCENT });
+                        label(ui, &zoom_text, if zoom_pct == 100 { text_secondary } else { accent });
                         ui.add_space(8.0);
-                        separator(ui);
+                        separator(ui, surface1);
                         ui.add_space(8.0);
                         // Graph totals (right-to-left, so reversed order)
-                        label(ui, &format!("{total_edges}e  {total_nodes}n"), TEXT_DIM);
+                        label(ui, &format!("{total_edges}e  {total_nodes}n"), text_dim);
                         if tag_active {
                             ui.add_space(4.0);
-                            label(ui, "🏷", ACCENT);
+                            label(ui, "🏷", accent);
                         }
                         // Undo/redo depth indicator
                         if undo_steps > 0 || redo_steps > 0 {
                             ui.add_space(8.0);
-                            separator(ui);
+                            separator(ui, surface1);
                             ui.add_space(8.0);
                             let has_history = undo_steps > 0 || redo_steps > 0;
-                            let hist_col = if has_history { TEXT_DIM } else { TEXT_DIM.gamma_multiply(0.4) };
+                            let hist_col = if has_history { text_dim } else { text_dim.gamma_multiply(0.4) };
                             label(ui, &format!("↺{} ↻{}", undo_steps, redo_steps), hist_col);
                         }
                     });
@@ -159,13 +166,13 @@ fn label(ui: &mut egui::Ui, text: &str, color: Color32) {
     ui.label(RichText::new(text).size(11.0).color(color));
 }
 
-fn separator(ui: &mut egui::Ui) {
+fn separator(ui: &mut egui::Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 12.0), egui::Sense::hover());
     ui.painter()
-        .rect_filled(rect, egui::CornerRadius::ZERO, SURFACE1);
+        .rect_filled(rect, egui::CornerRadius::ZERO, color);
 }
 
-fn pill(ui: &mut egui::Ui, text: &str, color: Color32) {
+fn pill(ui: &mut egui::Ui, text: &str, color: Color32, bg: Color32) {
     let galley = ui.fonts(|f| {
         f.layout_no_wrap(
             text.to_string(),
@@ -176,7 +183,7 @@ fn pill(ui: &mut egui::Ui, text: &str, color: Color32) {
     let size = galley.size() + egui::vec2(8.0, 2.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same(3), Color32::from_rgba_premultiplied(137, 180, 250, 18));
+        .rect_filled(rect, egui::CornerRadius::same(3), bg);
     ui.painter().galley(
         egui::pos2(rect.min.x + 4.0, rect.center().y - galley.size().y / 2.0),
         galley,
