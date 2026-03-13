@@ -49,7 +49,9 @@ use std::collections::HashMap;
 ///   `{server}` `{database}` `{cloud}` `{user}` `{service}` `{queue}` `{cache}` `{internet}`
 ///   `{decision}` `{start}` `{end}` `{process}` `{task}` `{load-balancer}`
 ///   `{z:N}` — 3D layer offset (positive = closer to camera)
+///   `{layer:N}` / `{level:N}` / `{tier:N}` — 3D layer as index × 120
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
+///   `{badge:text}` / `{v:text}` — text/version badge (alias for icon)
 ///   `{pinned}` — pin node to canvas position
 ///   `{x:N}` `{y:N}` — explicit canvas position (auto-included when pinned)
 ///   `{frame}` — group frame container (large translucent background box)
@@ -775,9 +777,10 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
                 z_offset = z;
             }
-        } else if tag.starts_with("layer:") {
-            // {layer:N} is a human-friendly alias for z = N * 120
-            if let Ok(v) = tag[6..].trim().parse::<f32>() {
+        } else if tag.starts_with("layer:") || tag.starts_with("level:") || tag.starts_with("tier:") {
+            // {layer:N} / {level:N} / {tier:N} are human-friendly aliases for z = N * 120
+            let colon = tag.find(':').unwrap();
+            if let Ok(v) = tag[colon+1..].trim().parse::<f32>() {
                 z_offset = v * 120.0;
             }
         } else if tag.starts_with("fill:") {
@@ -803,8 +806,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             height_override = tag[2..].trim().parse::<f32>().ok();
         } else if tag.starts_with("r:") {
             corner_radius = tag[2..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("icon:") {
-            icon = Some(tag[5..].trim().to_string());
+        } else if tag.starts_with("icon:") || tag.starts_with("badge:") || tag.starts_with("v:") {
+            let colon = tag.find(':').unwrap();
+            icon = Some(tag[colon+1..].trim().to_string());
         } else if let Some(nt) = tag_to_node_tag(tag) {
             node_tag = Some(nt);
         } else if tag == "pinned" || tag == "pin" {
@@ -835,6 +839,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                 // Accept 0-100 percentage or 0.0-1.0 float
                 opacity_override = Some(if v > 1.0 { v / 100.0 } else { v });
             }
+        } else if tag == "hidden" || tag == "invisible" {
+            opacity_override = Some(0.0);
         } else if tag == "gradient" || tag == "grad" {
             gradient = true;
         } else if tag == "locked" || tag == "lock" {
