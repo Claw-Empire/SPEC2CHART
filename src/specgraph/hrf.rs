@@ -3506,4 +3506,85 @@ y ->|returns data| z {dashed}
         assert_eq!(a.position[0], d.position[0], "a and d should be in same column");
         assert!(a.position[1] < d.position[1], "d should be below a");
     }
+
+    #[test]
+    fn test_named_tier_z_offsets() {
+        // {layer:db/api/frontend/edge/infra} should map to canonical z values
+        let input = r#"
+# Named Tier Test
+
+## Nodes
+- [db]       Database    {database} {layer:db}
+- [api]      API         {service}  {layer:api}
+- [ui]       Frontend    {user}     {layer:frontend}
+- [gw]       Gateway     {service}  {layer:edge}
+- [host]     Host        {server}   {layer:infra}
+
+## Flow
+db -> api
+api -> ui
+gw -> api
+"#;
+        let doc = parse_hrf(input).expect("named tier parse");
+        let find = |label: &str| doc.nodes.iter().find(|n| n.display_label() == label)
+            .expect("node not found").z_offset;
+        assert_eq!(find("Database"),   0.0,   "db → z=0");
+        assert_eq!(find("API"),        120.0, "api → z=120");
+        assert_eq!(find("Frontend"),   240.0, "frontend → z=240");
+        assert_eq!(find("Gateway"),    360.0, "edge → z=360");
+        assert_eq!(find("Host"),       480.0, "infra → z=480");
+    }
+
+    #[test]
+    fn test_feature_showcase_spec_parses() {
+        // Smoke test: the feature_showcase.spec bundled example should parse without errors
+        let spec = r#"
+# Feature Showcase
+
+## Config
+view    = 3d
+camera  = iso
+bg      = dots
+auto-z  = false
+
+## Style
+frontend = {fill:sky}    {layer:frontend}
+backend  = {fill:blue}   {layer:api}
+storage  = {fill:purple} {layer:db}
+
+## Nodes
+- [a] Alpha  {frontend}
+- [b] Beta   {backend}
+- [c] Gamma  {storage}
+
+## Flow
+a →|request| b
+b -> c: stores data {dashed}
+
+## Grid cols=2
+- [g1] Item One   {fill:blue}
+- [g2] Item Two   {fill:green}
+- [g3] Item Three {fill:red}
+- [g4] Item Four  {fill:yellow}
+"#;
+        let doc = parse_hrf(spec).expect("showcase parse");
+        assert_eq!(doc.nodes.len(), 7, "3 flow nodes + 4 grid nodes");
+        assert!(!doc.edges.is_empty(), "should have edges");
+        // a→b edge should have pipe label
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Alpha").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Beta").unwrap();
+        let ab = doc.edges.iter().find(|e| e.source.node_id == a.id && e.target.node_id == b.id)
+            .expect("a→b edge");
+        assert_eq!(ab.label, "request");
+        // b→c should have colon label
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Gamma").unwrap();
+        let bc = doc.edges.iter().find(|e| e.source.node_id == b.id && e.target.node_id == c.id)
+            .expect("b→c edge");
+        assert_eq!(bc.label, "stores data");
+        assert!(bc.style.dashed);
+        // z offsets from named tiers
+        assert_eq!(a.z_offset, 240.0, "frontend tier");
+        assert_eq!(b.z_offset, 120.0, "backend tier");
+        assert_eq!(c.z_offset, 0.0,   "storage tier");
+    }
 }
