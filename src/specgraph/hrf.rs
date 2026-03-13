@@ -525,6 +525,24 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.import_hints.zoom = Some(z.clamp(0.1, 4.0));
                 }
             }
+            // 3D camera: camera_yaw = -0.4, camera_pitch = 0.6, view = 3d
+            "camera_yaw" | "camera-yaw" | "yaw" => {
+                if let Ok(v) = val.trim().parse::<f32>() {
+                    doc.import_hints.camera_yaw = Some(v);
+                }
+            }
+            "camera_pitch" | "camera-pitch" | "pitch" => {
+                if let Ok(v) = val.trim().parse::<f32>() {
+                    doc.import_hints.camera_pitch = Some(v);
+                }
+            }
+            "view" | "view-mode" | "mode" => {
+                match val.to_lowercase().as_str() {
+                    "3d" | "three-d" | "threed" => { doc.import_hints.view_3d = Some(true); }
+                    "2d" | "flat" => { doc.import_hints.view_3d = Some(false); }
+                    _ => {}
+                }
+            }
             "flow" | "layout" | "direction" | "layout-dir" | "layout_dir" => {
                 let dir = match val.to_uppercase().as_str() {
                     "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => "LR",
@@ -640,6 +658,12 @@ pub struct ViewportExportConfig<'a> {
     pub bg_pattern: &'a str,
     pub snap: bool,
     pub grid_size: f32,
+    /// 3D camera yaw (radians). None = omit from config.
+    pub camera_yaw: Option<f32>,
+    /// 3D camera pitch (radians). None = omit from config.
+    pub camera_pitch: Option<f32>,
+    /// Whether the diagram should open in 3D view.
+    pub view_3d: bool,
 }
 
 /// Export a FlowchartDocument to Human-Readable Format.
@@ -844,6 +868,15 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
             out.push_str(&format!("snap = {}\n", vp.snap));
             if (vp.grid_size - 20.0).abs() > 0.5 {
                 out.push_str(&format!("grid-size = {}\n", vp.grid_size));
+            }
+            if vp.view_3d {
+                out.push_str("view = 3d\n");
+                if let Some(yaw) = vp.camera_yaw {
+                    out.push_str(&format!("camera_yaw = {:.4}\n", yaw));
+                }
+                if let Some(pitch) = vp.camera_pitch {
+                    out.push_str(&format!("camera_pitch = {:.4}\n", pitch));
+                }
             }
         }
         if has_layer_names {

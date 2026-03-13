@@ -686,6 +686,12 @@ pub struct ImportHints {
     pub grid_size: Option<f32>,
     /// Initial zoom level (1.0 = 100%)
     pub zoom: Option<f32>,
+    /// 3D camera yaw (radians)
+    pub camera_yaw: Option<f32>,
+    /// 3D camera pitch (radians)
+    pub camera_pitch: Option<f32>,
+    /// Switch to 3D view automatically on import
+    pub view_3d: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

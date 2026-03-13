@@ -285,10 +285,14 @@ impl FlowchartApp {
                                     super::BgPattern::Crosshatch => "crosshatch",
                                     super::BgPattern::None => "none",
                                 };
+                                let is_3d = matches!(self.view_mode, super::ViewMode::ThreeD);
                                 let vp = specgraph::hrf::ViewportExportConfig {
                                     bg_pattern: bg_str,
                                     snap: self.snap_to_grid,
                                     grid_size: self.grid_size,
+                                    view_3d: is_3d,
+                                    camera_yaw: if is_3d { Some(self.camera3d.yaw) } else { None },
+                                    camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
                                 };
                                 Ok(specgraph::hrf::export_hrf_ex(&self.document, "Untitled Diagram", Some(&vp)))
                             } else {
@@ -359,10 +363,14 @@ impl FlowchartApp {
                             super::BgPattern::Crosshatch => "crosshatch",
                             super::BgPattern::None => "none",
                         };
+                        let is_3d = matches!(self.view_mode, super::ViewMode::ThreeD);
                         let vp = specgraph::hrf::ViewportExportConfig {
                             bg_pattern: bg_str,
                             snap: self.snap_to_grid,
                             grid_size: self.grid_size,
+                            view_3d: is_3d,
+                            camera_yaw: if is_3d { Some(self.camera3d.yaw) } else { None },
+                            camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
                         };
                         let hrf = specgraph::hrf::export_hrf_ex(&self.document, "Untitled Diagram", Some(&vp));
                         ui.ctx().copy_text(hrf);
@@ -462,6 +470,16 @@ impl FlowchartApp {
                                     }
                                     if let Some(gs) = doc.import_hints.grid_size {
                                         self.grid_size = gs;
+                                    }
+                                    // Apply 3D camera hints
+                                    if let Some(yaw) = doc.import_hints.camera_yaw {
+                                        self.camera3d.yaw = yaw;
+                                    }
+                                    if let Some(pitch) = doc.import_hints.camera_pitch {
+                                        self.camera3d.pitch = pitch;
+                                    }
+                                    if let Some(true) = doc.import_hints.view_3d {
+                                        self.view_mode = super::ViewMode::ThreeD;
                                     }
                                     self.document = doc;
                                     self.selection.clear();
