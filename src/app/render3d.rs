@@ -383,7 +383,10 @@ impl FlowchartApp {
         let canvas_rect = response.rect;
         self.canvas_rect = canvas_rect;
 
-        painter.rect_filled(canvas_rect, CornerRadius::ZERO, CANVAS_BG);
+        let canvas_bg = Color32::from_rgba_unmultiplied(
+            self.canvas_bg[0], self.canvas_bg[1], self.canvas_bg[2], self.canvas_bg[3],
+        );
+        painter.rect_filled(canvas_rect, CornerRadius::ZERO, canvas_bg);
 
         let screen_center = canvas_rect.center();
         let screen_size = canvas_rect.size();

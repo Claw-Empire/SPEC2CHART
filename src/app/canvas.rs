@@ -190,10 +190,10 @@ impl FlowchartApp {
                     let tp = mp + Vec2::new(12.0, -22.0);
                     let pad = Vec2::new(6.0, 3.0);
                     let font = FontId::proportional(10.5);
-                    let galley = ui.ctx().fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), TEXT_DIM));
+                    let galley = ui.ctx().fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), self.theme.text_dim));
                     let bg_rect = Rect::from_min_size(tp - pad, galley.size() + pad * 2.0);
-                    painter.rect_filled(bg_rect, CornerRadius::same(3), TOOLTIP_BG);
-                    painter.text(tp, Align2::LEFT_TOP, &text, font, TEXT_DIM);
+                    painter.rect_filled(bg_rect, CornerRadius::same(3), self.theme.tooltip_bg);
+                    painter.text(tp, Align2::LEFT_TOP, &text, font, self.theme.text_dim);
                 }
             }
         }
@@ -207,10 +207,10 @@ impl FlowchartApp {
                 let tp = mp + Vec2::new(12.0, -22.0);
                 let pad = Vec2::new(6.0, 3.0);
                 let font = FontId::proportional(10.5);
-                let galley = ui.ctx().fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), ACCENT));
+                let galley = ui.ctx().fonts(|f| f.layout_no_wrap(text.clone(), font.clone(), self.theme.accent));
                 let bg_rect = Rect::from_min_size(tp - pad, galley.size() + pad * 2.0);
-                painter.rect_filled(bg_rect, CornerRadius::same(3), TOOLTIP_BG);
-                painter.text(tp, Align2::LEFT_TOP, &text, font, ACCENT);
+                painter.rect_filled(bg_rect, CornerRadius::same(3), self.theme.tooltip_bg);
+                painter.text(tp, Align2::LEFT_TOP, &text, font, self.theme.accent);
             }
         }
 
@@ -1356,7 +1356,7 @@ impl FlowchartApp {
                 let a = self.viewport.canvas_to_screen(*start_canvas);
                 let b = self.viewport.canvas_to_screen(end_canvas);
                 let sel_rect = Rect::from_two_pos(a, b);
-                painter.rect_filled(sel_rect, CornerRadius::ZERO, BOX_SELECT_FILL);
+                painter.rect_filled(sel_rect, CornerRadius::ZERO, self.theme.box_select_fill);
 
                 // Marching ants: animated dashed border
                 {
@@ -1376,7 +1376,7 @@ impl FlowchartApp {
                         sel_rect.left_top(), // close
                     ];
 
-                    let stroke = Stroke::new(1.2, BOX_SELECT_STROKE);
+                    let stroke = Stroke::new(1.2, self.theme.box_select_stroke);
                     let mut dist_offset = period - phase; // start phase
                     for seg in 0..4 {
                         let a = corners[seg];
@@ -1419,7 +1419,7 @@ impl FlowchartApp {
                     let badge_text = format!("{count}");
                     painter.rect_filled(
                         Rect::from_min_size(badge_pos, Vec2::new(22.0, 16.0)),
-                        CornerRadius::same(4), ACCENT,
+                        CornerRadius::same(4), self.theme.accent,
                     );
                     painter.text(badge_pos + Vec2::new(11.0, 8.0), Align2::CENTER_CENTER,
                         &badge_text, FontId::proportional(10.0), Color32::BLACK);
@@ -1456,7 +1456,7 @@ impl FlowchartApp {
             [src_screen, cp1, cp2, dst],
             false,
             Color32::TRANSPARENT,
-            Stroke::new(2.0, SELECTION_COLOR),
+            Stroke::new(2.0, self.theme.selection_color),
         );
         painter.add(bezier);
 
@@ -1478,7 +1478,7 @@ impl FlowchartApp {
                 let port_canvas = node.port_position(side);
                 let port_screen = self.viewport.canvas_to_screen(port_canvas);
                 let near = (port_screen - *current_screen).length() < 20.0;
-                let color = if near { ACCENT } else { Color32::from_rgba_unmultiplied(147, 153, 178, 160) };
+                let color = if near { self.theme.accent } else { Color32::from_rgba_unmultiplied(147, 153, 178, 160) };
                 painter.circle_filled(port_screen, if near { r * 1.8 } else { r }, color);
                 if near || self.viewport.zoom > 0.7 {
                     let offset = match side {
@@ -1504,8 +1504,8 @@ impl FlowchartApp {
                         .viewport
                         .canvas_to_screen(tgt_node.port_position(target_port.side));
                     let r = PORT_RADIUS * self.viewport.zoom.sqrt() * 2.0;
-                    painter.circle_filled(port_pos, r * 1.5, ACCENT_SELECT_BG);
-                    painter.circle_filled(port_pos, r, ACCENT);
+                    painter.circle_filled(port_pos, r * 1.5, self.theme.accent_select_bg);
+                    painter.circle_filled(port_pos, r, self.theme.accent);
                     painter.circle_stroke(port_pos, r, Stroke::new(2.0, Color32::WHITE));
                     // Port name badge
                     let side_name = match target_port.side {
@@ -1515,7 +1515,7 @@ impl FlowchartApp {
                     let badge_pos = port_pos + Vec2::new(0.0, r * 2.2);
                     let badge_w = side_name.len() as f32 * 5.5 + 10.0;
                     let badge_rect = Rect::from_center_size(badge_pos, Vec2::new(badge_w, 16.0));
-                    painter.rect_filled(badge_rect, CornerRadius::same(4), ACCENT);
+                    painter.rect_filled(badge_rect, CornerRadius::same(4), self.theme.accent);
                     painter.text(badge_pos, Align2::CENTER_CENTER, side_name,
                         FontId::proportional(9.5), Color32::BLACK);
                 }
@@ -1550,11 +1550,11 @@ impl FlowchartApp {
             *current_screen,
             Vec2::new(half_w * 2.0, half_h * 2.0),
         );
-        painter.rect_filled(screen_rect, CornerRadius::same(4), PREVIEW_FILL);
+        painter.rect_filled(screen_rect, CornerRadius::same(4), self.theme.preview_fill);
         painter.rect_stroke(
             screen_rect,
             CornerRadius::same(4),
-            Stroke::new(1.5, SELECTION_COLOR),
+            Stroke::new(1.5, self.theme.selection_color),
             StrokeKind::Outside,
         );
     }
@@ -1573,7 +1573,7 @@ impl FlowchartApp {
                 let font = FontId::proportional(12.0);
 
                 // Measure text to draw pill background
-                let galley = painter.layout_no_wrap(msg.clone(), font.clone(), TOAST_SUCCESS);
+                let galley = painter.layout_no_wrap(msg.clone(), font.clone(), self.theme.toast_success);
                 let pill_rect = Rect::from_center_size(
                     toast_pos,
                     Vec2::new(galley.size().x + 24.0, galley.size().y + 12.0),
@@ -1652,9 +1652,9 @@ impl FlowchartApp {
         if tx + w > canvas_rect.max.x { tx = mouse.x - w - 12.0; }
         if ty < canvas_rect.min.y { ty = mouse.y + 12.0; }
         let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), Vec2::new(w, h));
-        painter.rect_filled(bg_rect, egui::CornerRadius::same(4), TOOLTIP_BG);
-        painter.rect_stroke(bg_rect, egui::CornerRadius::same(4), egui::Stroke::new(1.0, TOOLTIP_BORDER), egui::StrokeKind::Outside);
-        painter.text(Pos2::new(tx + pad, ty + h / 2.0), Align2::LEFT_CENTER, &line, font, TEXT_SECONDARY);
+        painter.rect_filled(bg_rect, egui::CornerRadius::same(4), self.theme.tooltip_bg);
+        painter.rect_stroke(bg_rect, egui::CornerRadius::same(4), egui::Stroke::new(1.0, self.theme.tooltip_border), egui::StrokeKind::Outside);
+        painter.text(Pos2::new(tx + pad, ty + h / 2.0), Align2::LEFT_CENTER, &line, font, self.theme.text_secondary);
     }
 
     fn draw_node_tooltip(&self, painter: &egui::Painter, hover_pos: Option<Pos2>, canvas_rect: Rect) {
@@ -1700,16 +1700,16 @@ impl FlowchartApp {
         // Build rows to render
         let mut rows: Vec<(String, Color32)> = Vec::new();
         if !desc.is_empty() {
-            rows.push((desc.to_string(), TEXT_DIM));
+            rows.push((desc.to_string(), self.theme.text_dim));
         }
         if rich_mode {
             if conn_in > 0 || conn_out > 0 {
-                rows.push((format!("↑{} in  ↓{} out", conn_in, conn_out), TEXT_DIM));
+                rows.push((format!("↑{} in  ↓{} out", conn_in, conn_out), self.theme.text_dim));
             }
             if let Some(tag) = tag_label {
-                rows.push((format!("Tag: {}", tag), TEXT_DIM));
+                rows.push((format!("Tag: {}", tag), self.theme.text_dim));
             }
-            if has_url  { rows.push(("🔗 URL attached".to_string(), TEXT_DIM)); }
+            if has_url  { rows.push(("🔗 URL attached".to_string(), self.theme.text_dim)); }
             if has_comment {
                 let preview = if node.comment.len() > 60 {
                     format!("💬 {}…", &node.comment[..60])
@@ -1718,7 +1718,7 @@ impl FlowchartApp {
                 };
                 rows.push((preview, Color32::from_rgba_unmultiplied(166, 227, 161, 200)));
             }
-            if node.locked { rows.push(("🔒 Locked".to_string(), TEXT_DIM)); }
+            if node.locked { rows.push(("🔒 Locked".to_string(), self.theme.text_dim)); }
         }
         if rows.is_empty() && !rich_mode { return; }
 
@@ -1736,11 +1736,11 @@ impl FlowchartApp {
             ((hover_duration - 0.8) / 0.3).clamp(0.0, 1.0) as f32
         } else { 1.0 };
 
-        let bg = TOOLTIP_BG;
+        let bg = self.theme.tooltip_bg;
         let border_col = if rich_mode {
             Color32::from_rgba_unmultiplied(137, 180, 250, (80.0 * alpha_factor) as u8)
         } else {
-            TOOLTIP_BORDER
+            self.theme.tooltip_border
         };
 
         let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), egui::Vec2::new(max_w, total_h));
@@ -1750,7 +1750,7 @@ impl FlowchartApp {
 
         // Label header
         painter.text(Pos2::new(tx + pad, ty + pad), egui::Align2::LEFT_TOP, &label,
-            egui::FontId::proportional(12.0), TEXT_SECONDARY);
+            egui::FontId::proportional(12.0), self.theme.text_secondary);
 
         // Separator line when rich
         if rich_mode && !rows.is_empty() {
@@ -1841,7 +1841,7 @@ impl FlowchartApp {
             Align2::CENTER_CENTER,
             messages[slot],
             FontId::proportional(12.0),
-            TEXT_DIM.gamma_multiply(alpha as f32 / 160.0),
+            self.theme.text_dim.gamma_multiply(alpha as f32 / 160.0),
         );
 
         // Quick-start shortcut row
@@ -1851,9 +1851,9 @@ impl FlowchartApp {
         for (i, (key, desc)) in hints.iter().enumerate() {
             let x = start_x + i as f32 * 37.0;
             painter.text(Pos2::new(x, row_y), Align2::LEFT_CENTER,
-                *key, FontId::proportional(10.0), ACCENT.gamma_multiply(0.6));
+                *key, FontId::proportional(10.0), self.theme.accent.gamma_multiply(0.6));
             painter.text(Pos2::new(x + 10.0, row_y + 11.0), Align2::LEFT_CENTER,
-                *desc, FontId::proportional(8.5), TEXT_DIM.gamma_multiply(0.45));
+                *desc, FontId::proportional(8.5), self.theme.text_dim.gamma_multiply(0.45));
         }
 
         painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
@@ -1925,11 +1925,11 @@ impl FlowchartApp {
         let font_sm  = egui::FontId::proportional(10.5);
         let font_xs  = egui::FontId::proportional(9.5);
 
-        painter.text(Pos2::new(x, y), egui::Align2::LEFT_TOP, &line1, font_big, TEXT_SECONDARY);
-        painter.text(Pos2::new(x, y + 17.0), egui::Align2::LEFT_TOP, &line2, font_sm, TEXT_DIM);
+        painter.text(Pos2::new(x, y), egui::Align2::LEFT_TOP, &line1, font_big, self.theme.text_secondary);
+        painter.text(Pos2::new(x, y + 17.0), egui::Align2::LEFT_TOP, &line2, font_sm, self.theme.text_dim);
         let mut next_y = y + 29.0;
         if !line3.is_empty() {
-            painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, &line3, font_xs, TEXT_DIM);
+            painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, &line3, font_xs, self.theme.text_dim);
             next_y += 11.0;
         }
         if let Some(ref cl) = cursor_line {
@@ -2153,8 +2153,8 @@ impl FlowchartApp {
                 let bar_rect = Rect::from_min_size(Pos2::new(bar_x, bar_y), Vec2::new(bar_w, bar_h));
 
                 let painter2 = ui.painter();
-                painter2.rect_filled(bar_rect, CornerRadius::same(6), TOOLTIP_BG);
-                painter2.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, ACCENT.gamma_multiply(0.4)), StrokeKind::Outside);
+                painter2.rect_filled(bar_rect, CornerRadius::same(6), self.theme.tooltip_bg);
+                painter2.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, self.theme.accent.gamma_multiply(0.4)), StrokeKind::Outside);
 
                 let mut ex = bar_rect.min.x + 4.0;
                 let mut edge_clicked: Option<usize> = None;
@@ -2233,7 +2233,7 @@ impl FlowchartApp {
 
         // Draw bar background via painter
         let painter = ui.painter();
-        painter.rect_filled(bar_rect, CornerRadius::same(6), TOOLTIP_BG);
+        painter.rect_filled(bar_rect, CornerRadius::same(6), self.theme.tooltip_bg);
         painter.rect_stroke(bar_rect, CornerRadius::same(6), Stroke::new(1.0, SURFACE1), StrokeKind::Outside);
 
         // Draw buttons using ui.put()
@@ -2321,8 +2321,8 @@ impl FlowchartApp {
             );
 
             let painter2 = ui.painter();
-            painter2.rect_filled(abar_rect, CornerRadius::same(6), TOOLTIP_BG);
-            painter2.rect_stroke(abar_rect, CornerRadius::same(6), Stroke::new(1.0, ACCENT.gamma_multiply(0.5)), StrokeKind::Outside);
+            painter2.rect_filled(abar_rect, CornerRadius::same(6), self.theme.tooltip_bg);
+            painter2.rect_stroke(abar_rect, CornerRadius::same(6), Stroke::new(1.0, self.theme.accent.gamma_multiply(0.5)), StrokeKind::Outside);
 
             let mut ax = abar_rect.min.x + 4.0;
             let mut align_clicked: Option<usize> = None;
@@ -2561,7 +2561,7 @@ impl FlowchartApp {
         let leg_w = 120.0_f32;
         let leg_h = 20.0_f32;
         let leg_pos = Pos2::new(canvas_rect.max.x - leg_w - 20.0, canvas_rect.max.y - leg_h - 16.0);
-        painter.text(leg_pos, Align2::LEFT_TOP, "Connectivity:", FontId::proportional(9.0), TEXT_DIM);
+        painter.text(leg_pos, Align2::LEFT_TOP, "Connectivity:", FontId::proportional(9.0), self.theme.text_dim);
         let bar_y = leg_pos.y + 11.0;
         for i in 0..=60 {
             let t = i as f32 / 60.0;
@@ -2575,10 +2575,10 @@ impl FlowchartApp {
             let x = leg_pos.x + t * leg_w;
             painter.rect_filled(Rect::from_min_size(Pos2::new(x, bar_y), Vec2::new(leg_w/60.0+0.5, 7.0)), CornerRadius::ZERO, color);
         }
-        painter.text(leg_pos + Vec2::new(0.0, 12.0), Align2::LEFT_TOP, "low", FontId::proportional(7.0), TEXT_DIM);
-        painter.text(leg_pos + Vec2::new(leg_w, 12.0), Align2::RIGHT_TOP, "high", FontId::proportional(7.0), TEXT_DIM);
+        painter.text(leg_pos + Vec2::new(0.0, 12.0), Align2::LEFT_TOP, "low", FontId::proportional(7.0), self.theme.text_dim);
+        painter.text(leg_pos + Vec2::new(leg_w, 12.0), Align2::RIGHT_TOP, "high", FontId::proportional(7.0), self.theme.text_dim);
         painter.text(Pos2::new(canvas_rect.max.x - 12.0, canvas_rect.max.y - 30.0),
-            Align2::RIGHT_BOTTOM, "[H] heatmap", FontId::proportional(8.0), TEXT_DIM.gamma_multiply(0.6));
+            Align2::RIGHT_BOTTOM, "[H] heatmap", FontId::proportional(8.0), self.theme.text_dim.gamma_multiply(0.6));
     }
 
     fn draw_presentation_spotlight(&self, painter: &egui::Painter, canvas_rect: Rect, pointer_pos: Option<Pos2>) {
@@ -2681,7 +2681,7 @@ impl FlowchartApp {
 
         let ruler_h = 12.0_f32;
         let ruler_color = SURFACE0;
-        let tick_color = TEXT_DIM;
+        let tick_color = self.theme.text_dim;
         let label_font = egui::FontId::proportional(8.5);
 
         // Horizontal ruler along top
@@ -2830,7 +2830,7 @@ impl FlowchartApp {
         let bg = Color32::from_rgba_premultiplied(24, 24, 37, 220);
         let tick_color = Color32::from_rgba_premultiplied(100, 104, 130, 200);
         let label_color = Color32::from_rgba_premultiplied(130, 135, 160, 240);
-        let hairline_color = ACCENT.gamma_multiply(0.7);
+        let hairline_color = self.theme.accent.gamma_multiply(0.7);
 
         // Horizontal ruler (top strip)
         let h_ruler = Rect::from_min_max(
@@ -3007,7 +3007,7 @@ impl FlowchartApp {
                         let is_major = (xi % major_every == 0) && (yi % major_every == 0);
                         // Scale dot radius with zoom for crisp appearance at any zoom level
                         let zoom_scale = zoom.sqrt().clamp(0.5, 2.0);
-                        let (r, c) = if is_major { (1.8 * zoom_scale, GRID_MAJOR_COLOR) } else { (0.8 * zoom_scale, GRID_COLOR) };
+                        let (r, c) = if is_major { (1.8 * zoom_scale, self.theme.grid_major_color) } else { (0.8 * zoom_scale, self.theme.grid_color) };
                         painter.circle_filled(Pos2::new(x, y), r, c);
                         y += grid_screen;
                         yi += 1;
@@ -3023,9 +3023,9 @@ impl FlowchartApp {
                 while y < canvas_rect.max.y {
                     let is_major = yi % major_every == 0;
                     let stroke = if is_major {
-                        egui::Stroke::new(0.7, GRID_MAJOR_COLOR)
+                        egui::Stroke::new(0.7, self.theme.grid_major_color)
                     } else {
-                        egui::Stroke::new(0.4, GRID_COLOR)
+                        egui::Stroke::new(0.4, self.theme.grid_color)
                     };
                     painter.line_segment(
                         [Pos2::new(canvas_rect.min.x, y), Pos2::new(canvas_rect.max.x, y)],
@@ -3041,9 +3041,9 @@ impl FlowchartApp {
                 while y < canvas_rect.max.y {
                     let is_major = yi % major_every == 0;
                     let stroke = if is_major {
-                        egui::Stroke::new(0.7, GRID_MAJOR_COLOR)
+                        egui::Stroke::new(0.7, self.theme.grid_major_color)
                     } else {
-                        egui::Stroke::new(0.4, GRID_COLOR)
+                        egui::Stroke::new(0.4, self.theme.grid_color)
                     };
                     painter.line_segment(
                         [Pos2::new(canvas_rect.min.x, y), Pos2::new(canvas_rect.max.x, y)],
@@ -3057,9 +3057,9 @@ impl FlowchartApp {
                 while x < canvas_rect.max.x {
                     let is_major = xi % major_every == 0;
                     let stroke = if is_major {
-                        egui::Stroke::new(0.7, GRID_MAJOR_COLOR)
+                        egui::Stroke::new(0.7, self.theme.grid_major_color)
                     } else {
-                        egui::Stroke::new(0.4, GRID_COLOR)
+                        egui::Stroke::new(0.4, self.theme.grid_color)
                     };
                     painter.line_segment(
                         [Pos2::new(x, canvas_rect.min.y), Pos2::new(x, canvas_rect.max.y)],
@@ -3082,7 +3082,7 @@ impl FlowchartApp {
         for (zoom, label) in presets {
             let chip_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(36.0, 14.0));
             let is_active = (self.viewport.zoom - zoom).abs() < 0.05;
-            let color = if is_active { ACCENT } else { TEXT_DIM };
+            let color = if is_active { self.theme.accent } else { self.theme.text_dim };
             let resp = ui.interact(chip_rect, egui::Id::new(("zoom_preset", label)), egui::Sense::click());
             if resp.clicked() {
                 let center = self.canvas_rect.center();
@@ -3095,7 +3095,7 @@ impl FlowchartApp {
             ui.painter().text(
                 chip_rect.center(), Align2::CENTER_CENTER, *label,
                 FontId::proportional(9.5),
-                if resp.hovered() { TEXT_SECONDARY } else { color },
+                if resp.hovered() { self.theme.text_secondary } else { color },
             );
             x += 40.0;
         }
@@ -3137,14 +3137,14 @@ impl FlowchartApp {
         // Background panel
         {
             let painter = ui.painter().clone();
-            painter.rect_filled(overlay_rect, CornerRadius::same(10), TOOLTIP_BG);
+            painter.rect_filled(overlay_rect, CornerRadius::same(10), self.theme.tooltip_bg);
             painter.rect_stroke(overlay_rect, CornerRadius::same(10),
-                Stroke::new(1.0, ACCENT.gamma_multiply(0.4)), StrokeKind::Outside);
+                Stroke::new(1.0, self.theme.accent.gamma_multiply(0.4)), StrokeKind::Outside);
             // Search icon
             painter.text(
                 Pos2::new(overlay_rect.min.x + 12.0, overlay_rect.min.y + input_h / 2.0),
                 Align2::LEFT_CENTER, "🔍",
-                FontId::proportional(13.0), TEXT_DIM,
+                FontId::proportional(13.0), self.theme.text_dim,
             );
             // Divider between input and results
             if !results.is_empty() {
@@ -3218,7 +3218,7 @@ impl FlowchartApp {
                 ui2.painter().text(
                     Pos2::new(overlay_rect.max.x - 8.0, overlay_rect.min.y + input_h / 2.0),
                     Align2::RIGHT_CENTER, &badge,
-                    FontId::proportional(11.0), TEXT_DIM,
+                    FontId::proportional(11.0), self.theme.text_dim,
                 );
             }
         }
@@ -3234,7 +3234,7 @@ impl FlowchartApp {
             let resp = ui.allocate_rect(row_rect, egui::Sense::click());
             let is_hov = resp.hovered();
 
-            let bg = if is_highlighted { ACCENT.gamma_multiply(0.18) }
+            let bg = if is_highlighted { self.theme.accent.gamma_multiply(0.18) }
                      else if is_hov    { Color32::from_rgba_unmultiplied(137, 180, 250, 12) }
                      else              { Color32::TRANSPARENT };
             ui.painter().rect_filled(row_rect, CornerRadius::ZERO, bg);
@@ -3247,7 +3247,7 @@ impl FlowchartApp {
                 Pos2::new(row_rect.min.x + 14.0, row_rect.center().y),
                 Align2::LEFT_CENTER, &disp,
                 FontId::proportional(12.5),
-                if is_highlighted { TEXT_PRIMARY } else { TEXT_SECONDARY },
+                if is_highlighted { self.theme.text_primary } else { self.theme.text_secondary },
             );
 
             if resp.clicked() {
@@ -3332,11 +3332,11 @@ impl FlowchartApp {
             Vec2::new(minimap_w, minimap_h),
         );
 
-        painter.rect_filled(minimap_rect, CornerRadius::same(6), MINIMAP_BG);
+        painter.rect_filled(minimap_rect, CornerRadius::same(6), self.theme.minimap_bg);
         painter.rect_stroke(
             minimap_rect,
             CornerRadius::same(6),
-            Stroke::new(1.0, MINIMAP_BORDER),
+            Stroke::new(1.0, self.theme.minimap_border),
             StrokeKind::Outside,
         );
 
@@ -3346,7 +3346,7 @@ impl FlowchartApp {
             Align2::LEFT_CENTER,
             "MINIMAP",
             FontId::proportional(8.0),
-            MINIMAP_BORDER,
+            self.theme.minimap_border,
         );
 
         let mut bb_min = Pos2::new(f32::MAX, f32::MAX);
@@ -3415,7 +3415,7 @@ impl FlowchartApp {
             let node_color = if node.is_frame {
                 Color32::from_rgba_unmultiplied(89, 91, 118, 50)
             } else if is_selected {
-                ACCENT
+                self.theme.accent
             } else {
                 let [r, g, b, _] = node.style.fill_color;
                 Color32::from_rgba_unmultiplied(r, g, b, 200)
@@ -3453,11 +3453,11 @@ impl FlowchartApp {
 
         let clipped = vp_rect.intersect(minimap_rect);
         if clipped.is_positive() {
-            painter.rect_filled(clipped, CornerRadius::ZERO, MINIMAP_VP_FILL);
+            painter.rect_filled(clipped, CornerRadius::ZERO, self.theme.minimap_vp_fill);
             painter.rect_stroke(
                 clipped,
                 CornerRadius::ZERO,
-                Stroke::new(1.0, MINIMAP_VP_STROKE),
+                Stroke::new(1.0, self.theme.minimap_vp_stroke),
                 StrokeKind::Outside,
             );
             // Zoom % label inside the viewport rect if large enough
@@ -3635,7 +3635,7 @@ impl FlowchartApp {
         painter.rect_stroke(
             screen_rect,
             CornerRadius::same(4),
-            Stroke::new(2.0, ACCENT),
+            Stroke::new(2.0, self.theme.accent),
             StrokeKind::Outside,
         );
 
@@ -4009,7 +4009,7 @@ impl FlowchartApp {
                 let painter = ui.painter();
                 painter.rect_filled(bar_rect, CornerRadius::same(14), SURFACE1);
                 painter.rect_stroke(bar_rect, CornerRadius::same(14),
-                    Stroke::new(1.0, MINIMAP_BORDER), StrokeKind::Outside);
+                    Stroke::new(1.0, self.theme.minimap_border), StrokeKind::Outside);
                 // Connector stem to edge midpoint
                 let dot = Pos2::new(bar_rect.center().x, bar_rect.max.y);
                 painter.line_segment(
@@ -4024,7 +4024,7 @@ impl FlowchartApp {
                     let hov = resp.hovered();
                     let clicked = resp.clicked();
                     let bg = if *is_active {
-                        ACCENT.gamma_multiply(0.30)
+                        self.theme.accent.gamma_multiply(0.30)
                     } else if hov {
                         Color32::from_rgba_unmultiplied(137, 180, 250, 22)
                     } else {
@@ -4036,7 +4036,7 @@ impl FlowchartApp {
                         Align2::CENTER_CENTER,
                         *glyph,
                         FontId::proportional(13.0),
-                        if *is_active { ACCENT } else { TEXT_SECONDARY },
+                        if *is_active { self.theme.accent } else { self.theme.text_secondary },
                     );
                     if clicked { clicks[i] = true; }
                 }
@@ -4085,13 +4085,13 @@ impl FlowchartApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::NONE
-                    .fill(crate::app::theme::TOOLTIP_BG)
+                    .fill(self.theme.tooltip_bg)
                     .corner_radius(egui::CornerRadius::same(8))
-                    .stroke(egui::Stroke::new(1.0, crate::app::theme::ACCENT.gamma_multiply(0.5)))
+                    .stroke(egui::Stroke::new(1.0, self.theme.accent.gamma_multiply(0.5)))
                     .inner_margin(egui::Margin::symmetric(12, 10))
                     .show(ui, |ui| {
                         ui.set_min_width(w);
-                        ui.label(egui::RichText::new("Go to position (x, y)").size(11.0).color(crate::app::theme::TEXT_DIM));
+                        ui.label(egui::RichText::new("Go to position (x, y)").size(11.0).color(self.theme.text_dim));
                         ui.add_space(4.0);
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut self.goto_query)
@@ -4150,7 +4150,7 @@ impl FlowchartApp {
         let origin = Pos2::new(canvas_rect.max.x - total_w - 8.0, canvas_rect.min.y + 8.0);
         let mut x = origin.x;
         painter.text(Pos2::new(x, origin.y + pill_h / 2.0), Align2::LEFT_CENTER,
-            "Filter:", FontId::proportional(10.0), TEXT_DIM);
+            "Filter:", FontId::proportional(10.0), self.theme.text_dim);
         x += 38.0;
         let click_pos = ui.ctx().input(|i| {
             if i.pointer.any_click() { i.pointer.latest_pos() } else { None }
@@ -4198,9 +4198,9 @@ impl FlowchartApp {
         painter.rect_filled(btn_rect, CornerRadius::same(15),
             Color32::from_rgba_premultiplied(35, 35, 55, 220));
         painter.rect_stroke(btn_rect, CornerRadius::same(15),
-            Stroke::new(1.0, ACCENT.gamma_multiply(0.6)), StrokeKind::Outside);
+            Stroke::new(1.0, self.theme.accent.gamma_multiply(0.6)), StrokeKind::Outside);
         painter.text(btn_center, Align2::CENTER_CENTER, "↩  Back to content",
-            FontId::proportional(12.5), TEXT_SECONDARY.gamma_multiply(1.2));
+            FontId::proportional(12.5), self.theme.text_secondary.gamma_multiply(1.2));
         if ui.ctx().input(|i| i.pointer.any_click()) {
             if let Some(mp) = ui.ctx().input(|i| i.pointer.latest_pos()) {
                 if btn_rect.contains(mp) {
@@ -4228,7 +4228,7 @@ impl FlowchartApp {
         let br = self.viewport.canvas_to_screen(Pos2::new(max_x, max_y));
         let bbox = Rect::from_min_max(tl, br).expand(8.0);
         // Dashed border
-        let dash_color = SELECTION_COLOR.gamma_multiply(0.55);
+        let dash_color = self.theme.selection_color.gamma_multiply(0.55);
         let dash_len = 6.0_f32;
         let gap_len = 4.0_f32;
         let corners = [bbox.left_top(), bbox.right_top(), bbox.right_bottom(), bbox.left_bottom(), bbox.left_top()];
@@ -4253,7 +4253,7 @@ impl FlowchartApp {
         let w_canvas = max_x - min_x;
         let h_canvas = max_y - min_y;
         let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(9.0, 13.0);
-        let lbl_color = SELECTION_COLOR.gamma_multiply(0.75);
+        let lbl_color = self.theme.selection_color.gamma_multiply(0.75);
         let bg = DIM_OVERLAY;
         let w_text = format!("{:.0}", w_canvas);
         let w_pos = Pos2::new(bbox.center().x, bbox.max.y + 10.0);
@@ -4310,7 +4310,7 @@ impl FlowchartApp {
                 painter.rect_filled(bg, CornerRadius::same(4),
                     Color32::from_rgba_premultiplied(20, 20, 36, 220));
                 painter.rect_stroke(bg, CornerRadius::same(4),
-                    Stroke::new(0.5, ACCENT.gamma_multiply(0.5)), StrokeKind::Outside);
+                    Stroke::new(0.5, self.theme.accent.gamma_multiply(0.5)), StrokeKind::Outside);
                 painter.text(lpos, Align2::LEFT_TOP, &label, font,
                     Color32::from_rgba_unmultiplied(205, 214, 244, 240));
             }

@@ -270,19 +270,14 @@ pub fn auto_contrast_text(fill: [u8; 4]) -> [u8; 4] {
 }
 
 // ---------------------------------------------------------------------------
-// Backward-compatible constants — alias the dark theme so existing code
-// that uses `CANVAS_BG`, `ACCENT`, etc. continues to compile unchanged.
-// New code should prefer `self.theme.xxx` for dark/light awareness.
+// Backward-compatible constants — used by render.rs, properties.rs, and other
+// modules that don't yet have access to `self.theme`. Prefer `self.theme.xxx`
+// in methods on FlowchartApp for dark/light awareness.
 // ---------------------------------------------------------------------------
 
 // Canvas
-pub const CANVAS_BG: Color32 = Color32::from_rgb(30, 30, 46);
-pub const GRID_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 50);
-pub const GRID_MAJOR_COLOR: Color32 = Color32::from_rgba_premultiplied(88, 91, 112, 90);
 pub const SELECTION_COLOR: Color32 = Color32::from_rgb(137, 180, 250);
 pub const PORT_FILL: Color32 = Color32::from_rgb(49, 50, 68);
-pub const BOX_SELECT_FILL: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 20);
-pub const BOX_SELECT_STROKE: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 100);
 
 // UI chrome
 pub const ACCENT: Color32 = Color32::from_rgb(137, 180, 250);
@@ -305,17 +300,8 @@ pub const TEXT_HOVER_BG: Color32 = Color32::from_rgba_premultiplied(205, 214, 24
 pub const SHADOW_LIGHT: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 40);
 pub const SHADOW_MEDIUM: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 50);
 
-// Toast
-pub const TOAST_SUCCESS: Color32 = Color32::from_rgb(166, 227, 161);
-
 // ER diagram
 pub const FK_COLOR: Color32 = Color32::from_rgb(249, 226, 175);
-
-// Minimap
-pub const MINIMAP_BG: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 200);
-pub const MINIMAP_BORDER: Color32 = Color32::from_rgba_premultiplied(80, 80, 80, 180);
-pub const MINIMAP_VP_FILL: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 30);
-pub const MINIMAP_VP_STROKE: Color32 = Color32::from_rgba_premultiplied(80, 160, 255, 150);
 
 // Edge label background
 pub const EDGE_LABEL_BG: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 200);
@@ -323,13 +309,6 @@ pub const EDGE_LABEL_BG: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 
 // Section divider
 pub const DIVIDER_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 80);
 pub const ROW_DIVIDER: Color32 = Color32::from_rgba_premultiplied(100, 100, 100, 60);
-
-// Node preview
-pub const PREVIEW_FILL: Color32 = Color32::from_rgba_premultiplied(100, 160, 255, 80);
-
-// Tooltip
-pub const TOOLTIP_BG: Color32 = Color32::from_rgba_premultiplied(18, 18, 30, 230);
-pub const TOOLTIP_BORDER: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 200);
 
 // Ghost / overlay
 pub const GHOST_STROKE: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 60);

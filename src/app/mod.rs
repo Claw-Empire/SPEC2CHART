@@ -450,7 +450,7 @@ impl eframe::App for FlowchartApp {
         }
 
         CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(CANVAS_BG))
+            .frame(egui::Frame::NONE.fill(self.theme.canvas_bg))
             .show(ctx, |ui| {
                 match self.view_mode {
                     ViewMode::TwoD => self.draw_canvas(ui),
