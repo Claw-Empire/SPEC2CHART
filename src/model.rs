@@ -562,6 +562,9 @@ pub struct Edge {
     pub source_cardinality: Cardinality,
     pub target_cardinality: Cardinality,
     pub style: EdgeStyle,
+    /// Optional annotation/note — shown as a hoverable tooltip on the edge
+    #[serde(default)]
+    pub comment: String,
 }
 
 impl Edge {
@@ -576,6 +579,7 @@ impl Edge {
             source_cardinality: Cardinality::None,
             target_cardinality: Cardinality::None,
             style: EdgeStyle::default(),
+            comment: String::new(),
         }
     }
 }

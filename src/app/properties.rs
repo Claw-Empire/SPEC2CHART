@@ -1240,6 +1240,7 @@ impl FlowchartApp {
                         source_cardinality: crate::model::Cardinality::None,
                         target_cardinality: crate::model::Cardinality::None,
                         style: EdgeStyle::default(),
+                        comment: String::new(),
                     };
                     self.document.edges.push(edge);
                     self.history.push(&self.document);

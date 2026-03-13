@@ -1488,6 +1488,60 @@ impl FlowchartApp {
             }
         }
 
+        // Edge comment bubble: show annotation as speech bubble above midpoint when hovered
+        if is_hovered && !edge.comment.is_empty() && self.viewport.zoom > 0.3 {
+            let mid = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
+            let bubble_font = (11.5 * self.viewport.zoom).clamp(9.0, 18.0);
+            let note_text = format!("💬 {}", edge.comment);
+            let galley = painter.layout_no_wrap(
+                note_text.clone(),
+                FontId::proportional(bubble_font),
+                Color32::from_rgb(200, 200, 220),
+            );
+            let offset_y = -(20.0 + galley.size().y * 0.5 + 6.0) * self.viewport.zoom.sqrt();
+            let bubble_center = mid + Vec2::new(0.0, offset_y);
+            let pad = Vec2::new(8.0, 5.0);
+            let bubble_rect = Rect::from_center_size(bubble_center, galley.size() + pad * 2.0);
+            // Drop shadow
+            painter.rect_filled(
+                bubble_rect.translate(Vec2::new(1.5, 2.0)),
+                CornerRadius::same(6),
+                Color32::from_black_alpha(60),
+            );
+            // Bubble background
+            painter.rect_filled(
+                bubble_rect,
+                CornerRadius::same(6),
+                Color32::from_rgba_unmultiplied(30, 30, 46, 230),
+            );
+            painter.rect_stroke(
+                bubble_rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 120)),
+                StrokeKind::Inside,
+            );
+            // Little tail pointing down toward edge
+            let tail_tip = Pos2::new(bubble_center.x, bubble_rect.max.y + 5.0 * self.viewport.zoom.sqrt());
+            let tail_base_y = bubble_rect.max.y;
+            let hw = 4.0;
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    Pos2::new(bubble_center.x - hw, tail_base_y),
+                    Pos2::new(bubble_center.x + hw, tail_base_y),
+                    tail_tip,
+                ],
+                Color32::from_rgba_unmultiplied(30, 30, 46, 230),
+                Stroke::NONE,
+            ));
+            painter.text(
+                bubble_center,
+                Align2::CENTER_CENTER,
+                &note_text,
+                FontId::proportional(bubble_font),
+                Color32::from_rgb(200, 200, 220),
+            );
+        }
+
         // Direction tick-marks at 25% and 75% along selected edges
         if is_selected && !edge.style.orthogonal {
             for t in [0.25_f32, 0.75] {

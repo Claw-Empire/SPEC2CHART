@@ -90,6 +90,7 @@ use std::collections::HashMap;
 ///   `{c-src:1}` — source cardinality (1 / 0..1 / 1..N / 0..N)
 ///   `{c-tgt:0..N}` — target cardinality (1 / 0..1 / 1..N / 0..N)
 ///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
+///   `{note:text}` / `{comment:text}` — annotation shown as tooltip when hovering the edge
 ///
 /// ### `## Groups` section
 /// ```text
@@ -478,6 +479,9 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
             if let Some(s) = cardinality_str(&edge.target_cardinality) {
                 style_tags.push(format!("c-tgt:{}", s));
             }
+            if !edge.comment.is_empty() {
+                style_tags.push(format!("note:{}", edge.comment));
+            }
             let tag_str = if style_tags.is_empty() {
                 String::new()
             } else {
@@ -697,6 +701,11 @@ fn parse_flow_line_chain(
                 edge.source_cardinality = parse_cardinality(etag[6..].trim());
             } else if etag.starts_with("c-tgt:") {
                 edge.target_cardinality = parse_cardinality(etag[6..].trim());
+            } else if etag.starts_with("note:") || etag.starts_with("comment:") || etag.starts_with("annotation:") {
+                let val = if etag.starts_with("note:") { &etag[5..] }
+                    else if etag.starts_with("comment:") { &etag[8..] }
+                    else { &etag[11..] };
+                edge.comment = val.trim().to_string();
             } else if etag.starts_with("src-port:") || etag.starts_with("sport:")
                     || etag.starts_with("tgt-port:") || etag.starts_with("tport:") {
                 // Already handled above
