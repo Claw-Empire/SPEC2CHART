@@ -71,6 +71,7 @@ use std::collections::HashMap;
 ///   `{shadow}` — drop shadow effect
 ///   `{highlight}` / `{pulse}` / `{starred}` / `{important}` — slow amber pulsing ring (important node marker)
 ///   `{note:text}` / `{annotation:text}` / `{comment:text}` — 💬 annotation tooltip shown on hover
+///   `{group:name}` / `{cluster:name}` / `{in:name}` — assign to inline group frame (auto-creates bounding frame)
 ///   `{bold}` — bold text
 ///   `{italic}` — italic text
 ///   `{dashed-border}` — dashed border line
@@ -207,6 +208,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // ## Groups section: (group_id, label, fill_color, member_ids)
     let mut groups: Vec<(String, String, Option<[u8;4]>, Vec<String>)> = Vec::new();
 
+    // Inline group assignments from {group:name} tags in ## Nodes section
+    // Format: (node_str_id, group_name)
+    let mut inline_group_assignments: Vec<(String, String)> = Vec::new();
+
     // ## Config section: key = value pairs
     let mut config_map: HashMap<String, String> = HashMap::new();
 
@@ -317,6 +322,22 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     }
                     last_node_id = Some(node.id);
                     id_map.insert(id.clone(), node.id);
+                    // Detect {group:name} tag for inline group assignment
+                    {
+                        let (_, tags) = extract_tags(node_part);
+                        for tag in &tags {
+                            if tag.starts_with("group:") || tag.starts_with("cluster:") || tag.starts_with("in:") {
+                                let prefix = if tag.starts_with("group:") { 6 }
+                                    else if tag.starts_with("cluster:") { 8 }
+                                    else { 3 }; // in:
+                                let gname = tag[prefix..].trim().to_string();
+                                if !gname.is_empty() {
+                                    inline_group_assignments.push((id.clone(), gname));
+                                }
+                                break;
+                            }
+                        }
+                    }
                     // Defer inline edge creation
                     for (target_id, edge_tags) in inline_targets {
                         deferred_inline_edges.push((id.clone(), target_id, edge_tags));
@@ -554,6 +575,51 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         // Insert at the beginning so frames appear behind other nodes
         doc.nodes.insert(0, frame);
         let _ = gid; // frame has a new id; group-id is not tracked after creation
+    }
+
+    // Process inline group assignments: {group:name} tags from ## Nodes section
+    if !inline_group_assignments.is_empty() {
+        // Collect all unique group names and their member node ids
+        let mut inline_group_map: std::collections::HashMap<String, Vec<NodeId>> = std::collections::HashMap::new();
+        for (str_id, group_name) in &inline_group_assignments {
+            if let Some(&nid) = id_map.get(str_id) {
+                inline_group_map.entry(group_name.clone()).or_default().push(nid);
+            }
+        }
+        let pad = 24.0_f32;
+        // Sort for deterministic frame creation order
+        let mut group_names: Vec<&String> = inline_group_map.keys().collect();
+        group_names.sort();
+        for group_name in group_names {
+            let member_ids = &inline_group_map[group_name];
+            let mut min_x = f32::INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            for &nid in member_ids {
+                if let Some(node) = doc.nodes.iter().find(|n| n.id == nid) {
+                    let x1 = node.position[0];
+                    let y1 = node.position[1];
+                    min_x = min_x.min(x1);
+                    min_y = min_y.min(y1);
+                    max_x = max_x.max(x1 + node.size[0]);
+                    max_y = max_y.max(y1 + node.size[1]);
+                }
+            }
+            if min_x == f32::INFINITY { continue; }
+            let mut frame = Node::new_frame(egui::Pos2::new(min_x - pad, min_y - pad));
+            frame.size = [max_x - min_x + pad * 2.0, max_y - min_y + pad * 2.0];
+            // Capitalize first letter of group name for the frame label
+            let label = {
+                let mut s = group_name.clone();
+                if let Some(c) = s.get_mut(0..1) { c.make_ascii_uppercase(); }
+                s.replace('-', " ").replace('_', " ")
+            };
+            if let NodeKind::Shape { label: ref mut l, .. } = frame.kind {
+                *l = label;
+            }
+            doc.nodes.insert(0, frame);
+        }
     }
 
     Ok(doc)
@@ -2398,5 +2464,27 @@ success = #166534
         // success = #166534 → [22, 101, 52, 255]
         let c = doc.nodes.iter().find(|n| n.display_label() == "Healthy").unwrap();
         assert_eq!(c.style.fill_color, [22, 101, 52, 255], "success color mismatch: {:?}", c.style.fill_color);
+    }
+
+    #[test]
+    fn test_inline_group_assignment_creates_frame() {
+        let input = r#"
+## Nodes
+- [db] Database {circle} {group:backend}
+- [api] API {group:backend}
+- [ui] Frontend {group:frontend}
+"#;
+        let doc = parse_hrf(input).unwrap();
+        // 3 real nodes + 2 frames (backend, frontend)
+        assert_eq!(doc.nodes.len(), 5, "expected 3 nodes + 2 frames, got: {}", doc.nodes.len());
+        let frames: Vec<_> = doc.nodes.iter().filter(|n| n.is_frame).collect();
+        assert_eq!(frames.len(), 2, "expected 2 frame nodes");
+        let labels: Vec<&str> = frames.iter()
+            .map(|n| n.display_label())
+            .collect();
+        assert!(labels.iter().any(|&l| l.to_lowercase().contains("backend")),
+            "expected a Backend frame, got: {:?}", labels);
+        assert!(labels.iter().any(|&l| l.to_lowercase().contains("frontend")),
+            "expected a Frontend frame, got: {:?}", labels);
     }
 }
