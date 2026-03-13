@@ -147,6 +147,31 @@ impl FlowchartApp {
                         }
                     }
 
+                    // Hovered node info (when nothing selected)
+                    if sel_count == 0 && !edge_sel {
+                        if let Some(hid) = self.hover_node_id {
+                            if let Some(node) = self.document.find_node(&hid) {
+                                let ins  = self.document.edges.iter().filter(|e| e.target.node_id == hid).count();
+                                let outs = self.document.edges.iter().filter(|e| e.source.node_id == hid).count();
+                                ui.add_space(8.0);
+                                separator(ui, surface1);
+                                ui.add_space(8.0);
+                                // Truncate long labels
+                                let lbl = node.display_label();
+                                let short = if lbl.len() > 28 { format!("{}…", &lbl[..27]) } else { lbl.to_string() };
+                                label(ui, &short, text_primary);
+                                if ins > 0 || outs > 0 {
+                                    ui.add_space(5.0);
+                                    label(ui, &format!("↑{} ↓{}", ins, outs), text_dim);
+                                }
+                                if node.highlight {
+                                    ui.add_space(4.0);
+                                    label(ui, "⭐", Color32::from_rgb(255, 200, 50));
+                                }
+                            }
+                        }
+                    }
+
                     // Right side — graph stats, zoom, cursor
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         // Cursor coords

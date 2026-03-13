@@ -358,6 +358,9 @@ impl FlowchartApp {
             }
         }
 
+        // Store current hover node id for statusbar / other panels to read
+        self.hover_node_id = hover_node_id;
+
         // Progressive tooltip: track how long we've been hovering the same node
         {
             let now = ui.ctx().input(|i| i.time);

@@ -183,6 +183,9 @@ pub struct FlowchartApp {
     /// Tracks when a node hover started: (node_id, egui_time_secs)
     /// Used for progressive tooltip delay.
     pub(crate) hover_node_start: Option<(NodeId, f64)>,
+    /// The NodeId currently under the cursor (set each frame by canvas.rs).
+    /// Used by statusbar to show hovered node info.
+    pub(crate) hover_node_id: Option<NodeId>,
     /// Records when each node was first selected (egui time in seconds).
     /// Used for selection-confirmation flash micro-animation.
     pub(crate) selection_times: std::collections::HashMap<NodeId, f64>,
@@ -309,6 +312,7 @@ impl FlowchartApp {
             creation_ripples: Vec::new(),
             inline_node_edit: None,
             hover_node_start: None,
+            hover_node_id: None,
             selection_times: std::collections::HashMap::new(),
             search_cursor: 0,
             edge_birth_times: std::collections::HashMap::new(),
