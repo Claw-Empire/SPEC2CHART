@@ -70,6 +70,7 @@ use std::collections::HashMap;
 ///   `{icon:🔒}` — icon badge
 ///   `{shadow}` — drop shadow effect
 ///   `{highlight}` / `{pulse}` / `{starred}` / `{important}` — slow amber pulsing ring (important node marker)
+///   `{note:text}` / `{annotation:text}` / `{comment:text}` — 💬 annotation tooltip shown on hover
 ///   `{bold}` — bold text
 ///   `{italic}` — italic text
 ///   `{dashed-border}` — dashed border line
@@ -961,6 +962,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut text_color: Option<[u8; 4]> = None;
     let mut tooltip_text: Option<String> = None;
     let mut sublabel_text: Option<String> = None;
+    let mut node_note_text: Option<String> = None;
     let mut depth_3d: f32 = 0.0;
     let mut highlight = false;
     for tag in &tags {
@@ -1057,6 +1059,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                 else if tag.starts_with("subtitle:") { 9 }
                 else { 8 }; // caption:
             sublabel_text = Some(tag[prefix..].trim().to_string());
+        } else if tag.starts_with("note:") || tag.starts_with("annotation:") || tag.starts_with("comment:") {
+            // {note:text} on a node → shown as a 💬 annotation in the tooltip
+            let prefix = if tag.starts_with("note:") { 5 }
+                else if tag.starts_with("annotation:") { 11 }
+                else { 8 }; // comment:
+            node_note_text = Some(tag[prefix..].trim().to_string());
         } else if tag.starts_with("border-color:") || tag.starts_with("stroke:") {
             let v = if tag.starts_with("border-color:") { &tag[13..] } else { &tag[7..] };
             border_color = tag_to_fill_color(v.trim());
@@ -1163,6 +1171,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         node.depth_3d = depth_3d;
     }
     if highlight { node.highlight = true; }
+    if let Some(nn) = node_note_text {
+        node.comment = nn;
+    }
 
     Ok((id, node))
 }
@@ -1575,11 +1586,14 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 format!(" {{3d-depth:{:.0}}}", node.depth_3d)
             } else { String::new() };
             let highlight_tag = if node.highlight { " {highlight}" } else { "" };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let note_tag = if !node.comment.is_empty() {
+                format!(" {{note:{}}}", node.comment)
+            } else { String::new() };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, note_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));

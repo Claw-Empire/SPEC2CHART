@@ -867,31 +867,6 @@ impl FlowchartApp {
             }
         }
 
-        // Tab / Shift+Tab = cycle selection through nodes
-        let tab_pressed = ctx.input(|i| i.key_pressed(Key::Tab));
-        if !any_text_focused && tab_pressed {
-            let shift_held = ctx.input(|i| i.modifiers.shift);
-            let n = self.document.nodes.len();
-            if n > 0 {
-                let current_idx = self.selection.node_ids.iter().next()
-                    .and_then(|id| self.document.nodes.iter().position(|n| n.id == *id));
-                let next_idx = match current_idx {
-                    None => 0,
-                    Some(i) if shift_held => (i + n - 1) % n,
-                    Some(i) => (i + 1) % n,
-                };
-                let next_id = self.document.nodes[next_idx].id;
-                self.selection.select_node(next_id);
-                // Smoothly pan to show the selected node (uses animated pan_target)
-                let node_rect = self.document.nodes[next_idx].rect();
-                let node_center = node_rect.center();
-                let screen_center = self.canvas_rect.center();
-                let target_offset_x = screen_center.x - node_center.x * self.viewport.zoom;
-                let target_offset_y = screen_center.y - node_center.y * self.viewport.zoom;
-                self.pan_target = Some([target_offset_x, target_offset_y]);
-            }
-        }
-
         // Arrow keys on selected node = navigate to adjacent node by spatial direction
         if !any_text_focused && self.selection.node_ids.len() == 1 && self.selection.edge_ids.is_empty() {
             let sel_id = *self.selection.node_ids.iter().next().unwrap();

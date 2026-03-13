@@ -492,6 +492,7 @@ impl FlowchartApp {
                             ("Icon/Frame", "{icon:🔒} {frame}"),
                             ("Tooltip", "{tooltip:description text}  (or indent lines below)"),
                             ("Sublabel", "{sublabel:v2 · running}  (small text below node)"),
+                            ("Node note", "{note:deprecated — use /v2 instead}  (💬 tooltip)"),
                             ("Edge note", "a -> b {note:this path is deprecated}"),
                             ("Special", "{entity} {text} {locked} {url:https://...}"),
                             ("Edge flow", "{dashed} {glow} {animated} {thick} {ortho}"),
