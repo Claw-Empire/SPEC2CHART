@@ -12,8 +12,9 @@ use crate::model::*;
 // ---------------------------------------------------------------------------
 
 /// Build a syntax-highlighted `LayoutJob` for the HRF spec editor.
+/// `error_line` (1-based): if Some(n), that line is highlighted with a red background.
 /// Called as a TextEdit layouter closure.
-fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::Arc<egui::Galley> {
+fn spec_syntax_layout_ex(ui: &egui::Ui, text: &str, wrap_width: f32, error_line: Option<usize>) -> std::sync::Arc<egui::Galley> {
     use egui::text::{LayoutJob, TextFormat};
     use egui::FontId;
 
@@ -31,44 +32,54 @@ fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::
     job.wrap.max_width = wrap_width;
     job.wrap.break_anywhere = false;
 
+    let c_err_bg   = Color32::from_rgba_premultiplied(243, 139, 168, 30); // subtle red bg for error line
     let fmt = |color: Color32| TextFormat { font_id: font.clone(), color, ..Default::default() };
+    let fmt_bg = |color: Color32, bg: Color32| TextFormat { font_id: font.clone(), color, background: bg, ..Default::default() };
 
+    let mut line_num: usize = 0;
     for line in text.split_inclusive('\n') {
+        line_num += 1;
         let trimmed = line.trim_start();
+        let is_error_line = error_line == Some(line_num);
+        let bg = if is_error_line { c_err_bg } else { Color32::TRANSPARENT };
 
         if trimmed.starts_with("## ") || trimmed.starts_with("# ") {
             // Section / title headers
-            job.append(line, 0.0, fmt(c_section));
+            job.append(line, 0.0, fmt_bg(c_section, bg));
         } else if trimmed.starts_with("//") {
             // Comment lines
-            job.append(line, 0.0, fmt(c_comment));
+            job.append(line, 0.0, fmt_bg(c_comment, bg));
         } else if trimmed.contains("-->") || trimmed.contains("->") || trimmed.contains("<--") || trimmed.contains("<->")
                  || trimmed.contains('→') || trimmed.contains('⇒') || trimmed.contains('←') || trimmed.contains('↔')
                  || trimmed.contains('⟶') || trimmed.contains('⟵') || trimmed.contains('⇔') || trimmed.contains('⟷') {
             // Edge / flow lines — colour tags inline (including Unicode arrow variants)
-            append_line_with_tags(&mut job, line, c_arrow, c_tag, &font);
+            append_line_with_tags_bg(&mut job, line, c_arrow, c_tag, &font, bg);
         } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
             // Node definition lines
-            append_line_with_tags(&mut job, line, c_node, c_tag, &font);
+            append_line_with_tags_bg(&mut job, line, c_node, c_tag, &font, bg);
         } else if trimmed.contains(" = ") && !trimmed.starts_with(' ') {
             // Config key = value lines
             if let Some(eq) = line.find(" = ") {
-                job.append(&line[..eq + 3], 0.0, fmt(c_key));
-                job.append(&line[eq + 3..], 0.0, fmt(c_default));
+                job.append(&line[..eq + 3], 0.0, fmt_bg(c_key, bg));
+                job.append(&line[eq + 3..], 0.0, fmt_bg(c_default, bg));
             } else {
-                job.append(line, 0.0, fmt(c_key));
+                job.append(line, 0.0, fmt_bg(c_key, bg));
             }
         } else {
             // Description / other text
-            job.append(line, 0.0, fmt(c_default));
+            job.append(line, 0.0, fmt_bg(c_default, bg));
         }
     }
 
     ui.fonts(|f| f.layout_job(job))
 }
 
-/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`,
-/// `"quoted strings"` in string_color, and inline `// ...` comments in comment_color.
+/// Compat wrapper: no error line highlighting.
+fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::Arc<egui::Galley> {
+    spec_syntax_layout_ex(ui, text, wrap_width, None)
+}
+
+/// Append a line (no background highlight).
 fn append_line_with_tags(
     job: &mut egui::text::LayoutJob,
     line: &str,
@@ -76,13 +87,27 @@ fn append_line_with_tags(
     tag_color: Color32,
     font: &egui::FontId,
 ) {
+    append_line_with_tags_bg(job, line, base_color, tag_color, font, Color32::TRANSPARENT);
+}
+
+/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`,
+/// `"quoted strings"` in string_color, inline `// ...` comments in comment_color,
+/// and applying `bg` as background for the entire line (used for error highlighting).
+fn append_line_with_tags_bg(
+    job: &mut egui::text::LayoutJob,
+    line: &str,
+    base_color: Color32,
+    tag_color: Color32,
+    font: &egui::FontId,
+    bg: Color32,
+) {
     use egui::text::TextFormat;
     let c_comment = Color32::from_rgb(108, 112, 134);
     let c_string  = Color32::from_rgb(249, 226, 175); // yellow — "quoted labels" and |pipe labels|
-    let fmt_base    = TextFormat { font_id: font.clone(), color: base_color, ..Default::default() };
-    let fmt_tag     = TextFormat { font_id: font.clone(), color: tag_color,  ..Default::default() };
-    let fmt_comment = TextFormat { font_id: font.clone(), color: c_comment,  ..Default::default() };
-    let fmt_string  = TextFormat { font_id: font.clone(), color: c_string,   ..Default::default() };
+    let fmt_base    = TextFormat { font_id: font.clone(), color: base_color, background: bg, ..Default::default() };
+    let fmt_tag     = TextFormat { font_id: font.clone(), color: tag_color,  background: bg, ..Default::default() };
+    let fmt_comment = TextFormat { font_id: font.clone(), color: c_comment,  background: bg, ..Default::default() };
+    let fmt_string  = TextFormat { font_id: font.clone(), color: c_string,   background: bg, ..Default::default() };
 
     // Split off inline comment (// not preceded by ':' to preserve URLs)
     let (code_part, comment_part) = {
@@ -862,18 +887,29 @@ impl FlowchartApp {
                     ui.add_space(4.0);
                 }
 
-                // Main text editor
+                // Extract error line number (1-based) from "Line N: ..." error messages
+                let err_line_num: Option<usize> = self.spec_editor_error.as_ref().and_then(|err| {
+                    let pos = err.find("Line ")?;
+                    let after = &err[pos + 5..];
+                    let colon = after.find(':')?;
+                    after[..colon].trim().parse::<usize>().ok()
+                });
+
+                // Main text editor — highlight error line with subtle red background
                 let available = ui.available_rect_before_wrap();
                 let mut ui2 = ui.new_child(
                     egui::UiBuilder::new().max_rect(available)
                 );
+                let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+                    spec_syntax_layout_ex(ui, text, wrap_width, err_line_num)
+                };
                 let resp = ui2.add_sized(
                     available.size(),
                     egui::TextEdit::multiline(&mut self.spec_editor_text)
                         .font(egui::FontId::monospace(12.5))
                         .desired_rows(40)
                         .lock_focus(false)
-                        .layouter(&mut spec_syntax_layout),
+                        .layouter(&mut layouter),
                 );
                 if resp.changed() {
                     let now = ui2.ctx().input(|i| i.time);
