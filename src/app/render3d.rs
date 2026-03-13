@@ -1906,21 +1906,40 @@ impl FlowchartApp {
                 .camera3d
                 .project(label_pos, screen_center, screen_size)
             {
-                let layer_name = self.document.layer_names.get(&layer)
-                    .map(|s| format!("  {}", s))
-                    .unwrap_or_default();
+                let named = self.document.layer_names.get(&layer);
+                let layer_name_sfx = named.map(|s| format!("  {}", s)).unwrap_or_default();
                 let lbl = if node_count > 0 {
-                    format!("z={:.0}  ×{}{}", z, node_count, layer_name)
+                    format!("z={:.0}  ×{}{}", z, node_count, layer_name_sfx)
                 } else {
-                    format!("z={:.0}{}", z, layer_name)
+                    format!("z={:.0}{}", z, layer_name_sfx)
                 };
+                // Named layers are more prominent
+                let (font_size, alpha) = if named.is_some() { (10.5, 0.55) } else { (9.0, 0.28) };
                 painter.text(
                     screen_pos,
                     Align2::LEFT_CENTER,
                     lbl,
-                    FontId::proportional(9.0),
-                    self.theme.accent.gamma_multiply(0.28),
+                    FontId::proportional(font_size),
+                    self.theme.accent.gamma_multiply(alpha),
                 );
+                // For named layers, also draw a colored tab to the left of the label
+                if let Some(name) = named {
+                    let pill_colors = [
+                        Color32::from_rgb(137, 180, 250),
+                        Color32::from_rgb(166, 227, 161),
+                        Color32::from_rgb(249, 226, 175),
+                        Color32::from_rgb(203, 166, 247),
+                        Color32::from_rgb(243, 139, 168),
+                        Color32::from_rgb(148, 226, 213),
+                    ];
+                    let color = pill_colors[(layer.unsigned_abs() as usize) % pill_colors.len()];
+                    let tab_rect = Rect::from_min_size(
+                        Pos2::new(screen_pos.x - 14.0, screen_pos.y - 5.0),
+                        Vec2::new(4.0, 10.0),
+                    );
+                    painter.rect_filled(tab_rect, CornerRadius::same(2), color.gamma_multiply(0.7));
+                    let _ = name;
+                }
             }
         }
 

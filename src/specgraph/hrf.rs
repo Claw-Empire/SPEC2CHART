@@ -110,6 +110,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // ## Groups section: (group_id, label, fill_color, member_ids)
     let mut groups: Vec<(String, String, Option<[u8;4]>, Vec<String>)> = Vec::new();
 
+    // ## Config section: key = value pairs
+    let mut config_map: HashMap<String, String> = HashMap::new();
+
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
         let trimmed = line.trim();
@@ -137,6 +140,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "flow" | "flows" | "edges" | "connections" => Section::Flow,
                 "notes" | "note" | "stickies" => Section::Notes,
                 "groups" | "group" | "clusters" => Section::Groups,
+                "config" | "settings" | "meta" => Section::Config,
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
@@ -264,11 +268,42 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     }
                 }
             }
+            Section::Config => {
+                // Format: key = value  or  key: value
+                if !trimmed.is_empty() {
+                    let sep = if trimmed.contains('=') { '=' }
+                        else if trimmed.contains(':') { ':' }
+                        else { continue; };
+                    if let Some(pos) = trimmed.find(sep) {
+                        let key = trimmed[..pos].trim().to_lowercase();
+                        let val = trimmed[pos+1..].trim().to_string();
+                        config_map.insert(key, val);
+                    }
+                }
+            }
             Section::None => {}
         }
     }
 
     doc.description = preamble_lines.join("\n");
+
+    // Apply ## Config values
+    for (key, val) in &config_map {
+        match key.as_str() {
+            "title" => { doc.title = val.clone(); }
+            "description" | "desc" => { doc.description = val.clone(); }
+            // layer names: layer0 = Data Tier, layer 1 = Backend
+            _ if key.starts_with("layer") => {
+                let num_part = key.trim_start_matches("layer").trim();
+                if let Ok(idx) = num_part.trim_matches(|c: char| !c.is_ascii_digit())
+                    .parse::<i32>()
+                {
+                    doc.layer_names.insert(idx, val.clone());
+                }
+            }
+            _ => {}
+        }
+    }
 
     // Auto-layout: topological / hierarchical placement
     super::layout::hierarchical_layout(&mut doc);
@@ -497,6 +532,7 @@ enum Section {
     Flow,
     Notes,
     Groups,
+    Config,
 }
 
 // ---------------------------------------------------------------------------
