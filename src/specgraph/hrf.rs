@@ -1464,9 +1464,26 @@ fn parse_flow_line_chain(
             (left.to_string(), String::new())
         };
 
-        // right: node id (first word), then optional {tags}
+        // right: node id (first word), optional ": colon label", then optional {tags}
+        // Supports: `b: performs auth {dashed}` or `b {dashed}` or `b`
+        // We must extract {tags} first to avoid a colon inside a tag confusing us.
         let (to_id_raw, edge_tags) = extract_tags(right);
-        let to_id = to_id_raw.split_whitespace().next().unwrap_or(&to_id_raw).to_string();
+        // Now to_id_raw may be: "b" or "b: auth flow" or "b : auth flow"
+        // Split on first ':' — only if it appears after the node id token
+        let (to_id, colon_label) = {
+            let first_token_end = to_id_raw.find(|c: char| c.is_whitespace() || c == ':')
+                .unwrap_or(to_id_raw.len());
+            let first_token = &to_id_raw[..first_token_end];
+            let rest = to_id_raw[first_token_end..].trim();
+            if let Some(rest_after_colon) = rest.strip_prefix(':') {
+                let lbl = rest_after_colon.trim().to_string();
+                (first_token.to_string(), if lbl.is_empty() { String::new() } else { lbl })
+            } else {
+                (first_token.to_string(), String::new())
+            }
+        };
+        // Prefix label wins over colon label if both specified
+        let label = if !label.is_empty() { label.clone() } else { colon_label };
 
         let source_node_id = id_map.get(&from_id).ok_or_else(|| {
             let hint = suggest_id(&from_id, id_map.keys().map(|s| s.as_str()));
@@ -3272,5 +3289,32 @@ e ⟷ a
         let ea = doc.edges.iter().any(|edge| edge.source.node_id == e.id && edge.target.node_id == a.id);
         let ae = doc.edges.iter().any(|edge| edge.source.node_id == a.id && edge.target.node_id == e.id);
         assert!(ea || ae, "e ⟷ a should create at least one e↔a edge");
+    }
+
+    #[test]
+    fn test_colon_label_on_edge() {
+        let input = r#"
+# Colon Label Test
+
+## Nodes
+- [a] Service A
+- [b] Service B
+- [c] Service C
+
+## Flow
+a -> b: authenticates user
+b -> c: stores session {dashed}
+"#;
+        let doc = parse_hrf(input).expect("colon label parse");
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Service A").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Service B").unwrap();
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Service C").unwrap();
+        let ab = doc.edges.iter().find(|e| e.source.node_id == a.id && e.target.node_id == b.id)
+            .expect("a->b edge");
+        let bc = doc.edges.iter().find(|e| e.source.node_id == b.id && e.target.node_id == c.id)
+            .expect("b->c edge");
+        assert_eq!(ab.label, "authenticates user", "colon label on plain edge");
+        assert_eq!(bc.label, "stores session", "colon label with {{dashed}} tag");
+        assert!(bc.style.dashed, "dashed tag should apply even with colon label");
     }
 }
