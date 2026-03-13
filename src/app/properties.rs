@@ -371,6 +371,16 @@ impl FlowchartApp {
                             .desired_rows(3)
                             .font(FontId::proportional(12.0)),
                     );
+                    // Sublabel (small secondary text below node)
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Sublabel").size(11.0).color(theme.text_dim));
+                    ui.add_space(2.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut node.sublabel)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("e.g. v2.1 · running")
+                            .font(FontId::proportional(11.5)),
+                    );
                     // Comment field (also accessible via Cmd+M)
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -1172,6 +1182,17 @@ impl FlowchartApp {
                 }
             });
             ui.add_space(8.0);
+
+            // Edge annotation / note
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("💬 Note").size(11.0).color(theme.text_dim));
+            ui.add_space(2.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut edge.comment)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("annotation shown on hover")
+                    .font(FontId::proportional(11.0)),
+            );
 
             ui.label(egui::RichText::new("Arrow Head").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
