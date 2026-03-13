@@ -708,9 +708,9 @@ fn parse_flow_line_chain(
                     "thick" | "bold" => edge.style.width = 5.0,
                     "thin" => edge.style.width = 1.5,
                     "ortho" | "orthogonal" => edge.style.orthogonal = true,
-                    "arrow:open" => edge.style.arrow_head = ArrowHead::Open,
-                    "arrow:circle" => edge.style.arrow_head = ArrowHead::Circle,
-                    "arrow:none" => edge.style.arrow_head = ArrowHead::None,
+                    "arrow:open" | "open" => edge.style.arrow_head = ArrowHead::Open,
+                    "arrow:circle" | "circle-end" => edge.style.arrow_head = ArrowHead::Circle,
+                    "arrow:none" | "no-arrow" | "line" => edge.style.arrow_head = ArrowHead::None,
                     _ => {}
                 }
             }
@@ -766,6 +766,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut text_align: Option<crate::model::TextAlign> = None;
     let mut text_valign: Option<crate::model::TextVAlign> = None;
     let mut opacity_override: Option<f32> = None;
+    let mut font_size_override: Option<f32> = None;
     let mut gradient = false;
     let mut locked = false;
     let mut url_override: Option<String> = None;
@@ -833,6 +834,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                 "bottom" => Some(crate::model::TextVAlign::Bottom),
                 _ => Some(crate::model::TextVAlign::Middle),
             };
+        } else if tag.starts_with("font-size:") || tag.starts_with("fs:") || tag.starts_with("fontsize:") {
+            let colon = tag.find(':').unwrap();
+            font_size_override = tag[colon+1..].trim().parse::<f32>().ok();
         } else if tag.starts_with("opacity:") || tag.starts_with("alpha:") {
             let val_str = if tag.starts_with("opacity:") { &tag[8..] } else { &tag[6..] };
             if let Ok(v) = val_str.trim().parse::<f32>() {
@@ -937,6 +941,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(ta) = text_align { node.style.text_align = ta; }
     if let Some(tv) = text_valign { node.style.text_valign = tv; }
     if let Some(op) = opacity_override { node.style.opacity = op.clamp(0.0, 1.0); }
+    if let Some(fs) = font_size_override { node.style.font_size = fs.clamp(6.0, 72.0); }
     if gradient { node.style.gradient = true; }
     if locked { node.locked = true; }
     if let Some(u) = url_override { node.url = u; }
@@ -1248,6 +1253,9 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let icon_tag = if !node.icon.is_empty() {
                 format!(" {{icon:{}}}", node.icon)
             } else { String::new() };
+            let font_size_tag = if (node.style.font_size - 13.0).abs() > 0.5 {
+                format!(" {{font-size:{}}}", node.style.font_size)
+            } else { String::new() };
             let shadow_tag = if node.style.shadow { " {shadow}" } else { "" };
             let bold_tag = if node.style.bold { " {bold}" } else { "" };
             let italic_tag = if node.style.italic { " {italic}" } else { "" };
@@ -1295,11 +1303,11 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     format!(" {{text-color:#{:02x}{:02x}{:02x}}}", tc[0], tc[1], tc[2])
                 }
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, w_tag, h_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
