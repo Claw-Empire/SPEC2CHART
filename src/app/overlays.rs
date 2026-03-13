@@ -1,0 +1,581 @@
+// overlays.rs — Floating UI panels drawn on top of the canvas.
+//
+// Extracted from mod.rs to keep the main update() loop concise.
+// Each method draws one overlay and manages its own open/close state.
+
+use egui::{Color32, Pos2, Rect, Vec2};
+use crate::app::{FlowchartApp, ACCENT, SURFACE0, SURFACE1, TEXT_DIM, TEXT_SECONDARY};
+use crate::model::*;
+
+impl FlowchartApp {
+    // -----------------------------------------------------------------------
+    // Zoom indicator pill (fades after zoom changes)
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_zoom_indicator(&mut self, ctx: &egui::Context) {
+        let current_zoom = self.effective_zoom();
+        let now = ctx.input(|i| i.time);
+        if (current_zoom - self.last_zoom).abs() > 0.001 {
+            self.zoom_indicator_time = Some(now);
+            self.last_zoom = current_zoom;
+        }
+        let Some(birth) = self.zoom_indicator_time else { return };
+        let age = (now - birth) as f32;
+        let lifetime = 1.5_f32;
+        if age >= lifetime {
+            self.zoom_indicator_time = None;
+            return;
+        }
+        ctx.request_repaint();
+        let alpha = ((1.0 - (age / lifetime).powi(2)) * 255.0) as u8;
+        let zoom_pct = (current_zoom * 100.0).round() as i32;
+        let text = format!("{zoom_pct}%");
+        egui::Area::new(egui::Id::new("zoom_indicator"))
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 52.0])
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(ctx, |ui| {
+                let galley = ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        text.clone(),
+                        egui::FontId::proportional(18.0),
+                        Color32::from_rgba_premultiplied(205, 214, 244, alpha),
+                    )
+                });
+                let size = galley.size() + Vec2::new(20.0, 10.0);
+                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                let bg = Color32::from_rgba_premultiplied(30, 30, 46, alpha.saturating_sub(30));
+                ui.painter().rect_filled(rect, egui::CornerRadius::same(8), bg);
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::CornerRadius::same(8),
+                    egui::Stroke::new(
+                        1.0,
+                        Color32::from_rgba_premultiplied(137, 180, 250, alpha / 2),
+                    ),
+                    egui::StrokeKind::Outside,
+                );
+                ui.painter().galley(
+                    Pos2::new(rect.min.x + 10.0, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    Color32::WHITE,
+                );
+            });
+    }
+
+    // -----------------------------------------------------------------------
+    // Find & Replace dialog (Cmd+H)
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_find_replace(&mut self, ctx: &egui::Context) {
+        if !self.show_find_replace {
+            return;
+        }
+        let mut open = self.show_find_replace;
+        let mut do_replace_all = false;
+        egui::Window::new("Find & Replace")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Find:");
+                    ui.text_edit_singleline(&mut self.find_query);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Replace:");
+                    ui.text_edit_singleline(&mut self.replace_query);
+                });
+                ui.add_space(4.0);
+                let count = self
+                    .document
+                    .nodes
+                    .iter()
+                    .filter(|n| {
+                        !self.find_query.is_empty()
+                            && n.display_label()
+                                .to_lowercase()
+                                .contains(&self.find_query.to_lowercase())
+                    })
+                    .count();
+                if !self.find_query.is_empty() {
+                    ui.label(
+                        egui::RichText::new(format!("{count} match(es)"))
+                            .size(10.5)
+                            .color(TEXT_DIM),
+                    );
+                }
+                ui.add_space(4.0);
+                if ui.button("Replace All").clicked() {
+                    do_replace_all = true;
+                }
+            });
+        if do_replace_all && !self.find_query.is_empty() {
+            let find = self.find_query.to_lowercase();
+            let replace = self.replace_query.clone();
+            let mut changed = 0usize;
+            for node in self.document.nodes.iter_mut() {
+                match &mut node.kind {
+                    NodeKind::Shape { label, .. } => {
+                        if label.to_lowercase().contains(&find) {
+                            *label = label.to_lowercase().replace(&find, &replace);
+                            changed += 1;
+                        }
+                    }
+                    NodeKind::StickyNote { text, .. } => {
+                        if text.to_lowercase().contains(&find) {
+                            *text = text.to_lowercase().replace(&find, &replace);
+                            changed += 1;
+                        }
+                    }
+                    NodeKind::Entity { name, .. } => {
+                        if name.to_lowercase().contains(&find) {
+                            *name = name.to_lowercase().replace(&find, &replace);
+                            changed += 1;
+                        }
+                    }
+                    NodeKind::Text { content } => {
+                        if content.to_lowercase().contains(&find) {
+                            *content = content.to_lowercase().replace(&find, &replace);
+                            changed += 1;
+                        }
+                    }
+                }
+            }
+            if changed > 0 {
+                self.history.push(&self.document);
+                self.status_message = Some((
+                    format!("Replaced {changed} node(s)"),
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+        self.show_find_replace = open;
+    }
+
+    // -----------------------------------------------------------------------
+    // Shape picker palette (N key)
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_shape_picker(&mut self, ctx: &egui::Context) {
+        let Some(picker_pos) = self.shape_picker else {
+            return;
+        };
+        let shapes: &[(&str, NodeKind)] = &[
+            (
+                "■ Rect",
+                NodeKind::Shape {
+                    shape: NodeShape::Rectangle,
+                    label: String::new(),
+                    description: String::new(),
+                },
+            ),
+            (
+                "⬮ Round",
+                NodeKind::Shape {
+                    shape: NodeShape::RoundedRect,
+                    label: String::new(),
+                    description: String::new(),
+                },
+            ),
+            (
+                "◆ Diamond",
+                NodeKind::Shape {
+                    shape: NodeShape::Diamond,
+                    label: String::new(),
+                    description: String::new(),
+                },
+            ),
+            (
+                "● Circle",
+                NodeKind::Shape {
+                    shape: NodeShape::Circle,
+                    label: String::new(),
+                    description: String::new(),
+                },
+            ),
+            (
+                "▱ Parallel",
+                NodeKind::Shape {
+                    shape: NodeShape::Parallelogram,
+                    label: String::new(),
+                    description: String::new(),
+                },
+            ),
+            (
+                "⬡ Hexagon",
+                NodeKind::Shape {
+                    shape: NodeShape::Hexagon,
+                    label: String::new(),
+                    description: String::new(),
+                },
+            ),
+            (
+                "📝 Sticky",
+                NodeKind::StickyNote {
+                    text: String::new(),
+                    color: StickyColor::Yellow,
+                },
+            ),
+            ("T Text", NodeKind::Text { content: String::new() }),
+        ];
+        let canvas_pos = self.viewport.screen_to_canvas(picker_pos);
+        let mut chosen: Option<NodeKind> = None;
+        let mut close = false;
+        egui::Window::new("##shape_picker")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_pos(picker_pos)
+            .frame(egui::Frame {
+                fill: SURFACE0,
+                inner_margin: egui::Margin::same(8),
+                stroke: egui::Stroke::new(1.0, SURFACE1),
+                corner_radius: egui::CornerRadius::same(8),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new("Insert node").size(10.0).color(TEXT_DIM));
+                ui.add_space(4.0);
+                for (label, kind) in shapes {
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new(*label).size(12.0))
+                                .min_size(egui::vec2(110.0, 22.0)),
+                        )
+                        .clicked()
+                    {
+                        chosen = Some(kind.clone());
+                        close = true;
+                    }
+                }
+                if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+                    close = true;
+                }
+                if ui
+                    .ctx()
+                    .pointer_latest_pos()
+                    .map_or(false, |_p| !ui.ctx().is_pointer_over_area())
+                {
+                    close = true;
+                }
+            });
+        if let Some(kind) = chosen {
+            let w = 120.0_f32;
+            let h = 70.0_f32;
+            let pos = egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0);
+            let node = Node {
+                id: NodeId::new(),
+                kind,
+                position: [pos.x, pos.y],
+                size: [w, h],
+                z_offset: 0.0,
+                style: NodeStyle::default(),
+                pinned: false,
+                tag: None,
+                collapsed: false,
+                uncollapsed_size: None,
+                url: String::new(),
+                locked: false,
+                comment: String::new(),
+                is_frame: false,
+                frame_color: default_frame_color(),
+                icon: String::new(),
+            };
+            let id = node.id;
+            self.document.nodes.push(node);
+            self.selection.select_node(id);
+            self.focus_label_edit = true;
+            self.history.push(&self.document);
+            self.status_message = Some(("Node inserted".to_string(), std::time::Instant::now()));
+        }
+        if close {
+            self.shape_picker = None;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Inline edge label editor (double-click edge)
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_edge_label_editor(&mut self, ctx: &egui::Context) {
+        let Some((edge_id, pos)) = self.inline_edge_edit else {
+            return;
+        };
+        let mut close_editor = false;
+        egui::Window::new("##edge_label_editor")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_pos(pos)
+            .frame(egui::Frame {
+                fill: SURFACE0,
+                inner_margin: egui::Margin::same(6),
+                stroke: egui::Stroke::new(1.0, ACCENT),
+                corner_radius: egui::CornerRadius::same(6),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Edge label").size(10.0).color(TEXT_DIM));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let char_count = self
+                            .document
+                            .find_edge(&edge_id)
+                            .map(|e| e.label.chars().count())
+                            .unwrap_or(0);
+                        let count_color = if char_count > 45 {
+                            Color32::from_rgb(243, 139, 168)
+                        } else {
+                            TEXT_DIM
+                        };
+                        ui.label(
+                            egui::RichText::new(format!("{}/50", char_count))
+                                .size(9.5)
+                                .color(count_color),
+                        );
+                    });
+                });
+                if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+                    if edge.label.chars().count() > 50 {
+                        let trimmed: String = edge.label.chars().take(50).collect();
+                        edge.label = trimmed;
+                    }
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut edge.label)
+                            .desired_width(180.0)
+                            .hint_text("e.g. depends on, owns, sends to…")
+                            .font(egui::FontId::proportional(13.0)),
+                    );
+                    resp.request_focus();
+                    if ui.ctx().input(|i| {
+                        i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
+                    }) {
+                        close_editor = true;
+                        self.history.push(&self.document);
+                    }
+                } else {
+                    close_editor = true;
+                }
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Enter")
+                            .monospace()
+                            .size(9.5)
+                            .color(ACCENT.gamma_multiply(0.7)),
+                    );
+                    ui.label(egui::RichText::new("save").size(9.5).color(TEXT_DIM));
+                    ui.label(egui::RichText::new("·").size(9.5).color(TEXT_DIM));
+                    ui.label(
+                        egui::RichText::new("Esc")
+                            .monospace()
+                            .size(9.5)
+                            .color(ACCENT.gamma_multiply(0.7)),
+                    );
+                    ui.label(egui::RichText::new("cancel").size(9.5).color(TEXT_DIM));
+                });
+            });
+        if close_editor {
+            self.inline_edge_edit = None;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Comment editor (Cmd+M)
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_comment_editor(&mut self, ctx: &egui::Context) {
+        let Some(node_id) = self.comment_editing else {
+            return;
+        };
+        let mut close_comment = false;
+        let node_screen_pos = self
+            .document
+            .find_node(&node_id)
+            .map(|n| {
+                let p = self.viewport.canvas_to_screen(n.pos());
+                let s = n.size_vec() * self.viewport.zoom;
+                Pos2::new(p.x + s.x + 8.0, p.y)
+            })
+            .unwrap_or(Pos2::new(200.0, 200.0));
+        egui::Window::new("##comment_editor")
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_pos(node_screen_pos)
+            .frame(egui::Frame {
+                fill: Color32::from_rgba_unmultiplied(249, 226, 175, 240),
+                inner_margin: egui::Margin::same(8),
+                stroke: egui::Stroke::new(
+                    1.5,
+                    Color32::from_rgba_unmultiplied(200, 175, 100, 255),
+                ),
+                corner_radius: egui::CornerRadius::same(8),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new("💬 Comment")
+                        .size(10.0)
+                        .color(Color32::from_rgba_unmultiplied(80, 60, 20, 255)),
+                );
+                if let Some(node) = self.document.find_node_mut(&node_id) {
+                    let resp = ui.add(
+                        egui::TextEdit::multiline(&mut node.comment)
+                            .desired_width(200.0)
+                            .desired_rows(3)
+                            .font(egui::FontId::proportional(12.0))
+                            .text_color(Color32::from_rgba_unmultiplied(60, 40, 10, 255)),
+                    );
+                    resp.request_focus();
+                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close_comment = true;
+                        self.history.push(&self.document);
+                    }
+                } else {
+                    close_comment = true;
+                }
+                ui.horizontal(|ui| {
+                    if ui.small_button("✓ Done").clicked() {
+                        close_comment = true;
+                        self.history.push(&self.document);
+                    }
+                    if ui.small_button("🗑 Clear").clicked() {
+                        if let Some(node) = self.document.find_node_mut(&node_id) {
+                            node.comment.clear();
+                        }
+                        close_comment = true;
+                        self.history.push(&self.document);
+                    }
+                });
+            });
+        if close_comment {
+            self.comment_editing = None;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Keyboard shortcuts panel (F1 / ?)
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_shortcuts_panel(&mut self, ctx: &egui::Context) {
+        if !self.show_shortcuts_panel {
+            return;
+        }
+        let mut open = self.show_shortcuts_panel;
+        egui::Window::new("Keyboard Shortcuts")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .min_width(460.0)
+            .show(ctx, |ui| {
+                type Section = (&'static str, &'static [(&'static str, &'static str)]);
+                let sections: &[Section] = &[
+                    (
+                        "Tools",
+                        &[
+                            ("V", "Select tool"),
+                            ("E", "Connect / edge tool"),
+                            ("N", "Insert shape picker"),
+                            ("R / C / D", "Quick-create Rect / Circle / Diamond"),
+                            ("Double-click canvas", "Create node"),
+                            ("Double-click node", "Edit label"),
+                            ("Right-click", "Context menu"),
+                        ],
+                    ),
+                    (
+                        "Selection",
+                        &[
+                            ("⌘A", "Select all"),
+                            ("Escape", "Deselect"),
+                            ("Del / Backspace", "Delete selected"),
+                            ("Arrow keys", "Nudge 1 px  (⇧ = 10 px)"),
+                            ("⇧H / ⇧V", "Distribute selected horizontally / vertically"),
+                            ("⌘G", "Group into frame"),
+                        ],
+                    ),
+                    (
+                        "Edit",
+                        &[
+                            ("⌘Z", "Undo"),
+                            ("⌘⇧Z", "Redo"),
+                            ("⌘C / ⌘V", "Copy / Paste (nodes + edges)"),
+                            ("⌘D", "Duplicate"),
+                            ("⌘B / ⌘I", "Toggle bold / italic"),
+                            ("⌘⇧H", "Collapse / expand selected nodes"),
+                            ("⌘L", "Auto-layout (hierarchical)"),
+                            ("⌘⇧> / ⌘⇧<", "Increase / decrease font size"),
+                        ],
+                    ),
+                    (
+                        "View",
+                        &[
+                            ("⌘1", "Fit all to view"),
+                            ("⌘2", "Zoom to selection"),
+                            ("⌘= / ⌘-", "Zoom in / out"),
+                            ("⌘0", "Reset zoom to 100%"),
+                            ("F", "Focus mode — dim unconnected nodes"),
+                            ("⇧T", "Toggle dark/light mode"),
+                            ("G", "Toggle grid"),
+                            (
+                                "S",
+                                "Toggle snap · S with edge selected = cycle edge style",
+                            ),
+                            ("O", "Bird's-eye overview"),
+                            ("Alt+hover", "Show distance rulers"),
+                        ],
+                    ),
+                    (
+                        "Search & Navigate",
+                        &[
+                            ("⌘F", "Search nodes (spotlight)"),
+                            ("↑ / ↓", "Navigate search results"),
+                            ("Enter", "Jump to search result"),
+                            ("⌘⇧1–5", "Save viewport bookmark"),
+                            ("⇧1–5", "Jump to bookmark"),
+                        ],
+                    ),
+                    (
+                        "Help",
+                        &[
+                            ("F1 / ?", "This shortcuts panel"),
+                            ("⌘K", "Command palette"),
+                            ("[", "Collapse / expand left toolbar"),
+                            ("]", "Collapse / expand right panel"),
+                            ("⇧R", "Toggle coordinate rulers"),
+                        ],
+                    ),
+                ];
+                egui::ScrollArea::vertical()
+                    .max_height(420.0)
+                    .show(ui, |ui| {
+                        for (section, items) in sections {
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new(*section)
+                                    .size(10.0)
+                                    .color(TEXT_DIM)
+                                    .strong(),
+                            );
+                            egui::Grid::new(format!("sc_{}", section))
+                                .striped(true)
+                                .num_columns(2)
+                                .spacing([16.0, 3.0])
+                                .show(ui, |ui| {
+                                    for (key, desc) in *items {
+                                        ui.label(
+                                            egui::RichText::new(*key)
+                                                .monospace()
+                                                .color(ACCENT)
+                                                .size(11.5),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(*desc)
+                                                .size(11.5)
+                                                .color(TEXT_SECONDARY),
+                                        );
+                                        ui.end_row();
+                                    }
+                                });
+                        }
+                    });
+            });
+        self.show_shortcuts_panel = open;
+    }
+}
