@@ -96,6 +96,16 @@ use std::collections::HashMap;
 ///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
 ///   `{note:text}` / `{comment:text}` — annotation shown as tooltip when hovering the edge
 ///
+/// ### `## Style` section
+/// ```text
+/// ## Style
+/// primary = {fill:blue} {highlight}
+/// danger  = {fill:red} {bold}
+/// muted   = fill:teal opacity:0.7
+/// ```
+/// Named style templates expanded into full tag sets. Use `{style_name}` in any node line.
+/// Value can use `{}` tags explicitly or bare `key:value` pairs (auto-wrapped in `{}`).
+///
 /// ### `## Palette` section
 /// ```text
 /// ## Palette
@@ -131,10 +141,15 @@ use std::collections::HashMap;
 /// snap = true
 /// grid-size = 20
 /// zoom = 1.5
+/// flow = LR
+/// view = 3d
+/// camera_yaw = -0.4
+/// camera_pitch = 0.6
 /// layer0 = Database
 /// layer1 = API
 /// ```
 /// Import-time viewport hints applied when the spec is loaded into the app.
+/// `view = 3d` opens in 3D view; `camera_yaw/pitch` set the initial 3D camera angle.
 /// Pre-scan `## Palette` sections and return a palette map + pre-expanded input string
 /// where `{fill:name}` and `{color:name}` are replaced with `{fill:#hex}` / `{color:#hex}`.
 fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
@@ -190,9 +205,77 @@ fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
     (out, palette)
 }
 
+/// Pre-scan `## Style` sections and return an expanded string where
+/// `{style_name}` references in node lines are replaced with the full tag set.
+///
+/// Example:
+/// ```text
+/// ## Style
+/// primary = {fill:blue} {highlight}
+/// danger  = {fill:red} {bold}
+/// ```
+/// A node `- [api] API {primary}` becomes `- [api] API {fill:blue} {highlight}`.
+fn expand_styles(input: &str) -> String {
+    let mut styles: HashMap<String, String> = HashMap::new();
+    let mut in_style = false;
+
+    // First pass: collect style definitions
+    for line in input.lines() {
+        let t = line.trim();
+        if t.starts_with("## ") {
+            let h = t[3..].trim().to_lowercase();
+            in_style = matches!(h.as_str(), "style" | "styles" | "template" | "templates" | "vars" | "macros");
+            continue;
+        }
+        if !in_style || t.is_empty() || t.starts_with("//") { continue; }
+        // Parse: name = {tag1} {tag2} ...  or  name = tag1 tag2 ...
+        let sep = if t.contains('=') { '=' } else if t.contains(':') { ':' } else { continue; };
+        if let Some(pos) = t.find(sep) {
+            let name = t[..pos].trim().to_lowercase();
+            if name.is_empty() { continue; }
+            let val = t[pos+1..].trim();
+            // Normalize: if val doesn't contain {}, wrap each space-separated token in {}
+            let expansion = if val.contains('{') {
+                val.to_string()
+            } else {
+                val.split_whitespace()
+                    .map(|tok| format!("{{{}}}", tok))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            styles.insert(name, expansion);
+        }
+    }
+    if styles.is_empty() { return input.to_string(); }
+
+    // Second pass: expand {style_name} on non-style-section lines
+    let mut out = String::with_capacity(input.len() + 256);
+    let mut skip = false;
+    for line in input.lines() {
+        let t = line.trim();
+        if t.starts_with("## ") {
+            let h = t[3..].trim().to_lowercase();
+            skip = matches!(h.as_str(), "style" | "styles" | "template" | "templates" | "vars" | "macros");
+            out.push_str(line); out.push('\n');
+            continue;
+        }
+        if skip { out.push_str(line); out.push('\n'); continue; }
+
+        // Expand any {style_name} references
+        let mut expanded = line.to_string();
+        for (name, tags) in &styles {
+            let pattern = format!("{{{}}}", name);
+            expanded = expanded.replace(&pattern, tags);
+        }
+        out.push_str(&expanded); out.push('\n');
+    }
+    out
+}
+
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
-    // Pre-expand palette color names
-    let (expanded_input, _palette_map) = expand_palette(input);
+    // Pre-expand style templates, then palette color names
+    let input_with_styles = expand_styles(input);
+    let (expanded_input, _palette_map) = expand_palette(&input_with_styles);
     let input = expanded_input.as_str();
 
     let mut doc = FlowchartDocument::default();
@@ -250,6 +333,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "groups" | "group" | "clusters" => Section::Groups,
                 "config" | "settings" | "meta" => Section::Config,
                 "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
+                "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
                 "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None },
                 _ => {
                     // Check for "Layer N" or "Layer N: Name" patterns
@@ -2542,5 +2626,32 @@ success = #166534
             "expected a Backend frame, got: {:?}", labels);
         assert!(labels.iter().any(|&l| l.to_lowercase().contains("frontend")),
             "expected a Frontend frame, got: {:?}", labels);
+    }
+
+    #[test]
+    fn test_style_section_expands_templates() {
+        let input = r#"
+## Style
+primary = {fill:blue} {highlight}
+danger   = {fill:red} {bold}
+muted    = fill:teal opacity:0.7
+
+## Nodes
+- [a] API {primary}
+- [b] Error {danger}
+- [c] Helper {muted}
+"#;
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 3);
+        let a = doc.nodes.iter().find(|n| n.display_label() == "API").unwrap();
+        // {primary} = {fill:blue} {highlight}
+        assert!(a.highlight, "API node should be highlighted via primary style");
+        assert_eq!(a.style.fill_color, [137, 180, 250, 255], "primary fill should be blue");
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Error").unwrap();
+        // {danger} = {fill:red} {bold}
+        assert!(b.style.bold, "Error node should be bold via danger style");
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Helper").unwrap();
+        // {muted} = fill:teal opacity:0.7 → wrapped as {fill:teal} {opacity:0.7}
+        assert_eq!(c.style.fill_color, [148, 226, 213, 255], "muted fill should be teal");
     }
 }
