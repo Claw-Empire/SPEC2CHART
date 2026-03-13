@@ -45,6 +45,9 @@ use std::collections::HashMap;
 ///
 /// ### Supported node tags:
 ///   `{diamond}` `{circle}` `{rectangle}` `{parallelogram}` `{hexagon}` `{connector}` `{text}` `{entity}`
+///   Semantic presets (set shape + fill color):
+///   `{server}` `{database}` `{cloud}` `{user}` `{service}` `{queue}` `{cache}` `{internet}`
+///   `{decision}` `{start}` `{end}` `{process}` `{task}` `{load-balancer}`
 ///   `{z:N}` — 3D layer offset (positive = closer to camera)
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
 ///   `{pinned}` — pin node to canvas position
@@ -56,6 +59,7 @@ use std::collections::HashMap;
 ///   `{fill:#rrggbb}` — fill color as CSS hex (e.g. `{fill:#1e6f5c}`)
 ///   `{border-color:red}` or `{stroke:red}` — border/stroke color
 ///   `{text-color:white}` or `{color:white}` — text color override
+///   `{tooltip:text}` or `{tip:text}` or `{desc:text}` — inline description/tooltip text
 ///   `{size:200x80}` — shorthand for `{w:200} {h:80}`
 ///   `{pos:X,Y}` — shorthand for `{x:X} {y:Y}` (also pins the node)
 ///   `{w:200}` — explicit width in canvas units
@@ -83,6 +87,7 @@ use std::collections::HashMap;
 ///   `{to:label}` — target endpoint label
 ///   `{c-src:1}` — source cardinality (1 / 0..1 / 1..N / 0..N)
 ///   `{c-tgt:0..N}` — target cardinality (1 / 0..1 / 1..N / 0..N)
+///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
 ///
 /// ### `## Groups` section
 /// ```text
@@ -640,6 +645,12 @@ fn parse_flow_line_chain(
                 if let Ok(b) = etag[5..].trim().parse::<f32>() {
                     edge.style.curve_bend = b.clamp(-1.0, 1.0);
                 }
+            } else if etag.starts_with("weight:") || etag.starts_with("w:") {
+                let v = if etag.starts_with("weight:") { &etag[7..] } else { &etag[2..] };
+                if let Ok(w) = v.trim().parse::<f32>() {
+                    // weight 1=1.5px, 2=3px, 3=5px, 4+=7px
+                    edge.style.width = (w * 1.8).clamp(1.0, 9.0);
+                }
             } else if etag.starts_with("from:") {
                 edge.source_label = etag[5..].trim().to_string();
             } else if etag.starts_with("to:") {
@@ -722,6 +733,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut url_override: Option<String> = None;
     let mut border_color: Option<[u8; 4]> = None;
     let mut text_color: Option<[u8; 4]> = None;
+    let mut tooltip_text: Option<String> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -794,6 +806,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag.starts_with("url:") || tag.starts_with("link:") {
             let prefix_len = if tag.starts_with("url:") { 4 } else { 5 };
             url_override = Some(tag[prefix_len..].trim().to_string());
+        } else if tag.starts_with("tooltip:") || tag.starts_with("tip:") || tag.starts_with("desc:") {
+            let prefix = if tag.starts_with("tooltip:") { 8 } else if tag.starts_with("tip:") { 4 } else { 5 };
+            tooltip_text = Some(tag[prefix..].trim().to_string());
         } else if tag.starts_with("border-color:") || tag.starts_with("stroke:") {
             let v = if tag.starts_with("border-color:") { &tag[13..] } else { &tag[7..] };
             border_color = tag_to_fill_color(v.trim());
@@ -808,6 +823,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             italic = true;
         } else if tag == "dashed-border" || tag == "dashed_border" || tag == "border-dashed" {
             dashed_border = true;
+        } else if let Some((preset_shape, preset_color)) = tag_to_preset(tag) {
+            // Semantic preset: sets shape AND fill color at once
+            shape = preset_shape;
+            if fill_color.is_none() {
+                fill_color = Some(preset_color);
+            }
         } else {
             shape = tag_to_shape(tag);
         }
@@ -879,6 +900,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(u) = url_override { node.url = u; }
     if let Some(bc) = border_color { node.style.border_color = bc; }
     if let Some(tc) = text_color { node.style.text_color = tc; }
+    if let Some(tt) = tooltip_text {
+        if let NodeKind::Shape { description, .. } = &mut node.kind {
+            if description.is_empty() { *description = tt; }
+        }
+    }
 
     Ok((id, node))
 }
@@ -903,7 +929,8 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                         let val = raw[colon + 1..].trim();
                         match key.as_str() {
                             // Preserve original case for these values
-                            "from" | "to" | "icon" | "url" | "link" => {
+                            "from" | "to" | "icon" | "url" | "link"
+                            | "tooltip" | "tip" | "desc" => {
                                 format!("{}:{}", key, val)
                             }
                             // Preserve fill/color values that start with '#' (hex colors)
@@ -1100,6 +1127,36 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "hexagon" | "hex" | "process" => NodeShape::Hexagon,
         "connector" | "api" | "interface" | "protocol" | "gateway" => NodeShape::Connector,
         _ => NodeShape::RoundedRect,
+    }
+}
+
+/// Semantic preset → (shape, fill_color). Returns None if tag is not a preset.
+fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
+    match tag {
+        // Infrastructure
+        "server"    => Some((NodeShape::Rectangle,   [243, 139, 168, 255])), // red
+        "database"  | "db" | "storage"
+                    => Some((NodeShape::Circle,      [137, 180, 250, 255])), // blue
+        "cloud"     => Some((NodeShape::Hexagon,     [148, 226, 213, 255])), // teal
+        "user"      | "actor" | "person"
+                    => Some((NodeShape::Circle,      [203, 166, 247, 255])), // purple
+        "service"   | "microservice"
+                    => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green
+        "queue"     | "mq" | "broker"
+                    => Some((NodeShape::Parallelogram, [249, 226, 175, 255])), // yellow
+        "load-balancer" | "lb" | "proxy"
+                    => Some((NodeShape::Hexagon,     [245, 194, 231, 255])), // pink
+        "cache"     | "redis"
+                    => Some((NodeShape::RoundedRect, [249, 226, 175, 255])), // yellow
+        "internet"  | "external"
+                    => Some((NodeShape::Parallelogram, [137, 180, 250, 255])), // blue
+        "decision"  | "branch"
+                    => Some((NodeShape::Diamond,     [249, 226, 175, 255])), // yellow
+        "start"     | "end" | "terminal"
+                    => Some((NodeShape::Circle,      [166, 227, 161, 255])), // green
+        "process"   | "task" | "step"
+                    => Some((NodeShape::RoundedRect, [137, 180, 250, 255])), // blue
+        _ => None,
     }
 }
 
