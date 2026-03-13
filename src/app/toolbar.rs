@@ -472,6 +472,8 @@ impl FlowchartApp {
                             ("Edge", "{arrow:open/circle/none} {bend:0.3}"),
                             ("Edge", "{color:blue} {from:label} {to:label}"),
                             ("Cardinality", "{c-src:1} {c-tgt:0..N}"),
+                            ("Ports", "{src-port:top/bottom/left/right} {tgt-port:...}"),
+                            ("Misc", "{locked} {url:https://...}"),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);

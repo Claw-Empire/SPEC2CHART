@@ -525,8 +525,24 @@ fn parse_flow_line_chain(
         } else {
             (source_node_id, target_node_id)
         };
-        let source = Port { node_id: *actual_source_id, side: PortSide::Bottom };
-        let target = Port { node_id: *actual_target_id, side: PortSide::Top };
+        let mut src_side = PortSide::Bottom;
+        let mut tgt_side = PortSide::Top;
+        // Pre-scan for port overrides before creating port structs
+        for etag in &edge_tags {
+            if etag.starts_with("src-port:") || etag.starts_with("sport:") {
+                let key_len = if etag.starts_with("src-port:") { 9 } else { 6 };
+                if let Some(ps) = tag_to_port_side(&etag[key_len..]) {
+                    src_side = ps;
+                }
+            } else if etag.starts_with("tgt-port:") || etag.starts_with("tport:") {
+                let key_len = if etag.starts_with("tgt-port:") { 9 } else { 6 };
+                if let Some(ps) = tag_to_port_side(&etag[key_len..]) {
+                    tgt_side = ps;
+                }
+            }
+        }
+        let source = Port { node_id: *actual_source_id, side: src_side };
+        let target = Port { node_id: *actual_target_id, side: tgt_side };
         let mut edge = Edge::new(source, target);
         edge.label = label.clone();
         // Apply edge style tags
@@ -547,6 +563,9 @@ fn parse_flow_line_chain(
                 edge.source_cardinality = parse_cardinality(etag[6..].trim());
             } else if etag.starts_with("c-tgt:") {
                 edge.target_cardinality = parse_cardinality(etag[6..].trim());
+            } else if etag.starts_with("src-port:") || etag.starts_with("sport:")
+                    || etag.starts_with("tgt-port:") || etag.starts_with("tport:") {
+                // Already handled above
             } else {
                 match etag.as_str() {
                     "dashed" | "dash" => edge.style.dashed = true,
@@ -1060,6 +1079,17 @@ fn cardinality_str(c: &Cardinality) -> Option<&'static str> {
         Cardinality::ZeroOrOne => Some("0..1"),
         Cardinality::OneOrMany => Some("1..N"),
         Cardinality::ZeroOrMany => Some("0..N"),
+    }
+}
+
+/// Parse a port side name into a PortSide enum value.
+fn tag_to_port_side(s: &str) -> Option<PortSide> {
+    match s.trim().to_lowercase().as_str() {
+        "top" | "t" => Some(PortSide::Top),
+        "bottom" | "bot" | "b" => Some(PortSide::Bottom),
+        "left" | "l" => Some(PortSide::Left),
+        "right" | "r" => Some(PortSide::Right),
+        _ => None,
     }
 }
 
