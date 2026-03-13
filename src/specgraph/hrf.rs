@@ -77,6 +77,8 @@ use std::collections::HashMap;
 ///   `{shadow}` — drop shadow effect
 ///   `{highlight}` / `{pulse}` / `{starred}` / `{important}` — slow amber pulsing ring (important node marker)
 ///   `{glow}` / `{neon}` — neon glow effect on node border
+///   `{shape:circle}` / `{type:diamond}` / `{kind:hexagon}` — explicit property-style shape (same as shorthand)
+///   `{status:done}` / `{status:wip}` / `{status:blocked}` — property-style status (same as shorthand)
 ///   `{done}` / `{complete}` — progress=100%, Ok badge (green)
 ///   `{wip}` / `{in-progress}` / `{doing}` — progress=50%, Info badge (blue)
 ///   `{review}` / `{in-review}` — progress=75%, Warning badge (yellow)
@@ -1980,6 +1982,40 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
         } else if tag == "glow" || tag == "neon" || tag == "glow-node" {
             node_glow = true;
+        } else if tag.starts_with("shape:") || tag.starts_with("type:") || tag.starts_with("kind:") {
+            // {shape:circle} / {type:diamond} / {kind:hexagon} — explicit property-style shape
+            let colon = tag.find(':').unwrap();
+            let val = tag[colon+1..].trim();
+            shape = tag_to_shape(val);
+        } else if tag.starts_with("status:") {
+            // {status:done} / {status:wip} / {status:blocked} etc — property-style status
+            let val = tag[7..].trim();
+            // Re-dispatch to status shorthands
+            match val {
+                "done" | "complete" | "completed" | "finished" => {
+                    progress = 1.0;
+                    if node_tag.is_none() { node_tag = Some(NodeTag::Ok); }
+                }
+                "wip" | "in-progress" | "doing" | "active" => {
+                    if progress < 0.01 { progress = 0.5; }
+                    if node_tag.is_none() { node_tag = Some(NodeTag::Info); }
+                }
+                "review" | "in-review" | "reviewing" => {
+                    if progress < 0.01 { progress = 0.75; }
+                    if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+                }
+                "blocked" | "stuck" | "failed" | "error" => {
+                    if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
+                }
+                "todo" | "pending" | "backlog" | "queued" => {
+                    if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+                }
+                other => {
+                    if let Some(nt) = tag_to_node_tag(other) {
+                        node_tag = Some(nt);
+                    }
+                }
+            }
         } else if tag == "tier-color" || tag == "auto-color" || tag == "tint" || tag == "tier-tint" {
             // {tier-color}: auto-assign fill based on z-tier (applied after all tags)
             tier_color_tag = true;
