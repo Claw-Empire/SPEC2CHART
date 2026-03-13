@@ -446,16 +446,17 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             Section::Flow => {
                 if !trimmed.is_empty() {
-                    // Expand multi-target shorthand: `a -> [b, c, d] {tags}` → multiple lines
-                    if let Some(expanded) = expand_multi_target(trimmed) {
-                        for expanded_line in &expanded {
-                            let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, line_num)?;
-                            for edge in edges {
-                                doc.edges.push(edge);
-                            }
-                        }
+                    // Expand multi-source: `[a, b] -> target {tags}` → multiple lines
+                    // Expand multi-target: `source -> [a, b, c] {tags}` → multiple lines
+                    let lines_to_parse: Vec<String> = if let Some(expanded) = expand_multi_source(trimmed) {
+                        expanded
+                    } else if let Some(expanded) = expand_multi_target(trimmed) {
+                        expanded
                     } else {
-                        let edges = parse_flow_line_chain(trimmed, &id_map, line_num)?;
+                        vec![trimmed.to_string()]
+                    };
+                    for expanded_line in &lines_to_parse {
+                        let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, line_num)?;
                         for edge in edges {
                             doc.edges.push(edge);
                         }
@@ -1198,6 +1199,46 @@ fn expand_multi_target(line: &str) -> Option<Vec<String>> {
                 format!("{} {} {} {}", source_part, arrow, t, tail)
             }
         })
+        .collect();
+    Some(expanded)
+}
+
+/// Expand a multi-source shorthand line into individual lines.
+///
+/// `[web, mobile] -> api {thick}` expands to:
+/// ```text
+/// web -> api {thick}
+/// mobile -> api {thick}
+/// ```
+///
+/// Returns `None` if the line does not use multi-source syntax.
+fn expand_multi_source(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with('[') { return None; }
+
+    let close = trimmed.find(']')?;
+    let ids_str = &trimmed[1..close];
+    let after_bracket = trimmed[close + 1..].trim_start();
+
+    // Must be followed by an arrow
+    let arrow = if after_bracket.starts_with("-->") { "-->" }
+        else if after_bracket.starts_with("<->")  { "<->" }
+        else if after_bracket.starts_with("<--")  { "<--" }
+        else if after_bracket.starts_with("->")   { "->"  }
+        else { return None; };
+
+    let rest = after_bracket[arrow.len()..].trim_start(); // target + any tags
+
+    let sources: Vec<&str> = ids_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if sources.is_empty() { return None; }
+
+    // Preserve any leading whitespace from original line (for indented lines)
+    let indent_len = line.len() - trimmed.len();
+    let indent = &line[..indent_len];
+
+    let expanded: Vec<String> = sources
+        .into_iter()
+        .map(|src| format!("{}{} {} {}", indent, src, arrow, rest))
         .collect();
     Some(expanded)
 }
@@ -2873,5 +2914,38 @@ api -> worker
         // IDs are slugified from display labels: "pg" → "postgresql", "redis" → "redis"
         assert!(exported.contains("[postgresql, redis]") || exported.contains("[redis, postgresql]"),
             "expected multi-target in export:\n{}", exported);
+    }
+
+    #[test]
+    fn test_multi_source_shorthand_parse() {
+        let input = r#"
+# Multi Source
+
+## Nodes
+- [web] Web App
+- [mobile] Mobile App
+- [api] API Service
+
+## Flow
+[web, mobile] -> api {thick}
+"#;
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 3);
+        // [web, mobile] -> api expands to 2 edges: web->api and mobile->api
+        assert_eq!(doc.edges.len(), 2, "expected 2 edges, got {}", doc.edges.len());
+
+        let web    = doc.nodes.iter().find(|n| n.display_label() == "Web App").unwrap().id;
+        let mobile = doc.nodes.iter().find(|n| n.display_label() == "Mobile App").unwrap().id;
+        let api    = doc.nodes.iter().find(|n| n.display_label() == "API Service").unwrap().id;
+
+        assert!(doc.edges.iter().any(|e| e.source.node_id == web && e.target.node_id == api),
+            "expected web->api edge");
+        assert!(doc.edges.iter().any(|e| e.source.node_id == mobile && e.target.node_id == api),
+            "expected mobile->api edge");
+
+        // Both edges should be thick
+        for edge in &doc.edges {
+            assert!(edge.style.width > 4.0, "expected thick edge, width={}", edge.style.width);
+        }
     }
 }

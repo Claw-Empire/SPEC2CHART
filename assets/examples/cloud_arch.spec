@@ -65,8 +65,7 @@ worker -> [pg, s3]
 
 // Frontend
 cdn -> web
-web -> lb
-mobile -> lb
+[web, mobile] -> lb
 
 ## Notes
 
