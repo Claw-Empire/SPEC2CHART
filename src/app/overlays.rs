@@ -603,20 +603,31 @@ impl FlowchartApp {
                 .inner_margin(egui::Margin::ZERO))
             .show(ctx, |ui| {
                 // Header bar
+                let mut do_sync = false;
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
                     ui.colored_label(theme.text_primary,
                         egui::RichText::new("Spec Editor").size(13.0).strong());
                     ui.add_space(4.0);
                     ui.colored_label(theme.text_dim,
-                        egui::RichText::new("— edit HRF, canvas updates live").size(10.5));
+                        egui::RichText::new("— edit to update canvas").size(10.5));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
                         if ui.small_button("✕").on_hover_text("Close spec editor  Cmd+E").clicked() {
                             keep_open = false;
                         }
+                        ui.add_space(4.0);
+                        if ui.small_button("↻").on_hover_text("Sync text from current canvas state").clicked() {
+                            do_sync = true;
+                        }
                     });
                 });
+                if do_sync {
+                    let title = self.document.title.clone();
+                    self.spec_editor_text = crate::specgraph::hrf::export_hrf(&self.document, &title);
+                    self.spec_editor_last_edit = None;
+                    self.spec_editor_error = None;
+                }
 
                 // Thin divider
                 let rect = ui.available_rect_before_wrap();
@@ -662,6 +673,26 @@ impl FlowchartApp {
                 if ui2.ctx().input(|i| i.key_pressed(egui::Key::Escape)) && resp.has_focus() {
                     keep_open = false;
                 }
+
+                // Status footer: show node/edge count or pending indicator
+                let n = self.document.nodes.len();
+                let e = self.document.edges.len();
+                let (footer_text, footer_color) = if let Some(_) = self.spec_editor_last_edit {
+                    ("⏱ parsing…".to_string(), theme.text_dim)
+                } else if self.spec_editor_error.is_some() {
+                    ("✗ parse error".to_string(), Color32::from_rgb(243, 139, 168))
+                } else {
+                    (format!("✓  {} nodes  {}  edges", n, e), Color32::from_rgb(166, 227, 161))
+                };
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.colored_label(footer_color, egui::RichText::new(footer_text).size(10.5));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(8.0);
+                        ui.colored_label(theme.text_dim,
+                            egui::RichText::new("Cmd+E to close").size(10.0));
+                    });
+                });
             });
 
         if !keep_open {
