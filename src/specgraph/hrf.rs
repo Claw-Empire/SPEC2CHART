@@ -446,9 +446,19 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             Section::Flow => {
                 if !trimmed.is_empty() {
-                    let edges = parse_flow_line_chain(trimmed, &id_map, line_num)?;
-                    for edge in edges {
-                        doc.edges.push(edge);
+                    // Expand multi-target shorthand: `a -> [b, c, d] {tags}` → multiple lines
+                    if let Some(expanded) = expand_multi_target(trimmed) {
+                        for expanded_line in &expanded {
+                            let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, line_num)?;
+                            for edge in edges {
+                                doc.edges.push(edge);
+                            }
+                        }
+                    } else {
+                        let edges = parse_flow_line_chain(trimmed, &id_map, line_num)?;
+                        for edge in edges {
+                            doc.edges.push(edge);
+                        }
                     }
                 }
             }
@@ -854,9 +864,9 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
 
     // Flow section — edges grouped by source node for human readability
     if !doc.edges.is_empty() {
-        // Build a helper closure to format a single edge line
-        let fmt_edge_line = |edge: &Edge| -> String {
-            let from = id_map.get(&edge.source.node_id).cloned().unwrap_or_default();
+        // Build a helper closure to collect style tags for an edge
+        let edge_style_tags = |edge: &Edge| -> (String, Vec<String>) {
+            // Returns (to_id, style_tags_vec)
             let to = id_map.get(&edge.target.node_id).cloned().unwrap_or_default();
             let mut style_tags: Vec<String> = Vec::new();
             if edge.style.dashed { style_tags.push("dashed".to_string()); }
@@ -899,6 +909,13 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
             if !edge.comment.is_empty() {
                 style_tags.push(format!("note:{}", edge.comment));
             }
+            (to, style_tags)
+        };
+
+        // Build a helper closure to format a single edge line
+        let fmt_edge_line = |edge: &Edge| -> String {
+            let from = id_map.get(&edge.source.node_id).cloned().unwrap_or_default();
+            let (to, style_tags) = edge_style_tags(edge);
             let tag_str = if style_tags.is_empty() {
                 String::new()
             } else {
@@ -943,8 +960,43 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
                 }
             }
             if let Some(edges) = groups.get(sid) {
-                for edge in edges {
-                    out.push_str(&fmt_edge_line(edge));
+                let from = id_map.get(sid).cloned().unwrap_or_default();
+                // Collect (to_id, tag_str, has_label) for each edge
+                let edge_infos: Vec<(String, String, bool)> = edges.iter().map(|edge| {
+                    let (to, style_tags) = edge_style_tags(edge);
+                    let tag_str = if style_tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {{{}}}", style_tags.join("} {"))
+                    };
+                    (to, tag_str, !edge.label.is_empty())
+                }).collect();
+
+                // Try to collapse consecutive edges with same tag_str and no label
+                // into multi-target: `from -> [t1, t2, t3] {tag}`
+                let mut i = 0;
+                while i < edge_infos.len() {
+                    let (ref _to0, ref tag0, has_label0) = edge_infos[i];
+                    // Can only collapse unlabelled edges
+                    if has_label0 {
+                        out.push_str(&fmt_edge_line(edges[i]));
+                        i += 1;
+                        continue;
+                    }
+                    // Look ahead for consecutive edges with same tag_str
+                    let mut j = i + 1;
+                    while j < edge_infos.len() {
+                        let (_, ref tag_j, has_label_j) = edge_infos[j];
+                        if !has_label_j && tag_j == tag0 { j += 1; } else { break; }
+                    }
+                    if j - i >= 2 {
+                        // Collapse i..j into multi-target
+                        let targets: Vec<&str> = edge_infos[i..j].iter().map(|(t, _, _)| t.as_str()).collect();
+                        out.push_str(&format!("{} --> [{}]{}\n", from, targets.join(", "), tag0));
+                    } else {
+                        out.push_str(&fmt_edge_line(edges[i]));
+                    }
+                    i = j;
                 }
             }
             if use_headers {
@@ -1065,6 +1117,49 @@ fn append_description(node: &mut Node, text: &str) {
             // Entity descriptions could be attributes — skip for now
         }
     }
+}
+
+/// Expand a multi-target shorthand line into individual lines.
+///
+/// `api -> [pg, redis, worker] {dashed}` expands to:
+/// ```text
+/// api -> pg {dashed}
+/// api -> redis {dashed}
+/// api -> worker {dashed}
+/// ```
+///
+/// Returns `None` if the line does not use multi-target syntax.
+fn expand_multi_target(line: &str) -> Option<Vec<String>> {
+    // Find the arrow and the opening bracket that follows
+    let arrow = if line.contains("-->") { "-->" }
+        else if line.contains("<->") { "<->" }
+        else if line.contains("<--") { "<--" }
+        else if line.contains("->")  { "->"  }
+        else { return None; };
+
+    let arrow_pos = line.find(arrow)?;
+    let after_arrow = line[arrow_pos + arrow.len()..].trim_start();
+    if !after_arrow.starts_with('[') { return None; }
+
+    let source_part = line[..arrow_pos].trim();
+    let close = after_arrow.find(']')?;
+    let ids_str = &after_arrow[1..close];
+    let tail = after_arrow[close + 1..].trim(); // any tags after ]
+
+    let targets: Vec<&str> = ids_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if targets.is_empty() { return None; }
+
+    let expanded: Vec<String> = targets
+        .into_iter()
+        .map(|t| {
+            if tail.is_empty() {
+                format!("{} {} {}", source_part, arrow, t)
+            } else {
+                format!("{} {} {} {}", source_part, arrow, t, tail)
+            }
+        })
+        .collect();
+    Some(expanded)
 }
 
 /// Parse a flow line that may be a chain: `a --> b --> c` or `a "label" --> b --> c`.
@@ -2694,5 +2789,49 @@ muted    = fill:teal opacity:0.7
         let c = doc.nodes.iter().find(|n| n.display_label() == "Helper").unwrap();
         // {muted} = fill:teal opacity:0.7 → wrapped as {fill:teal} {opacity:0.7}
         assert_eq!(c.style.fill_color, [148, 226, 213, 255], "muted fill should be teal");
+    }
+
+    #[test]
+    fn test_multi_target_shorthand_parse_and_export() {
+        let input = r#"
+# Multi Target
+
+## Nodes
+- [api] API Service {connector}
+- [pg] PostgreSQL {circle}
+- [redis] Redis {circle}
+- [worker] Worker
+
+## Flow
+api -> [pg, redis] {dashed}
+api -> worker
+"#;
+        let doc = parse_hrf(input).unwrap();
+        assert_eq!(doc.nodes.len(), 4);
+        assert_eq!(doc.edges.len(), 3, "expected 3 edges (api->[pg,redis], api->worker), got {}", doc.edges.len());
+
+        let api = doc.nodes.iter().find(|n| n.display_label() == "API Service").unwrap().id;
+        let pg = doc.nodes.iter().find(|n| n.display_label() == "PostgreSQL").unwrap().id;
+        let redis = doc.nodes.iter().find(|n| n.display_label() == "Redis").unwrap().id;
+        let worker = doc.nodes.iter().find(|n| n.display_label() == "Worker").unwrap().id;
+
+        let api_pg = doc.edges.iter().find(|e| e.source.node_id == api && e.target.node_id == pg);
+        assert!(api_pg.is_some(), "expected api->pg edge");
+        assert!(api_pg.unwrap().style.dashed, "api->pg should be dashed");
+
+        let api_redis = doc.edges.iter().find(|e| e.source.node_id == api && e.target.node_id == redis);
+        assert!(api_redis.is_some(), "expected api->redis edge");
+        assert!(api_redis.unwrap().style.dashed, "api->redis should be dashed");
+
+        assert!(doc.edges.iter().any(|e| e.source.node_id == api && e.target.node_id == worker),
+            "expected api->worker edge");
+        assert!(!doc.edges.iter().find(|e| e.source.node_id == api && e.target.node_id == worker)
+            .unwrap().style.dashed, "api->worker should NOT be dashed");
+
+        // Export should collapse the two dashed edges back to multi-target bracket syntax
+        let exported = export_hrf(&doc, "Multi Target");
+        // IDs are slugified from display labels: "pg" → "postgresql", "redis" → "redis"
+        assert!(exported.contains("[postgresql, redis]") || exported.contains("[redis, postgresql]"),
+            "expected multi-target in export:\n{}", exported);
     }
 }
