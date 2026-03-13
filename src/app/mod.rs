@@ -233,6 +233,9 @@ pub struct FlowchartApp {
     pub(crate) spec_editor_last_edit: Option<f64>,
     /// Last parse error from the spec editor (shown as inline warning)
     pub(crate) spec_editor_error: Option<String>,
+    /// 3D zoom momentum: accumulated scroll velocity, decays each frame.
+    /// Positive = zooming in (distance decreasing), negative = zooming out.
+    pub(crate) cam3d_zoom_vel: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,6 +347,7 @@ impl FlowchartApp {
             spec_editor_text: String::new(),
             spec_editor_last_edit: None,
             spec_editor_error: None,
+            cam3d_zoom_vel: 0.0,
         }
     }
 

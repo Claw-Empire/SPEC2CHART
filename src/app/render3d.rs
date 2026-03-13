@@ -400,23 +400,69 @@ impl FlowchartApp {
             ui.ctx().input(|i| i.pointer.hover_pos())
         });
 
-        // Scroll => zoom (only when pointer is over the 3D canvas, not the sidebar).
-        // Consume both scroll fields via input_mut so they cannot leak to the sidebar.
+        // Scroll handling — only when pointer is over the 3D canvas.
+        // Consume both scroll fields so they cannot leak to the sidebar.
         if response.hovered() {
-            let scroll_delta = ui.ctx().input_mut(|i| {
-                let d = if i.raw_scroll_delta.y != 0.0 {
+            let (scroll_y, scroll_x) = ui.ctx().input_mut(|i| {
+                let sy = if i.raw_scroll_delta.y != 0.0 {
                     i.raw_scroll_delta.y
                 } else {
                     i.smooth_scroll_delta.y
                 };
+                let sx = if i.raw_scroll_delta.x != 0.0 {
+                    i.raw_scroll_delta.x
+                } else {
+                    i.smooth_scroll_delta.x
+                };
                 i.raw_scroll_delta    = egui::Vec2::ZERO;
                 i.smooth_scroll_delta = egui::Vec2::ZERO;
-                d
+                (sy, sx)
             });
-            if scroll_delta != 0.0 {
-                let factor = (1.0 - scroll_delta * 0.003).clamp(0.9, 1.1);
-                self.camera3d.distance = (self.camera3d.distance * factor).clamp(100.0, 10000.0);
+
+            // Vertical scroll → zoom-in/out with inertia.
+            // Accumulate into velocity; applied exponentially below.
+            if scroll_y.abs() > 0.1 {
+                self.cam3d_zoom_vel += scroll_y * 0.0018;
             }
+
+            // Horizontal scroll → yaw-orbit the camera (natural trackpad pan feel).
+            // Only when horizontal dominates (avoid diagonal diagonal triggering both).
+            if scroll_x.abs() > scroll_y.abs() * 0.5 && scroll_x.abs() > 0.5 {
+                let orbit_speed = 0.0015;
+                self.camera3d.yaw -= scroll_x * orbit_speed;
+                ui.ctx().request_repaint();
+            }
+        }
+
+        // Apply 3D zoom velocity inertia every frame.
+        // Positive velocity = zoom in (distance decreases).
+        if self.cam3d_zoom_vel.abs() > 0.0002 {
+            // Exponential zoom: equal ratio change at any distance level.
+            // vel > 0 → factor < 1 → distance shrinks (zoom in).
+            let factor = (-self.cam3d_zoom_vel).exp().clamp(0.75, 1.35);
+            let new_distance = (self.camera3d.distance * factor).clamp(100.0, 10000.0);
+
+            // Zoom-to-cursor: keep the world point under the cursor stationary.
+            // Move target toward (inward zoom) or away from (outward zoom)
+            // the cursor's ground-plane intersection point.
+            if let Some(cursor_pos) = pointer_pos {
+                if let Some(cursor_world) = self.camera3d.unproject_to_plane(
+                    cursor_pos, screen_center, screen_size, self.camera3d.target[2],
+                ) {
+                    // approach ∈ (0,1) when zooming in; negative when zooming out.
+                    let approach = (1.0 - factor) * 0.55;
+                    self.camera3d.target[0] += approach * (cursor_world[0] - self.camera3d.target[0]);
+                    self.camera3d.target[1] += approach * (cursor_world[1] - self.camera3d.target[1]);
+                }
+            }
+
+            self.camera3d.distance = new_distance;
+            // Decay: ~85% retained per frame (smooth momentum over ~6 frames)
+            self.cam3d_zoom_vel *= 0.82;
+            if self.cam3d_zoom_vel.abs() < 0.0002 {
+                self.cam3d_zoom_vel = 0.0;
+            }
+            ui.ctx().request_repaint();
         }
 
         // Compute z-layers
@@ -569,10 +615,11 @@ impl FlowchartApp {
                         start_mouse,
                     } => {
                         let delta = mouse - *start_mouse;
-                        let sensitivity = 0.005;
+                        // Screen-relative sensitivity: consistent feel at any canvas size.
+                        let sensitivity = 3.2 / screen_size.x.max(400.0);
                         self.camera3d.yaw = start_offset[0] + delta.x * sensitivity;
                         self.camera3d.pitch = (start_offset[1] - delta.y * sensitivity)
-                            .clamp(0.1, std::f32::consts::FRAC_PI_2 - 0.05);
+                            .clamp(0.08, std::f32::consts::FRAC_PI_2 - 0.04);
                     }
                     DragState::DraggingNode {
                         start_positions,

@@ -140,6 +140,65 @@ impl Camera3D {
 
         Some((Pos2::new(screen_x, screen_y), depth_scale))
     }
+
+    /// Unproject a screen position to a world point on the horizontal plane z = `plane_z`.
+    /// Returns `None` if the camera ray is parallel to the plane or hits from behind.
+    pub fn unproject_to_plane(
+        &self,
+        screen_pos: Pos2,
+        screen_center: Pos2,
+        screen_size: Vec2,
+        plane_z: f32,
+    ) -> Option<[f32; 2]> {
+        let pos = self.position();
+
+        // Camera basis (same as project())
+        let d = [
+            self.target[0] - pos[0],
+            self.target[1] - pos[1],
+            self.target[2] - pos[2],
+        ];
+        let fwd_len = (d[0]*d[0] + d[1]*d[1] + d[2]*d[2]).sqrt();
+        if fwd_len < 0.001 { return None; }
+        let fwd = [d[0]/fwd_len, d[1]/fwd_len, d[2]/fwd_len];
+
+        let world_up = [0.0_f32, -1.0, 0.0];
+        let right = {
+            let r = [
+                fwd[1]*world_up[2] - fwd[2]*world_up[1],
+                fwd[2]*world_up[0] - fwd[0]*world_up[2],
+                fwd[0]*world_up[1] - fwd[1]*world_up[0],
+            ];
+            let len = (r[0]*r[0] + r[1]*r[1] + r[2]*r[2]).sqrt();
+            if len < 0.001 { return None; }
+            [r[0]/len, r[1]/len, r[2]/len]
+        };
+        let up = [
+            right[1]*fwd[2] - right[2]*fwd[1],
+            right[2]*fwd[0] - right[0]*fwd[2],
+            right[0]*fwd[1] - right[1]*fwd[0],
+        ];
+
+        // NDC of screen position
+        let nx = (screen_pos.x - screen_center.x) / (screen_size.x * 0.5);
+        let ny = (screen_pos.y - screen_center.y) / (screen_size.y * 0.5);
+        let aspect = screen_size.x / screen_size.y;
+        let half_fov_tan = (self.fov * 0.5).tan();
+
+        // Ray direction (not normalised — we only need the ratio for plane intersection)
+        let dir = [
+            nx * right[0] * aspect * half_fov_tan + ny * up[0] * half_fov_tan + fwd[0],
+            nx * right[1] * aspect * half_fov_tan + ny * up[1] * half_fov_tan + fwd[1],
+            nx * right[2] * aspect * half_fov_tan + ny * up[2] * half_fov_tan + fwd[2],
+        ];
+
+        // Intersect with z = plane_z
+        if dir[2].abs() < 0.0001 { return None; }
+        let t = (plane_z - pos[2]) / dir[2];
+        if t < 0.0 { return None; }
+
+        Some([pos[0] + t * dir[0], pos[1] + t * dir[1]])
+    }
 }
 
 /// Compute z-layer depths for nodes using BFS from root nodes.
