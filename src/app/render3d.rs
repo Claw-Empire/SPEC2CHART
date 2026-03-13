@@ -1193,6 +1193,22 @@ impl FlowchartApp {
             );
         }
 
+        // Highlight ring: slow amber pulse for important nodes
+        if node.highlight && !node.is_frame {
+            let time = painter.ctx().input(|i| i.time);
+            let breath = ((time * std::f64::consts::PI).sin() as f32) * 0.3 + 0.7;
+            let expand = (4.0 + breath * 2.5) * scale;
+            let glow_fill = Color32::from_rgba_unmultiplied(255, 185, 0, (breath * 18.0 * opacity) as u8);
+            painter.rect_filled(screen_rect.expand(expand + 2.0), CornerRadius::same(6), glow_fill);
+            painter.rect_stroke(
+                screen_rect.expand(expand),
+                CornerRadius::same(5),
+                Stroke::new(1.5 * scale.sqrt().max(0.5), Color32::from_rgba_unmultiplied(255, 200, 50, (breath * 160.0 * opacity) as u8)),
+                StrokeKind::Outside,
+            );
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        }
+
         // Shadow
         let shadow_offset = Vec2::new(2.0, 3.0) * scale;
         let shadow_rect = screen_rect.translate(shadow_offset);
@@ -1582,6 +1598,25 @@ impl FlowchartApp {
                 display_text,
                 FontId::proportional(font_size),
                 text_color,
+            );
+        }
+
+        // Sublabel (small text below main label)
+        if !node.sublabel.is_empty() && scale > 0.35 {
+            let sub_size = (node.style.font_size * scale * 0.65).clamp(6.0, 12.0);
+            let sub_alpha = (alpha as f32 * 0.62) as u8;
+            let sub_col = Color32::from_rgba_premultiplied(
+                node.style.text_color[0],
+                node.style.text_color[1],
+                node.style.text_color[2],
+                sub_alpha,
+            );
+            painter.text(
+                Pos2::new(screen_rect.center().x, screen_rect.max.y + sub_size * 0.5),
+                Align2::CENTER_TOP,
+                &node.sublabel,
+                FontId::proportional(sub_size),
+                sub_col,
             );
         }
 
