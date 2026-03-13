@@ -580,6 +580,9 @@ impl FlowchartApp {
                             ("Cardinality", "{c-src:1} {c-tgt:0..N}"),
                             ("Ports", "{src-port:top/l/r/bottom} {tgt-port:...}"),
                             ("Arrow aliases", "-> (short) / <-- (reverse) / <-> (bidir)"),
+                            ("Multi-target", "a -> [b, c, d] {tags}  (shared-style fan-out)"),
+                            ("## Style", "primary = {fill:blue} {highlight}  →  use {primary}"),
+                            ("3D cam keys", "1=Iso  2=Top  3=Front  4=Side  (in 3D mode)"),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);
