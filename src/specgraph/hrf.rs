@@ -116,13 +116,17 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         } else {
                             // Strip "— description" and parse the number
                             let num_part = after.split('—').next().unwrap_or(after).trim();
-                            // Support "z:120" or "z=120" or just "1" (layer index)
-                            let num_str = num_part.trim_start_matches("z:").trim_start_matches("z=");
-                            if let Ok(v) = num_str.parse::<f32>() {
-                                // Heuristic: if > 10 treat as raw z offset, otherwise as layer index
-                                if v <= 10.0 { v * 120.0 } else { v }
+                            // Explicit "z=N" or "z:N" → use raw value
+                            if num_part.starts_with("z=") || num_part.starts_with("z:") {
+                                let num_str = &num_part[2..];
+                                num_str.parse::<f32>().unwrap_or(0.0)
                             } else {
-                                0.0
+                                // Plain number: ≤ 10 → layer index (×120), > 10 → raw z
+                                if let Ok(v) = num_part.parse::<f32>() {
+                                    if v <= 10.0 { v * 120.0 } else { v }
+                                } else {
+                                    0.0
+                                }
                             }
                         };
                         Section::Nodes { default_z: z }
@@ -257,7 +261,16 @@ pub fn export_hrf(doc: &FlowchartDocument, title: &str) -> String {
                 .collect();
 
             if use_layers {
-                out.push_str(&format!("## Layer {}\n", section_z));
+                // Use natural index (0,1,2...) when z is a multiple of Z_SPACING (120),
+                // otherwise use explicit "z=N" notation to avoid the index heuristic.
+                let z_spacing = 120.0_f32;
+                let idx = (section_z / z_spacing).round();
+                let is_multiple = (section_z - idx * z_spacing).abs() < 0.5;
+                if is_multiple {
+                    out.push_str(&format!("## Layer {}\n", idx as i32));
+                } else {
+                    out.push_str(&format!("## Layer z={}\n", section_z));
+                }
             } else {
                 out.push_str("## Nodes\n");
             }
@@ -1063,7 +1076,7 @@ a "serves" --> b {dashed}
         let exported = export_hrf(&doc, "Export Test");
         // With multi-layer export, z:50 is expressed as a ## Layer 50 section
         // (rather than inline {z:50} tags on each node).
-        assert!(exported.contains("## Layer 50") || exported.contains("{z:50}"),
+        assert!(exported.contains("## Layer 50") || exported.contains("## Layer z=50") || exported.contains("{z:50}"),
             "expected z:50 info in: {}", exported);
         assert!(exported.contains("{critical}"));
         assert!(exported.contains("{connector}"));
