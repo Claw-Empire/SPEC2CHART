@@ -1803,8 +1803,21 @@ impl FlowchartApp {
                     NodeKind::Text { .. } => " {text}",
                     NodeKind::StickyNote { .. } => "",
                 };
+                // Use semantic tier name when z matches a standard tier
                 let z_hint = if node.z_offset != 0.0 {
-                    format!(" {{z:{:.0}}}", node.z_offset)
+                    let tier_name = match node.z_offset as i32 {
+                        0   => Some("db"),
+                        120 => Some("api"),
+                        240 => Some("frontend"),
+                        360 => Some("edge"),
+                        480 => Some("infra"),
+                        _   => None,
+                    };
+                    if let Some(name) = tier_name {
+                        format!(" {{layer:{}}}", name)
+                    } else {
+                        format!(" {{z:{:.0}}}", node.z_offset)
+                    }
                 } else { String::new() };
                 if !shape_hint.is_empty() || !z_hint.is_empty() {
                     Some(format!("spec: [id] label{}{}", shape_hint, z_hint))
