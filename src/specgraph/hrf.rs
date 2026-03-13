@@ -1643,10 +1643,26 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                 depth_3d = d.clamp(0.0, 400.0);
             }
         } else if tag.starts_with("layer:") || tag.starts_with("level:") || tag.starts_with("tier:") {
-            // {layer:N} / {level:N} / {tier:N} are human-friendly aliases for z = N * 120
+            // {layer:N} / {level:N} / {tier:N} — numeric: z = N * 120
+            // {layer:name} — named semantic tier (db=0, api=120, frontend=240, edge=360, infra=480)
             let colon = tag.find(':').unwrap();
-            if let Ok(v) = tag[colon+1..].trim().parse::<f32>() {
+            let val = tag[colon+1..].trim();
+            if let Ok(v) = val.parse::<f32>() {
                 z_offset = v * 120.0;
+            } else {
+                z_offset = match val.to_lowercase().as_str() {
+                    "db" | "data" | "database" | "storage" | "store"
+                    | "cache" | "queue" | "mq" | "persistence" => 0.0,
+                    "app" | "api" | "service" | "server" | "backend"
+                    | "biz" | "logic" | "worker" | "handler" | "core" => 120.0,
+                    "ui" | "frontend" | "client" | "web" | "browser"
+                    | "view" | "spa" | "mobile" | "app-ui" => 240.0,
+                    "edge" | "gateway" | "lb" | "proxy" | "cdn"
+                    | "ingress" | "router" | "balancer" => 360.0,
+                    "infra" | "platform" | "ops" | "host"
+                    | "k8s" | "kubernetes" | "cloud" | "network" => 480.0,
+                    _ => z_offset, // unknown name — leave z unchanged
+                };
             }
         } else if tag.starts_with("fill:") {
             fill_color = tag_to_fill_color(tag[5..].trim());
