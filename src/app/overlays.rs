@@ -749,15 +749,41 @@ impl FlowchartApp {
                 );
                 ui.add_space(1.0);
 
-                // Error banner (if last parse failed)
+                // Error banner (if last parse failed) — try to extract line number
                 if let Some(ref err) = self.spec_editor_error.clone() {
-                    ui.horizontal(|ui| {
+                    let err_color = Color32::from_rgb(243, 139, 168);
+                    // Try to extract "Line N:" from the error message
+                    let line_snippet: Option<String> = {
+                        // Pattern: "Line N: ..."
+                        let re_prefix = "Line ";
+                        if let Some(pos) = err.find(re_prefix) {
+                            let after = &err[pos + re_prefix.len()..];
+                            if let Some(colon) = after.find(':') {
+                                let line_num_str = &after[..colon];
+                                if let Ok(n) = line_num_str.trim().parse::<usize>() {
+                                    let lines: Vec<&str> = self.spec_editor_text.lines().collect();
+                                    if n > 0 && n <= lines.len() {
+                                        let raw = lines[n - 1].trim();
+                                        let preview = if raw.len() > 50 { &raw[..50] } else { raw };
+                                        Some(format!("→ {}", preview))
+                                    } else { None }
+                                } else { None }
+                            } else { None }
+                        } else { None }
+                    };
+                    ui.horizontal_wrapped(|ui| {
                         ui.add_space(10.0);
-                        ui.colored_label(
-                            Color32::from_rgb(243, 139, 168),
-                            egui::RichText::new(format!("⚠ {}", err)).size(10.5),
-                        );
+                        ui.colored_label(err_color, egui::RichText::new(format!("⚠ {}", err)).size(10.5));
                     });
+                    if let Some(snippet) = line_snippet {
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ui.colored_label(
+                                err_color.gamma_multiply(0.7),
+                                egui::RichText::new(snippet).size(10.0).monospace(),
+                            );
+                        });
+                    }
                     ui.add_space(4.0);
                 }
 
