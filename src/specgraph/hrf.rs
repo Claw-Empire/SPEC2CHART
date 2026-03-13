@@ -69,6 +69,7 @@ use std::collections::HashMap;
 ///   `{h:100}` — explicit height in canvas units
 ///   `{icon:🔒}` — icon badge
 ///   `{shadow}` — drop shadow effect
+///   `{highlight}` / `{pulse}` / `{starred}` / `{important}` — slow amber pulsing ring (important node marker)
 ///   `{bold}` — bold text
 ///   `{italic}` — italic text
 ///   `{dashed-border}` — dashed border line
@@ -961,6 +962,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut tooltip_text: Option<String> = None;
     let mut sublabel_text: Option<String> = None;
     let mut depth_3d: f32 = 0.0;
+    let mut highlight = false;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -1063,6 +1065,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             text_color = tag_to_fill_color(v.trim());
         } else if tag == "shadow" || tag == "drop-shadow" {
             shadow = true;
+        } else if tag == "highlight" || tag == "pulse" || tag == "starred" || tag == "important" || tag == "star" {
+            highlight = true;
         } else if tag == "bold" || tag == "strong" {
             bold = true;
         } else if tag == "italic" || tag == "em" {
@@ -1158,6 +1162,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if depth_3d > 0.0 {
         node.depth_3d = depth_3d;
     }
+    if highlight { node.highlight = true; }
 
     Ok((id, node))
 }
@@ -1569,11 +1574,12 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let depth_3d_tag = if node.depth_3d > 0.0 {
                 format!(" {{3d-depth:{:.0}}}", node.depth_3d)
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let highlight_tag = if node.highlight { " {highlight}" } else { "" };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));

@@ -238,6 +238,27 @@ impl FlowchartApp {
             }
         }
 
+        // Highlight ring: slow amber pulse for nodes marked as important
+        if node.highlight && !node.is_frame {
+            let time = painter.ctx().input(|i| i.time);
+            // Slow breath: ~0.5 Hz, oscillates between 0.4 and 1.0
+            let breath = ((time * std::f64::consts::PI).sin() as f32) * 0.3 + 0.7;
+            let expand = 5.0 + breath * 3.0;
+            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + expand * 0.4) as u8);
+            // Outer soft glow fill
+            let glow_fill = Color32::from_rgba_unmultiplied(255, 185, 0, (breath * 22.0) as u8);
+            painter.rect_filled(screen_rect.expand(expand + 3.0), cr, glow_fill);
+            // Inner sharp stroke
+            let stroke_alpha = (breath * 180.0 + 40.0) as u8;
+            painter.rect_stroke(
+                screen_rect.expand(expand),
+                cr,
+                Stroke::new(1.8 * self.viewport.zoom.sqrt().max(0.6), Color32::from_rgba_unmultiplied(255, 200, 50, stroke_alpha)),
+                StrokeKind::Outside,
+            );
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        }
+
         // Drop shadow (rendered before node so it appears behind)
         if node.style.shadow && !node.is_frame {
             let shadow_offset = Vec2::new(3.0, 5.0) * self.viewport.zoom.sqrt();

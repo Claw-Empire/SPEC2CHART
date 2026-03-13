@@ -484,7 +484,7 @@ impl FlowchartApp {
                             ("Semantic presets", "{queue} {cache} {internet} {decision} {start} {end}"),
                             ("Status tags", "{critical} {warning} {ok} {info}"),
                             ("Color", "{fill:blue/#rrggbb} {border-color:red} {text-color:white}"),
-                            ("Style", "{bold} {italic} {shadow} {gradient} {dashed-border}"),
+                            ("Style", "{bold} {italic} {shadow} {gradient} {dashed-border} {highlight}"),
                             ("Opacity", "{opacity:50} (50%) or {opacity:0.5}"),
                             ("Size", "{size:200x80} or {w:200} {h:100} {r:8} {border:2}"),
                             ("Position", "{pos:100,200} (pinned) or {x:100} {y:200} {pinned}"),

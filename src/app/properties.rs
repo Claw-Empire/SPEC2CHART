@@ -726,6 +726,9 @@ impl FlowchartApp {
                 ui.add_space(8.0);
                 ui.checkbox(&mut node.style.shadow, egui::RichText::new("Shadow").size(11.0).color(theme.text_dim))
                     .on_hover_text("Render a soft drop shadow beneath the node");
+                ui.add_space(8.0);
+                ui.checkbox(&mut node.highlight, egui::RichText::new("⭐ Highlight").size(11.0).color(theme.text_dim))
+                    .on_hover_text("Pulsing amber ring — marks this node as important");
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
