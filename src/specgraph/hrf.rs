@@ -493,7 +493,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "flow" | "flows" | "edges" | "connections" => Section::Flow,
                 "notes" | "note" | "stickies" => Section::Notes,
                 "groups" | "group" | "clusters" => Section::Groups,
-                "config" | "settings" | "meta" => Section::Config,
+                "config" | "settings" | "meta" | "diagram" | "options" => Section::Config,
                 "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
                 "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
                 "layers" | "layer-map" | "layer-names" | "z-layers" => Section::Palette, // skip: handled by expand_layers pre-pass
@@ -1891,6 +1891,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut progress: f32 = 0.0;
     let mut node_glow = false;
     let mut tier_color_tag = false;
+    let mut gradient_angle: Option<u8> = None;
+    let mut frame_color_override: Option<[u8; 4]> = None;
     let mut collapsed = false;
     for tag in &tags {
         if tag.starts_with("z:") {
@@ -2018,6 +2020,20 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             opacity_override = Some(0.0);
         } else if tag == "gradient" || tag == "grad" {
             gradient = true;
+        } else if tag.starts_with("gradient-angle:") || tag.starts_with("grad-angle:") || tag.starts_with("gradient:") && tag.len() > 9 && tag[9..].trim().parse::<u8>().is_ok() {
+            // {gradient-angle:45} or {gradient:45} — gradient direction in degrees
+            let colon = tag.find(':').unwrap();
+            if let Ok(a) = tag[colon+1..].trim().parse::<u8>() {
+                gradient = true; // gradient-angle implies gradient
+                gradient_angle = Some(a);
+            }
+        } else if tag.starts_with("frame-color:") || tag.starts_with("frame-fill:") || tag.starts_with("bg-color:") {
+            // {frame-color:#rrggbb} — override group frame background color
+            let colon = tag.find(':').unwrap();
+            let v = tag[colon+1..].trim();
+            if let Some(c) = parse_hex_color(v).or_else(|| tag_to_fill_color(v)) {
+                frame_color_override = Some(c);
+            }
         } else if tag == "collapsed" || tag == "collapse" || tag == "compact" || tag == "pill" {
             collapsed = true;
         } else if tag == "locked" || tag == "lock" {
@@ -2154,6 +2170,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(op) = opacity_override { node.style.opacity = op.clamp(0.0, 1.0); }
     if let Some(fs) = font_size_override { node.style.font_size = fs.clamp(6.0, 72.0); }
     if gradient { node.style.gradient = true; }
+    if let Some(ga) = gradient_angle { node.style.gradient_angle = ga; }
+    if let Some(fc) = frame_color_override { node.frame_color = fc; }
     if locked { node.locked = true; }
     if collapsed { node.collapsed = true; }
     if let Some(u) = url_override { node.url = u; }
@@ -2572,7 +2590,13 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let opacity_tag = if (node.style.opacity - 1.0).abs() > 0.01 {
                 format!(" {{opacity:{:.0}}}", node.style.opacity * 100.0)
             } else { String::new() };
-            let gradient_tag = if node.style.gradient { " {gradient}" } else { "" };
+            let gradient_tag = if node.style.gradient {
+                if node.style.gradient_angle > 0 {
+                    format!(" {{gradient}} {{gradient-angle:{}}}", node.style.gradient_angle)
+                } else {
+                    " {gradient}".to_string()
+                }
+            } else { String::new() };
             let locked_tag = if node.locked { " {locked}" } else { "" };
             let collapsed_tag = if node.collapsed { " {collapsed}" } else { "" };
             let url_tag = if !node.url.is_empty() {
@@ -2621,11 +2645,18 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 format!(" {{note:{}}}", node.comment)
             } else { String::new() };
             let glow_tag = if node.style.glow { " {glow}" } else { "" };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let frame_color_tag = if node.is_frame {
+                let default_fc = crate::model::default_frame_color();
+                if node.frame_color != default_fc {
+                    let fc = node.frame_color;
+                    format!(" {{frame-color:#{:02x}{:02x}{:02x}}}", fc[0], fc[1], fc[2])
+                } else { String::new() }
+            } else { String::new() };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, collapsed_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag, glow_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag, glow_tag, frame_color_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
