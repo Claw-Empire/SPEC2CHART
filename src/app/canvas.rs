@@ -1711,6 +1711,35 @@ impl FlowchartApp {
             if let Some(tag) = tag_label {
                 rows.push((format!("Tag: {}", tag), self.theme.text_dim));
             }
+            if node.z_offset != 0.0 {
+                rows.push((format!("3D layer z={:.0}", node.z_offset), self.theme.accent.gamma_multiply(0.7)));
+            }
+            // Quick spec hint
+            let spec_hint = {
+                use crate::model::NodeKind;
+                let shape_hint = match &node.kind {
+                    NodeKind::Shape { shape, .. } => match shape {
+                        crate::model::NodeShape::Diamond => " {diamond}",
+                        crate::model::NodeShape::Circle => " {circle}",
+                        crate::model::NodeShape::Parallelogram => " {parallelogram}",
+                        crate::model::NodeShape::Hexagon => " {hexagon}",
+                        crate::model::NodeShape::Connector => " {connector}",
+                        _ => "",
+                    },
+                    NodeKind::Entity { .. } => " {entity}",
+                    NodeKind::Text { .. } => " {text}",
+                    NodeKind::StickyNote { .. } => "",
+                };
+                let z_hint = if node.z_offset != 0.0 {
+                    format!(" {{z:{:.0}}}", node.z_offset)
+                } else { String::new() };
+                if !shape_hint.is_empty() || !z_hint.is_empty() {
+                    Some(format!("spec: [id] label{}{}", shape_hint, z_hint))
+                } else { None }
+            };
+            if let Some(hint) = spec_hint {
+                rows.push((hint, self.theme.text_dim.gamma_multiply(0.6)));
+            }
             if has_url  { rows.push(("🔗 URL attached".to_string(), self.theme.text_dim)); }
             if has_comment {
                 let preview = if node.comment.len() > 60 {
