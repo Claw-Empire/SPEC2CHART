@@ -1869,16 +1869,23 @@ fn tag_to_node_tag(tag: &str) -> Option<NodeTag> {
 
 fn tag_to_fill_color(name: &str) -> Option<[u8; 4]> {
     match name {
-        "blue"   => Some([137, 180, 250, 255]),
-        "green"  => Some([166, 227, 161, 255]),
-        "red"    => Some([243, 139, 168, 255]),
-        "yellow" => Some([249, 226, 175, 255]),
-        "purple" => Some([203, 166, 247, 255]),
-        "pink"   => Some([245, 194, 231, 255]),
-        "teal"   => Some([148, 226, 213, 255]),
-        "white"  => Some([255, 255, 255, 255]),
-        "black"  => Some([17, 17, 27, 255]),
+        "blue"     => Some([137, 180, 250, 255]),
+        "green"    => Some([166, 227, 161, 255]),
+        "red"      => Some([243, 139, 168, 255]),
+        "yellow"   => Some([249, 226, 175, 255]),
+        "purple"   => Some([203, 166, 247, 255]),
+        "mauve"    => Some([203, 166, 247, 255]),
+        "pink"     => Some([245, 194, 231, 255]),
+        "teal"     => Some([148, 226, 213, 255]),
+        "white"    => Some([255, 255, 255, 255]),
+        "black"    => Some([17, 17, 27, 255]),
+        "orange"   => Some([250, 179, 135, 255]),
+        "peach"    => Some([250, 179, 135, 255]),
+        "sky"      => Some([137, 220, 235, 255]),
+        "lavender" => Some([180, 190, 254, 255]),
+        "gray" | "grey" => Some([108, 112, 134, 255]),
         "surface" | "default" => Some([30, 30, 46, 255]),
+        "none" | "transparent" | "clear" => Some([0, 0, 0, 0]),
         _ => parse_hex_color(name),
     }
 }
@@ -1933,6 +1940,11 @@ fn fill_color_name(fill: [u8; 4]) -> Option<&'static str> {
         [148, 226, 213, 255] => Some("teal"),
         [255, 255, 255, 255] => Some("white"),
         [17, 17, 27, 255]    => Some("black"),
+        [250, 179, 135, 255] => Some("orange"),
+        [137, 220, 235, 255] => Some("sky"),
+        [180, 190, 254, 255] => Some("lavender"),
+        [108, 112, 134, 255] => Some("gray"),
+        [0, 0, 0, 0]         => Some("none"),
         _ => None,
     }
 }
