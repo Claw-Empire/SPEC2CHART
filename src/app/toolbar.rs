@@ -608,7 +608,7 @@ impl FlowchartApp {
                             ("3D named tier", "{layer:db}  {layer:api}  {layer:frontend}  {layer:edge}"),
                             ("3D tier-color", "{tier-color} / auto-tier-color = true  (tier fill tints)"),
                             ("Grid layout", "## Grid cols=3  (auto grid layout, 3 columns)"),
-                            ("Label refs", "REST API --> Database  (use display label as flow id)"),
+                            ("Label refs", "REST API --> Database  or  \"REST API\" --> \"Database\""),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);

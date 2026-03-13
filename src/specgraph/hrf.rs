@@ -1741,7 +1741,13 @@ fn parse_flow_line_chain(
             } else {
                 String::new()
             };
-            (before.to_string(), lbl)
+            if before.is_empty() {
+                // `"Display Name" -->` — whole left is a quoted label reference, no edge label
+                (lbl, String::new())
+            } else {
+                // `node_id "edge label" -->` — before is node ID, lbl is edge label
+                (before.to_string(), lbl)
+            }
         } else {
             (left.to_string(), String::new())
         };
@@ -1762,20 +1768,28 @@ fn parse_flow_line_chain(
 
         // right: node id (first word), optional ": colon label", then optional {tags}
         // Supports: `b: performs auth {dashed}` or `b {dashed}` or `b`
+        // Also: `"Display Name" {tags}` — quoted label reference (node lookup by label).
         // We must extract {tags} first to avoid a colon inside a tag confusing us.
         let (to_id_raw, edge_tags) = extract_tags(right);
-        // Now to_id_raw may be: "b" or "b: auth flow" or "b : auth flow"
-        // Split on first ':' — only if it appears after the node id token
+        // Now to_id_raw may be: "b" or "b: auth flow" or "b : auth flow" or `"Display Name"`
         let (to_id, colon_label) = {
-            let first_token_end = to_id_raw.find(|c: char| c.is_whitespace() || c == ':')
-                .unwrap_or(to_id_raw.len());
-            let first_token = &to_id_raw[..first_token_end];
-            let rest = to_id_raw[first_token_end..].trim();
-            if let Some(rest_after_colon) = rest.strip_prefix(':') {
-                let lbl = rest_after_colon.trim().to_string();
-                (first_token.to_string(), if lbl.is_empty() { String::new() } else { lbl })
+            let raw = to_id_raw.trim();
+            if raw.starts_with('"') {
+                // Quoted label reference: `"Display Name"` → node id = Display Name (label lookup)
+                let q_end = raw[1..].find('"').map(|i| i + 1).unwrap_or(raw.len());
+                let quoted = raw[1..q_end].to_string();
+                (quoted, String::new())
             } else {
-                (first_token.to_string(), String::new())
+                let first_token_end = raw.find(|c: char| c.is_whitespace() || c == ':')
+                    .unwrap_or(raw.len());
+                let first_token = &raw[..first_token_end];
+                let rest = raw[first_token_end..].trim();
+                if let Some(rest_after_colon) = rest.strip_prefix(':') {
+                    let lbl = rest_after_colon.trim().to_string();
+                    (first_token.to_string(), if lbl.is_empty() { String::new() } else { lbl })
+                } else {
+                    (first_token.to_string(), String::new())
+                }
             }
         };
         // Prefix quoted label > pipe label > colon label (priority order)
@@ -4110,5 +4124,36 @@ auth --> db
         // Third edge: explicit id -> explicit id (still works)
         assert_eq!(doc.edges[2].source.node_id, auth_id);
         assert_eq!(doc.edges[2].target.node_id, db_id);
+    }
+
+    #[test]
+    fn test_quoted_label_flow_references() {
+        // "Display Name" --> "Other Node" — both source and target as quoted label refs
+        // The existing `auth "edge label" --> db` syntax must still work.
+        let input = r#"
+# Quoted Label Flow Test
+
+## Nodes
+- [auth] Auth Service
+- [db] Main Database
+
+## Flow
+"Auth Service" --> "Main Database"
+auth "calls" --> db
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        assert_eq!(doc.edges.len(), 2);
+        let auth_id = doc.nodes.iter().find(|n| n.display_label() == "Auth Service").unwrap().id;
+        let db_id   = doc.nodes.iter().find(|n| n.display_label() == "Main Database").unwrap().id;
+
+        // First edge: quoted label refs, no edge label
+        assert_eq!(doc.edges[0].source.node_id, auth_id);
+        assert_eq!(doc.edges[0].target.node_id, db_id);
+        assert!(doc.edges[0].label.is_empty(), "no edge label on quoted node ref");
+
+        // Second edge: explicit id with quoted edge label
+        assert_eq!(doc.edges[1].source.node_id, auth_id);
+        assert_eq!(doc.edges[1].target.node_id, db_id);
+        assert_eq!(doc.edges[1].label, "calls", "edge label from quoted syntax");
     }
 }
