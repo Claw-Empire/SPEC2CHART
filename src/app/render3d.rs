@@ -1620,6 +1620,31 @@ impl FlowchartApp {
             );
         }
 
+        // Progress bar (thin strip at front-face bottom)
+        if node.progress > 0.0 && scale > 0.25 {
+            let bar_h = (3.0 * scale).clamp(2.0, 5.0);
+            let pct = node.progress.clamp(0.0, 1.0);
+            let track_rect = Rect::from_min_size(
+                Pos2::new(screen_rect.min.x, screen_rect.max.y - bar_h),
+                Vec2::new(screen_rect.width(), bar_h),
+            );
+            let bar_rect = Rect::from_min_size(
+                Pos2::new(screen_rect.min.x, screen_rect.max.y - bar_h),
+                Vec2::new(screen_rect.width() * pct, bar_h),
+            );
+            let cr = CornerRadius { sw: 2, se: 2, nw: 0, ne: 0 };
+            let a = (alpha as f32 * 0.4) as u8;
+            painter.rect_filled(track_rect, cr, Color32::from_rgba_premultiplied(0, 0, 0, a));
+            let bar_col = if pct >= 1.0 {
+                Color32::from_rgba_premultiplied(166, 227, 161, alpha)
+            } else if pct >= 0.6 {
+                Color32::from_rgba_premultiplied(249, 226, 175, alpha)
+            } else {
+                Color32::from_rgba_premultiplied(243, 139, 168, alpha)
+            };
+            painter.rect_filled(bar_rect, cr, bar_col);
+        }
+
         // z-layer badge
         if z_layer > 0 && scale > 0.3 {
             let badge_pos = Pos2::new(

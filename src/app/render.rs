@@ -418,6 +418,44 @@ impl FlowchartApp {
             );
         }
 
+        // Progress bar (thin filled strip at node bottom; shown when progress > 0)
+        if node.progress > 0.0 && self.viewport.zoom > 0.3 {
+            let bar_h = (3.0 * self.viewport.zoom).clamp(2.0, 6.0);
+            let bar_rect = Rect::from_min_size(
+                Pos2::new(screen_rect.min.x, screen_rect.max.y - bar_h),
+                Vec2::new(screen_rect.width() * node.progress.clamp(0.0, 1.0), bar_h),
+            );
+            // Track (empty part)
+            let track_rect = Rect::from_min_size(
+                Pos2::new(screen_rect.min.x, screen_rect.max.y - bar_h),
+                Vec2::new(screen_rect.width(), bar_h),
+            );
+            let cr = CornerRadius { sw: 3, se: 3, nw: 0, ne: 0 };
+            painter.rect_filled(track_rect, cr, Color32::BLACK.gamma_multiply(0.25));
+            // Filled part — green at 100%, yellow-ish at mid, red at low
+            let pct = node.progress.clamp(0.0, 1.0);
+            let bar_col = if pct >= 1.0 {
+                Color32::from_rgb(166, 227, 161)  // green
+            } else if pct >= 0.6 {
+                Color32::from_rgb(249, 226, 175)  // yellow
+            } else {
+                Color32::from_rgb(243, 139, 168)  // red/pink
+            };
+            painter.rect_filled(bar_rect, cr, bar_col);
+            // Percentage label
+            if self.viewport.zoom > 0.6 {
+                let pct_str = format!("{}%", (pct * 100.0).round() as u32);
+                let lbl_size = (8.0 * self.viewport.zoom.sqrt()).clamp(7.0, 11.0);
+                painter.text(
+                    Pos2::new(screen_rect.max.x - 2.0, screen_rect.max.y - bar_h - 1.0),
+                    Align2::RIGHT_BOTTOM,
+                    &pct_str,
+                    FontId::proportional(lbl_size),
+                    bar_col.gamma_multiply(0.9),
+                );
+            }
+        }
+
         // Lock badge (shown as a small 🔒 in top-right when node is locked)
         if node.locked && self.viewport.zoom > 0.4 {
             let icon_size = (9.0 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);

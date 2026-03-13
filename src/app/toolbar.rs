@@ -572,6 +572,7 @@ impl FlowchartApp {
                             ("Icon/Frame", "{icon:🔒} {frame}"),
                             ("Tooltip", "{tooltip:description text}  (or indent lines below)"),
                             ("Sublabel", "{sublabel:v2 · running}  (small text below node)"),
+                            ("Progress", "{progress:75}  (0–100% completion bar at node bottom)"),
                             ("Node note", "{note:deprecated — use /v2 instead}  (💬 tooltip on hover)"),
                             ("Inline group", "{group:backend}  (auto bounding frame)"),
                             ("Edge note", "a -> b {note:this path is deprecated}"),

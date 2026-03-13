@@ -381,6 +381,22 @@ impl FlowchartApp {
                             .hint_text("e.g. v2.1 · running")
                             .font(FontId::proportional(11.5)),
                     );
+                    // Progress bar (0–100%)
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Progress").size(11.0).color(theme.text_dim));
+                        let pct = (node.progress * 100.0).round() as i32;
+                        ui.label(egui::RichText::new(format!("{}%", pct)).size(11.0).color(theme.text_primary));
+                    });
+                    ui.add_space(2.0);
+                    ui.style_mut().spacing.slider_width = ui.available_width() - 8.0;
+                    if ui.add(egui::Slider::new(&mut node.progress, 0.0..=1.0)
+                        .show_value(false)
+                    ).changed() {
+                        // snap to 0 if very small
+                        if node.progress < 0.01 { node.progress = 0.0; }
+                    }
+
                     // Comment field (also accessible via Cmd+M)
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {

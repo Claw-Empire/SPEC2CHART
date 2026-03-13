@@ -38,6 +38,8 @@ use std::collections::HashMap;
 /// id "label" --> id {dashed}                ← dashed edge
 /// id --> id {glow}                          ← glowing edge
 /// id --> id {arrow:open}                    ← arrow head style
+/// [a, b, c] -> target                       ← multi-source fan-in (same as a->target, b->target, c->target)
+/// source -> [a, b, c] {dashed}              ← multi-target fan-out (tags applied to all edges)
 ///
 /// ## Notes
 /// - Note text {yellow}
@@ -58,8 +60,9 @@ use std::collections::HashMap;
 ///   `{frame}` — group frame container (large translucent background box)
 ///
 /// ### Supported node style tags:
-///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/white/black)
+///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/orange/sky/lavender/gray/mauve/white/black/none)
 ///   `{fill:#rrggbb}` — fill color as CSS hex (e.g. `{fill:#1e6f5c}`)
+///   `{fill:none}` — transparent fill (border only)
 ///   `{border-color:red}` or `{stroke:red}` — border/stroke color
 ///   `{text-color:white}` or `{color:white}` — text color override
 ///   `{tooltip:text}` or `{tip:text}` or `{desc:text}` — inline description/tooltip text
@@ -136,20 +139,25 @@ use std::collections::HashMap;
 /// ### `## Config` section
 /// ```text
 /// ## Config
-/// title = My Diagram
-/// bg = dots
-/// snap = true
+/// title  = My Diagram
+/// bg     = dots          (dots / lines / crosshatch / none)
+/// snap   = true
 /// grid-size = 20
-/// zoom = 1.5
-/// flow = LR
-/// view = 3d
-/// camera_yaw = -0.4
-/// camera_pitch = 0.6
-/// layer0 = Database
+/// zoom   = 1.5           (or "fit"/"auto" to auto-fit on load)
+/// flow   = LR            (layout direction: LR / TB / RL / BT)
+/// view   = 3d            (open in 3D view on import)
+/// camera = iso           (preset: iso / top / front / side)
+/// camera_yaw   = -0.6    (raw yaw in radians, overridden by camera preset)
+/// camera_pitch =  0.5    (raw pitch in radians)
+/// layer0 = Database      (display name for 3D layer 0)
 /// layer1 = API
 /// ```
 /// Import-time viewport hints applied when the spec is loaded into the app.
-/// `view = 3d` opens in 3D view; `camera_yaw/pitch` set the initial 3D camera angle.
+/// `view = 3d` opens in 3D view on import.
+/// `camera = iso/top/front/side` sets a named 3D camera preset.
+/// `camera_yaw/pitch` set raw angles (ignored when a named preset is used).
+/// `zoom = fit` (or `auto`) auto-fits the diagram to the viewport on load.
+///
 /// Pre-scan `## Palette` sections and return a palette map + pre-expanded input string
 /// where `{fill:name}` and `{color:name}` are replaced with `{fill:#hex}` / `{color:#hex}`.
 fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
@@ -272,6 +280,13 @@ fn expand_styles(input: &str) -> String {
     out
 }
 
+/// Parse a `.spec` Human-Readable Format string into a `FlowchartDocument`.
+///
+/// See the full format reference in the doc-comment on `expand_palette` above.
+/// Supports: `## Nodes`, `## Layer N`, `## Flow`, `## Notes`, `## Config`,
+/// `## Style`, `## Palette`, `## Steps`, `## Groups`.
+/// Multi-source `[a,b]->c` and multi-target `a->[b,c]` shorthands are expanded
+/// before edge parsing.
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Pre-expand style templates, then palette color names
     let input_with_styles = expand_styles(input);
@@ -1473,6 +1488,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut node_note_text: Option<String> = None;
     let mut depth_3d: f32 = 0.0;
     let mut highlight = false;
+    let mut progress: f32 = 0.0;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -1583,6 +1599,13 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             shadow = true;
         } else if tag == "highlight" || tag == "pulse" || tag == "starred" || tag == "important" || tag == "star" {
             highlight = true;
+        } else if tag.starts_with("progress:") || tag.starts_with("pct:") || tag.starts_with("percent:") {
+            let prefix = if tag.starts_with("progress:") { 9 } else if tag.starts_with("pct:") { 4 } else { 8 };
+            let val_str = tag[prefix..].trim().trim_end_matches('%');
+            if let Ok(v) = val_str.parse::<f32>() {
+                // Accept 0–100 range or 0.0–1.0 range
+                progress = if v > 1.0 { (v / 100.0).clamp(0.0, 1.0) } else { v.clamp(0.0, 1.0) };
+            }
         } else if tag == "bold" || tag == "strong" {
             bold = true;
         } else if tag == "italic" || tag == "em" {
@@ -1679,6 +1702,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         node.depth_3d = depth_3d;
     }
     if highlight { node.highlight = true; }
+    if progress > 0.0 { node.progress = progress; }
     if let Some(nn) = node_note_text {
         node.comment = nn;
     }
@@ -2106,14 +2130,17 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 format!(" {{3d-depth:{:.0}}}", node.depth_3d)
             } else { String::new() };
             let highlight_tag = if node.highlight { " {highlight}" } else { "" };
+            let progress_tag = if node.progress > 0.0 {
+                format!(" {{progress:{}}}", (node.progress * 100.0).round() as u32)
+            } else { String::new() };
             let note_tag = if !node.comment.is_empty() {
                 format!(" {{note:{}}}", node.comment)
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, note_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
@@ -2975,5 +3002,33 @@ api -> worker
         for edge in &doc.edges {
             assert!(edge.style.width > 4.0, "expected thick edge, width={}", edge.style.width);
         }
+    }
+
+    #[test]
+    fn test_progress_tag_parse_and_export() {
+        let input = r#"
+# Progress Test
+
+## Nodes
+- [task_a] Task A {progress:75}
+- [task_b] Task B {progress:100%}
+- [task_c] Task C {progress:0.5}
+
+## Flow
+task_a -> task_b -> task_c
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Task A").unwrap();
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Task B").unwrap();
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Task C").unwrap();
+        assert!((a.progress - 0.75).abs() < 0.01, "task_a progress should be 0.75, got {}", a.progress);
+        assert!((b.progress - 1.00).abs() < 0.01, "task_b progress should be 1.0, got {}", b.progress);
+        assert!((c.progress - 0.5).abs()  < 0.01, "task_c progress should be 0.5, got {}", c.progress);
+
+        // Export round-trip
+        let exported = export_hrf(&doc, "Progress Test");
+        assert!(exported.contains("{progress:75}"), "should export progress:75, got:\n{}", exported);
+        assert!(exported.contains("{progress:100}"), "should export progress:100, got:\n{}", exported);
+        assert!(exported.contains("{progress:50}"), "should export progress:50, got:\n{}", exported);
     }
 }
