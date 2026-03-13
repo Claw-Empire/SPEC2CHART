@@ -970,63 +970,86 @@ impl FlowchartApp {
             }
         }
 
-        // Named layer pills (top-left corner legend)
-        if !self.document.layer_names.is_empty() {
-            let mut sorted_layers: Vec<(&i32, &String)> =
-                self.document.layer_names.iter().collect();
-            sorted_layers.sort_by_key(|(k, _)| **k);
-            let pill_colors = [
-                Color32::from_rgb(137, 180, 250), // blue
-                Color32::from_rgb(166, 227, 161), // green
-                Color32::from_rgb(249, 226, 175), // yellow
-                Color32::from_rgb(203, 166, 247), // mauve
-                Color32::from_rgb(243, 139, 168), // red
-                Color32::from_rgb(148, 226, 213), // teal
-            ];
-            // Compute node count per layer index for badges
+        // Layer legend (top-left corner): shows all distinct z-tiers present in the diagram.
+        // Uses explicit layer_names first, then falls back to semantic tier names.
+        {
+            // Collect distinct z-layers with node counts
             let mut layer_counts: std::collections::HashMap<i32, usize> =
                 std::collections::HashMap::new();
             for node in &self.document.nodes {
-                let idx = (node.z_offset / 120.0).round() as i32;
-                *layer_counts.entry(idx).or_insert(0) += 1;
+                if !node.is_frame {
+                    let idx = (node.z_offset / 120.0).round() as i32;
+                    *layer_counts.entry(idx).or_insert(0) += 1;
+                }
             }
-            let mut y = canvas_rect.min.y + 10.0;
-            for (i, (layer_idx, name)) in sorted_layers.iter().enumerate() {
-                let color = pill_colors[i % pill_colors.len()];
-                let count = layer_counts.get(layer_idx).copied().unwrap_or(0);
-                let count_badge = if count > 0 { format!(" ×{}", count) } else { String::new() };
-                let text = format!("L{}  {}{}", layer_idx, name, count_badge);
-                let galley = painter.layout_no_wrap(
-                    text.clone(),
-                    FontId::proportional(10.5),
-                    color,
-                );
-                let pill_w = galley.size().x + 14.0;
-                let pill_h = galley.size().y + 6.0;
-                let pill_rect = Rect::from_min_size(
-                    Pos2::new(canvas_rect.min.x + 8.0, y),
-                    Vec2::new(pill_w, pill_h),
-                );
-                let cr = CornerRadius::same((pill_h * 0.5) as u8);
-                painter.rect_filled(
-                    pill_rect,
-                    cr,
-                    Color32::from_rgba_premultiplied(10, 10, 20, 160),
-                );
-                painter.rect_stroke(
-                    pill_rect,
-                    cr,
-                    Stroke::new(1.0, color.gamma_multiply(0.55)),
-                    StrokeKind::Inside,
-                );
-                painter.text(
-                    pill_rect.center(),
-                    Align2::CENTER_CENTER,
-                    &text,
-                    FontId::proportional(10.5),
-                    color,
-                );
-                y += pill_h + 4.0;
+            // Only show legend when there are 2+ distinct layers
+            if layer_counts.len() >= 2 {
+                let mut sorted_idxs: Vec<i32> = layer_counts.keys().copied().collect();
+                sorted_idxs.sort();
+                let pill_colors = [
+                    Color32::from_rgb(137, 180, 250), // blue  — z=0 db
+                    Color32::from_rgb(148, 226, 213), // teal  — z=1 api
+                    Color32::from_rgb(203, 166, 247), // mauve — z=2 frontend
+                    Color32::from_rgb(249, 226, 175), // yellow— z=3 edge
+                    Color32::from_rgb(166, 227, 161), // green — z=4 infra
+                    Color32::from_rgb(243, 139, 168), // red   — z=5+
+                ];
+                let semantic_name = |idx: i32| match idx {
+                    0 => "db",
+                    1 => "api",
+                    2 => "frontend",
+                    3 => "edge",
+                    4 => "infra",
+                    _ => "",
+                };
+                let mut y = canvas_rect.min.y + 10.0;
+                for (i, layer_idx) in sorted_idxs.iter().enumerate() {
+                    let color = pill_colors[(*layer_idx as usize).min(pill_colors.len() - 1)];
+                    let count = layer_counts.get(layer_idx).copied().unwrap_or(0);
+                    // Use explicit name → semantic name → layer number
+                    let name = self.document.layer_names.get(layer_idx)
+                        .map(|s| s.as_str())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| { let s = semantic_name(*layer_idx); if s.is_empty() { None } else { Some(s) } })
+                        .unwrap_or("");
+                    let label = if name.is_empty() {
+                        format!("L{}  ×{}", layer_idx, count)
+                    } else {
+                        format!("{}  ×{}", name, count)
+                    };
+                    let galley = painter.layout_no_wrap(
+                        label.clone(),
+                        FontId::proportional(10.5),
+                        color,
+                    );
+                    let pill_w = galley.size().x + 14.0;
+                    let pill_h = galley.size().y + 6.0;
+                    let pill_rect = Rect::from_min_size(
+                        Pos2::new(canvas_rect.min.x + 8.0, y),
+                        Vec2::new(pill_w, pill_h),
+                    );
+                    let cr = CornerRadius::same((pill_h * 0.5) as u8);
+                    painter.rect_filled(
+                        pill_rect,
+                        cr,
+                        Color32::from_rgba_premultiplied(10, 10, 20, 160),
+                    );
+                    painter.rect_stroke(
+                        pill_rect,
+                        cr,
+                        Stroke::new(1.0, color.gamma_multiply(0.55)),
+                        StrokeKind::Inside,
+                    );
+                    painter.text(
+                        pill_rect.center(),
+                        Align2::CENTER_CENTER,
+                        &label,
+                        FontId::proportional(10.5),
+                        color,
+                    );
+                    y += pill_h + 4.0;
+                    let _ = i; // suppress unused warning
+                }
             }
         }
 
