@@ -777,11 +777,26 @@ impl FlowchartApp {
             let max_text_w = (screen_rect.width() - pad * 2.0).max(10.0);
             let max_text_h = (screen_rect.height() - pad * 2.0).max(6.0);
             // Build display label with bold/italic markers for visual hint
-            let display_label: std::borrow::Cow<str> = match (style.bold, style.italic) {
+            let base_label: std::borrow::Cow<str> = match (style.bold, style.italic) {
                 (true, true)  => std::borrow::Cow::Owned(format!("𝘽 𝘐 {}", label)),
                 (true, false) => std::borrow::Cow::Owned(format!("𝗕 {}", label)),
                 (false, true) => std::borrow::Cow::Owned(format!("𝘐 {}", label)),
                 (false, false) => std::borrow::Cow::Borrowed(label),
+            };
+            // For narrow nodes (< 50 screen px), use single-line truncated label
+            // to avoid ugly 1-2 character word-wrap lines.
+            let display_label: std::borrow::Cow<str> = if max_text_w < 50.0 {
+                let approx_chars = (max_text_w / (font_size * 0.52)).floor().max(1.0) as usize;
+                let base = base_label.as_ref();
+                let char_count = base.chars().count();
+                if char_count > approx_chars && approx_chars >= 2 {
+                    let truncated: String = base.chars().take(approx_chars.saturating_sub(1)).collect();
+                    std::borrow::Cow::Owned(format!("{}…", truncated))
+                } else {
+                    base_label
+                }
+            } else {
+                base_label
             };
             // Apply bold/italic via LayoutJob
             let galley = if style.bold {
