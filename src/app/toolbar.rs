@@ -310,6 +310,26 @@ impl FlowchartApp {
                     }
                 });
                 ui.add_space(2.0);
+                // Copy spec to clipboard (HRF format)
+                if ui
+                    .add_sized(
+                        egui::vec2(ui.available_width(), 24.0),
+                        egui::Button::new(
+                            egui::RichText::new("Copy Spec to Clipboard").size(11.0),
+                        )
+                        .fill(Color32::TRANSPARENT),
+                    )
+                    .on_hover_text("Copy diagram as HRF spec text (Cmd+Shift+S)")
+                    .clicked()
+                {
+                    let hrf = specgraph::export_hrf(&self.document, "Untitled Diagram");
+                    ui.ctx().copy_text(hrf);
+                    self.status_message = Some((
+                        "Spec copied to clipboard".to_string(),
+                        std::time::Instant::now(),
+                    ));
+                }
+                ui.add_space(2.0);
                 // Spec cheatsheet toggle
                 if ui
                     .add_sized(

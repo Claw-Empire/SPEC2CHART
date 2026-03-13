@@ -552,6 +552,17 @@ impl FlowchartApp {
             if self.show_find_replace { self.find_query.clear(); self.replace_query.clear(); }
         }
 
+        // Cmd+Shift+S = copy current diagram as HRF spec to system clipboard
+        let cmd_shift_s = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd_shift_s)) {
+            let hrf = crate::specgraph::export_hrf(&self.document, "Untitled Diagram");
+            ctx.copy_text(hrf);
+            self.status_message = Some((
+                "Spec copied to clipboard".to_string(),
+                std::time::Instant::now(),
+            ));
+        }
+
         // ? = toggle shortcuts panel
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F1) || (i.key_pressed(Key::Slash) && i.modifiers.shift)) {
             self.show_shortcuts_panel = !self.show_shortcuts_panel;
