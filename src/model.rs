@@ -700,6 +700,9 @@ pub struct FlowchartDocument {
     /// Import-time hints from `## Config` — not serialized, applied on import only.
     #[serde(skip)]
     pub import_hints: ImportHints,
+    /// Layout direction: "TB" (default), "LR", "RL", "BT".
+    #[serde(default)]
+    pub layout_dir: String,
 }
 
 impl FlowchartDocument {

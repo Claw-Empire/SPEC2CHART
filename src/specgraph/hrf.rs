@@ -525,6 +525,15 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.import_hints.zoom = Some(z.clamp(0.1, 4.0));
                 }
             }
+            "flow" | "layout" | "direction" | "layout-dir" | "layout_dir" => {
+                let dir = match val.to_uppercase().as_str() {
+                    "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => "LR",
+                    "RL" | "RIGHT-LEFT" | "RIGHT_LEFT" => "RL",
+                    "BT" | "BOTTOM-TOP" | "BOTTOM_TOP" | "UP" => "BT",
+                    _ => "TB", // default top-to-bottom
+                };
+                doc.layout_dir = dir.to_string();
+            }
             // layer names: layer0 = Data Tier, layer 1 = Backend
             _ if key.starts_with("layer") => {
                 let num_part = key.trim_start_matches("layer").trim();

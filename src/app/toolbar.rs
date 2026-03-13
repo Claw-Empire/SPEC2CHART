@@ -511,7 +511,7 @@ impl FlowchartApp {
                         ui.set_width(ui.available_width());
                         let entries: &[(&str, &str)] = &[
                             ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps / ## Config"),
-                            ("## Config", "bg = dots | snap = true | grid-size = 20 | zoom = 1.5"),
+                            ("## Config", "bg = dots | snap = true | grid-size = 20 | zoom = 1.5 | flow = LR"),
                             ("## Palette", "brand = #1e3a5f  →  use {fill:brand} anywhere"),
                             ("Inline edges", "- [api] Service → db, cache {dashed}"),
                             ("## Steps", "1. Step label {diamond}  (sequential flowchart)"),
