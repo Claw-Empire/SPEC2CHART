@@ -1205,8 +1205,21 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
                 let idx = (section_z / z_spacing).round();
                 let is_multiple = (section_z - idx * z_spacing).abs() < 0.5;
                 let layer_key = idx as i32;
+                // Use explicit layer name, then semantic tier name, then nothing
                 let name_suffix = doc.layer_names.get(&layer_key)
                     .map(|n| format!(": {}", n))
+                    .or_else(|| {
+                        // Fallback: well-known z values get a human-readable tier name
+                        let semantic = match *section_z as i32 {
+                            0   => Some("db"),
+                            120 => Some("api"),
+                            240 => Some("frontend"),
+                            360 => Some("edge"),
+                            480 => Some("infra"),
+                            _   => None,
+                        };
+                        semantic.map(|n| format!(": {}", n))
+                    })
                     .unwrap_or_default();
                 if is_multiple {
                     out.push_str(&format!("## Layer {}{}\n", idx as i32, name_suffix));
