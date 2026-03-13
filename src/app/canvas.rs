@@ -498,107 +498,9 @@ impl FlowchartApp {
             painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         }
 
-        // Focus mode overlay: hop-aware neighborhood dimming
-        // Selected: no overlay | 1-hop neighbors: light dim | others: heavy dim
-        if self.focus_mode && !self.selection.is_empty() {
-            for node in &self.document.nodes {
-                if self.selection.contains_node(&node.id) { continue; }
-                let screen_pos = self.viewport.canvas_to_screen(node.pos());
-                let screen_size = node.size_vec() * self.viewport.zoom;
-                let screen_rect = Rect::from_min_size(screen_pos, screen_size);
-                if !screen_rect.intersects(canvas_rect) { continue; }
-                // Neighbors get a lighter veil; distant nodes get heavy dim
-                let alpha = if focus_neighbors.contains(&node.id) { 90u8 } else { 190u8 };
-                painter.rect_filled(
-                    screen_rect,
-                    CornerRadius::same(4),
-                    Color32::from_rgba_premultiplied(16, 16, 28, alpha),
-                );
-            }
-        }
+        self.draw_focus_and_filter_overlays(&painter, canvas_rect, &focus_neighbors);
 
-        // Tag filter overlay: dim nodes that don't match the active tag filter
-        if let Some(filter_tag) = self.tag_filter {
-            for node in &self.document.nodes {
-                if node.tag == Some(filter_tag) { continue; }
-                let screen_pos = self.viewport.canvas_to_screen(node.pos());
-                let screen_size = node.size_vec() * self.viewport.zoom;
-                let screen_rect = Rect::from_min_size(screen_pos, screen_size);
-                if !screen_rect.intersects(canvas_rect) { continue; }
-                painter.rect_filled(
-                    screen_rect,
-                    CornerRadius::same(4),
-                    Color32::from_rgba_premultiplied(12, 12, 22, 175),
-                );
-            }
-        }
-
-        // Multi-selection bounding box with dimension labels (shown when ≥2 nodes selected)
-        if self.selection.node_ids.len() >= 2 {
-            let sel_nodes: Vec<&Node> = self.document.nodes.iter()
-                .filter(|n| self.selection.contains_node(&n.id))
-                .collect();
-            if !sel_nodes.is_empty() {
-                let mut min_x = f32::MAX; let mut min_y = f32::MAX;
-                let mut max_x = f32::MIN; let mut max_y = f32::MIN;
-                for n in &sel_nodes {
-                    let p = n.pos();
-                    let s = n.size_vec();
-                    min_x = min_x.min(p.x); min_y = min_y.min(p.y);
-                    max_x = max_x.max(p.x + s.x); max_y = max_y.max(p.y + s.y);
-                }
-                let tl = self.viewport.canvas_to_screen(Pos2::new(min_x, min_y));
-                let br = self.viewport.canvas_to_screen(Pos2::new(max_x, max_y));
-                let bbox = Rect::from_min_max(tl, br).expand(8.0);
-                // Dashed border segments
-                let dash_color = SELECTION_COLOR.gamma_multiply(0.55);
-                let dash_len = 6.0_f32;
-                let gap_len = 4.0_f32;
-                let corners = [bbox.left_top(), bbox.right_top(), bbox.right_bottom(), bbox.left_bottom(), bbox.left_top()];
-                for pair in corners.windows(2) {
-                    let (a, b) = (pair[0], pair[1]);
-                    let total = (b - a).length();
-                    if total < 1.0 { continue; }
-                    let dir = (b - a) / total;
-                    let mut t = 0.0_f32;
-                    let mut drawing = true;
-                    while t < total {
-                        let seg_end = (t + if drawing { dash_len } else { gap_len }).min(total);
-                        if drawing {
-                            painter.line_segment([a + dir * t, a + dir * seg_end],
-                                Stroke::new(1.2, dash_color));
-                        }
-                        t = seg_end;
-                        drawing = !drawing;
-                    }
-                }
-                // Dimension labels
-                let w_canvas = max_x - min_x;
-                let h_canvas = max_y - min_y;
-                let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(9.0, 13.0);
-                let lbl_color = SELECTION_COLOR.gamma_multiply(0.75);
-                let bg = Color32::from_rgba_premultiplied(16, 16, 28, 180);
-                // Width label (bottom-center)
-                let w_text = format!("{:.0}", w_canvas);
-                let w_pos = Pos2::new(bbox.center().x, bbox.max.y + 10.0);
-                let w_galley = painter.layout_no_wrap(w_text.clone(), FontId::proportional(font_sz), lbl_color);
-                let wr = Rect::from_center_size(w_pos, w_galley.size()).expand2(Vec2::new(4.0, 2.0));
-                painter.rect_filled(wr, CornerRadius::same(3), bg);
-                painter.text(w_pos, Align2::CENTER_CENTER, &w_text, FontId::proportional(font_sz), lbl_color);
-                // Height label (right-center)
-                let h_text = format!("{:.0}", h_canvas);
-                let h_pos = Pos2::new(bbox.max.x + 10.0, bbox.center().y);
-                let h_galley = painter.layout_no_wrap(h_text.clone(), FontId::proportional(font_sz), lbl_color);
-                let hr = Rect::from_center_size(h_pos, h_galley.size()).expand2(Vec2::new(4.0, 2.0));
-                painter.rect_filled(hr, CornerRadius::same(3), bg);
-                painter.text(h_pos, Align2::CENTER_CENTER, &h_text, FontId::proportional(font_sz), lbl_color);
-                // Count label (top-left corner)
-                let count_text = format!("{}×", sel_nodes.len());
-                let count_pos = Pos2::new(bbox.min.x - 1.0, bbox.min.y - 10.0);
-                painter.text(count_pos, Align2::LEFT_BOTTOM, &count_text, FontId::proportional(font_sz), lbl_color);
-                let _ = (w_galley, h_galley); // suppress unused warnings
-            }
-        }
+        self.draw_multi_selection_dimensions(&painter);
 
         // Compute search matches (for highlight overlay)
         let search_matches: std::collections::HashSet<NodeId> = if self.show_search && !self.search_query.is_empty() {
@@ -710,29 +612,7 @@ impl FlowchartApp {
             }
         }
 
-        // Deletion ghost animations: shrink-fade over 0.25s
-        {
-            let now = painter.ctx().input(|i| i.time);
-            let duration = 0.25_f64;
-            self.deletion_ghosts.retain(|g| now - g.3 < duration);
-            if !self.deletion_ghosts.is_empty() {
-                for &(center, size, fill, death_time) in &self.deletion_ghosts {
-                    let t = ((now - death_time) / duration) as f32; // 0→1
-                    let scale = 1.0 - t * 0.5;
-                    let alpha = ((1.0 - t).powf(1.5) * 180.0) as u8;
-                    let screen_center = self.viewport.canvas_to_screen(Pos2::new(center[0], center[1]));
-                    let sw = size[0] * self.viewport.zoom * scale;
-                    let sh = size[1] * self.viewport.zoom * scale;
-                    let ghost_rect = Rect::from_center_size(screen_center, Vec2::new(sw, sh));
-                    let fill_col = Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], alpha);
-                    painter.rect_filled(ghost_rect, CornerRadius::same(6), fill_col);
-                    let stroke_col = Color32::from_rgba_unmultiplied(200, 80, 80, (alpha as f32 * 0.8) as u8);
-                    painter.rect_stroke(ghost_rect, CornerRadius::same(6),
-                        Stroke::new(1.5, stroke_col), StrokeKind::Outside);
-                }
-                painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
-            }
-        }
+        self.draw_deletion_ghosts(&painter);
 
         // Connectivity heatmap overlay
         if self.show_heatmap && !self.document.nodes.is_empty() {
@@ -764,110 +644,14 @@ impl FlowchartApp {
             self.draw_presentation_spotlight(&painter, canvas_rect, pointer_pos);
         }
 
-        // Multi-node drag ghost: faint outlines at original positions when dragging 2+ nodes
-        if let DragState::DraggingNode { start_positions, .. } = &self.drag {
-            if start_positions.len() >= 2 {
-                let ghost_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 60));
-                for (node_id, orig_pos) in start_positions {
-                    if let Some(node) = self.document.find_node(node_id) {
-                        let screen_tl = self.viewport.canvas_to_screen(*orig_pos);
-                        let ghost_rect = Rect::from_min_size(screen_tl, node.size_vec() * self.viewport.zoom);
-                        if ghost_rect.intersects(canvas_rect) {
-                            painter.rect_stroke(ghost_rect, CornerRadius::same(4), ghost_stroke, StrokeKind::Outside);
-                        }
-                    }
-                }
-            }
-        }
+        self.draw_drag_ghosts(&painter, canvas_rect);
 
-        // Live size readout near cursor during resize
-        if let DragState::ResizingNode { node_id, .. } = &self.drag {
-            if let (Some(node), Some(mouse)) = (self.document.find_node(node_id), pointer_pos) {
-                let [w, h] = node.size;
-                let label = format!("{w:.0} × {h:.0}");
-                let lpos = mouse + Vec2::new(12.0, 12.0);
-                let font = FontId::proportional(11.0);
-                let galley = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE);
-                let bg = Rect::from_min_size(lpos - Vec2::new(4.0, 2.0), galley.size() + Vec2::new(8.0, 4.0));
-                painter.rect_filled(bg, CornerRadius::same(4), Color32::from_rgba_premultiplied(20, 20, 36, 220));
-                painter.rect_stroke(bg, CornerRadius::same(4), Stroke::new(0.5, ACCENT.gamma_multiply(0.5)), StrokeKind::Outside);
-                painter.text(lpos, Align2::LEFT_TOP, &label, font, Color32::from_rgba_unmultiplied(205, 214, 244, 240));
-            }
-        }
-
-        // Resize ghost: show original node rect when resizing
-        if let DragState::ResizingNode { start_rect, .. } = &self.drag {
-            let sr = *start_rect; // [x, y, w, h] in canvas space
-            let tl = self.viewport.canvas_to_screen(Pos2::new(sr[0], sr[1]));
-            let ghost_rect = Rect::from_min_size(tl, Vec2::new(sr[2], sr[3]) * self.viewport.zoom);
-            painter.rect_stroke(
-                ghost_rect,
-                CornerRadius::same(4),
-                Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 90)),
-                StrokeKind::Outside,
-            );
-            // Draw dashed ghost with 2 offset rects
-            painter.rect_stroke(
-                ghost_rect.expand(1.5),
-                CornerRadius::same(5),
-                Stroke::new(0.5, Color32::from_rgba_unmultiplied(137, 180, 250, 40)),
-                StrokeKind::Outside,
-            );
-            // Size label
-            painter.text(
-                ghost_rect.center_bottom() + Vec2::new(0.0, 6.0),
-                Align2::CENTER_TOP,
-                &format!("{:.0} × {:.0}", sr[2], sr[3]),
-                FontId::proportional(9.0),
-                Color32::from_rgba_unmultiplied(137, 180, 250, 160),
-            );
-        }
+        self.draw_resize_feedback(&painter, pointer_pos);
 
         // --- Previews ---
         self.draw_alignment_guides(&painter, canvas_rect);
         self.draw_distance_indicators(&painter);
-        // Multi-selection bounding box outline
-        if self.selection.node_ids.len() >= 2 {
-            let bb = self.selection.node_ids.iter()
-                .filter_map(|id| self.document.find_node(id))
-                .fold(Option::<Rect>::None, |acc, n| {
-                    let sr = Rect::from_min_size(self.viewport.canvas_to_screen(n.pos()), n.size_vec() * self.viewport.zoom);
-                    Some(acc.map_or(sr, |r| r.union(sr)))
-                });
-            if let Some(bb) = bb {
-                let expanded = bb.expand(6.0);
-                // Dashed bounding box stroke
-                painter.rect_stroke(
-                    expanded, CornerRadius::same(4),
-                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 80)),
-                    StrokeKind::Outside,
-                );
-                // Corner handle dots
-                for corner in [expanded.left_top(), expanded.right_top(), expanded.left_bottom(), expanded.right_bottom()] {
-                    painter.circle_filled(corner, 4.0, Color32::from_rgba_unmultiplied(137, 180, 250, 180));
-                    painter.circle_stroke(corner, 4.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(30, 30, 46, 200)));
-                }
-                // Edge midpoint handles
-                for mid in [
-                    Pos2::new(expanded.center().x, expanded.min.y),
-                    Pos2::new(expanded.center().x, expanded.max.y),
-                    Pos2::new(expanded.min.x, expanded.center().y),
-                    Pos2::new(expanded.max.x, expanded.center().y),
-                ] {
-                    painter.circle_filled(mid, 3.0, Color32::from_rgba_unmultiplied(137, 180, 250, 140));
-                }
-                // Bounding box size label
-                let w = (bb.width() / self.viewport.zoom).round() as i32;
-                let h = (bb.height() / self.viewport.zoom).round() as i32;
-                painter.text(
-                    expanded.center_top() - Vec2::new(0.0, 14.0),
-                    Align2::CENTER_BOTTOM,
-                    &format!("{w} × {h}"),
-                    FontId::proportional(9.0),
-                    Color32::from_rgba_unmultiplied(137, 180, 250, 160),
-                );
-            }
-        }
+        self.draw_multi_selection_handles(&painter);
 
         self.draw_inline_node_editor(ui, canvas_rect);
         // Floating edge style bar: quick-toggle edge styles on selected edge
@@ -892,94 +676,9 @@ impl FlowchartApp {
         self.draw_canvas_hud(&painter, canvas_rect, pointer_pos);
         self.draw_canvas_vignette(&painter, canvas_rect);
 
-        // "Back to content" button — shown when user has panned away from all nodes
-        if !self.document.nodes.is_empty() {
-            let any_visible = self.document.nodes.iter().any(|n| {
-                let sr = Rect::from_min_size(
-                    self.viewport.canvas_to_screen(n.pos()),
-                    n.size_vec() * self.viewport.zoom,
-                );
-                sr.expand(40.0).intersects(canvas_rect)
-            });
-            if !any_visible {
-                let btn_center = Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 48.0);
-                let btn_size = Vec2::new(160.0, 30.0);
-                let btn_rect = Rect::from_center_size(btn_center, btn_size);
-                // Background pill
-                painter.rect_filled(btn_rect, CornerRadius::same(15), Color32::from_rgba_premultiplied(35, 35, 55, 220));
-                painter.rect_stroke(btn_rect, CornerRadius::same(15), Stroke::new(1.0, ACCENT.gamma_multiply(0.6)), StrokeKind::Outside);
-                painter.text(btn_center, Align2::CENTER_CENTER, "↩  Back to content",
-                    FontId::proportional(12.5), TEXT_SECONDARY.gamma_multiply(1.2));
-                // Hit test
-                if ui.ctx().input(|i| i.pointer.any_click()) {
-                    if let Some(mp) = ui.ctx().input(|i| i.pointer.latest_pos()) {
-                        if btn_rect.contains(mp) {
-                            self.fit_to_content();
-                        }
-                    }
-                }
-            }
-        }
+        self.draw_back_to_content(&painter, canvas_rect, ui);
 
-        // Tag filter pills — show at top-right when any tagged nodes exist
-        {
-            use crate::model::NodeTag;
-            let mut tags_used: Vec<NodeTag> = self.document.nodes.iter()
-                .filter_map(|n| n.tag)
-                .collect();
-            tags_used.dedup();
-            if !tags_used.is_empty() {
-                let all_tags = [NodeTag::Critical, NodeTag::Warning, NodeTag::Ok, NodeTag::Info];
-                let pill_h = 20.0_f32;
-                let pad = 8.0_f32;
-                let gap = 4.0_f32;
-                // Only show tags that are used in the document
-                let visible: Vec<NodeTag> = all_tags.iter().copied()
-                    .filter(|t| tags_used.iter().any(|u| u == t))
-                    .collect();
-                let total_w: f32 = visible.iter().map(|t| {
-                    t.label().len() as f32 * 6.5 + pad * 2.0
-                }).sum::<f32>() + gap * (visible.len().saturating_sub(1)) as f32 + 24.0;
-                let origin = Pos2::new(canvas_rect.max.x - total_w - 8.0, canvas_rect.min.y + 8.0);
-                let mut x = origin.x;
-                // "Filter:" label
-                painter.text(
-                    Pos2::new(x, origin.y + pill_h / 2.0),
-                    Align2::LEFT_CENTER,
-                    "Filter:",
-                    FontId::proportional(10.0),
-                    TEXT_DIM,
-                );
-                x += 38.0;
-                let click_pos = ui.ctx().input(|i| {
-                    if i.pointer.any_click() { i.pointer.latest_pos() } else { None }
-                });
-                for tag in &visible {
-                    let tag_c = tag.color();
-                    let fill_c = Color32::from_rgba_unmultiplied(tag_c[0], tag_c[1], tag_c[2], tag_c[3]);
-                    let label = tag.label();
-                    let pw = label.len() as f32 * 6.5 + pad * 2.0;
-                    let pill = Rect::from_min_size(Pos2::new(x, origin.y), Vec2::new(pw, pill_h));
-                    let is_active = self.tag_filter == Some(*tag);
-                    let bg_alpha = if is_active { 240u8 } else { 80u8 };
-                    let bg = Color32::from_rgba_unmultiplied(fill_c.r(), fill_c.g(), fill_c.b(), bg_alpha);
-                    painter.rect_filled(pill, CornerRadius::same(10), bg);
-                    if is_active {
-                        painter.rect_stroke(pill, CornerRadius::same(10),
-                            Stroke::new(1.5, fill_c), StrokeKind::Outside);
-                    }
-                    let txt_col = if is_active { Color32::from_rgb(20, 20, 30) } else { fill_c };
-                    painter.text(pill.center(), Align2::CENTER_CENTER, label,
-                        FontId::proportional(10.5), txt_col);
-                    if let Some(cp) = click_pos {
-                        if pill.expand(2.0).contains(cp) {
-                            self.tag_filter = if is_active { None } else { Some(*tag) };
-                        }
-                    }
-                    x += pw + gap;
-                }
-            }
-        }
+        self.draw_tag_filter_pills(&painter, canvas_rect, ui);
 
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
@@ -4424,6 +4123,297 @@ impl FlowchartApp {
                         }
                     });
             });
+    }
+
+    // -----------------------------------------------------------------------
+    // Extracted sub-methods (previously inline in draw_canvas)
+    // -----------------------------------------------------------------------
+
+    /// Tag filter pills — show at top-right when any tagged nodes exist.
+    fn draw_tag_filter_pills(&mut self, painter: &egui::Painter, canvas_rect: Rect, ui: &mut egui::Ui) {
+        use crate::model::NodeTag;
+        let mut tags_used: Vec<NodeTag> = self.document.nodes.iter()
+            .filter_map(|n| n.tag)
+            .collect();
+        tags_used.dedup();
+        if tags_used.is_empty() { return; }
+        let all_tags = [NodeTag::Critical, NodeTag::Warning, NodeTag::Ok, NodeTag::Info];
+        let pill_h = 20.0_f32;
+        let pad = 8.0_f32;
+        let gap = 4.0_f32;
+        let visible: Vec<NodeTag> = all_tags.iter().copied()
+            .filter(|t| tags_used.iter().any(|u| u == t))
+            .collect();
+        let total_w: f32 = visible.iter().map(|t| {
+            t.label().len() as f32 * 6.5 + pad * 2.0
+        }).sum::<f32>() + gap * (visible.len().saturating_sub(1)) as f32 + 24.0;
+        let origin = Pos2::new(canvas_rect.max.x - total_w - 8.0, canvas_rect.min.y + 8.0);
+        let mut x = origin.x;
+        painter.text(Pos2::new(x, origin.y + pill_h / 2.0), Align2::LEFT_CENTER,
+            "Filter:", FontId::proportional(10.0), TEXT_DIM);
+        x += 38.0;
+        let click_pos = ui.ctx().input(|i| {
+            if i.pointer.any_click() { i.pointer.latest_pos() } else { None }
+        });
+        for tag in &visible {
+            let tag_c = tag.color();
+            let fill_c = Color32::from_rgba_unmultiplied(tag_c[0], tag_c[1], tag_c[2], tag_c[3]);
+            let label = tag.label();
+            let pw = label.len() as f32 * 6.5 + pad * 2.0;
+            let pill = Rect::from_min_size(Pos2::new(x, origin.y), Vec2::new(pw, pill_h));
+            let is_active = self.tag_filter == Some(*tag);
+            let bg_alpha = if is_active { 240u8 } else { 80u8 };
+            let bg = Color32::from_rgba_unmultiplied(fill_c.r(), fill_c.g(), fill_c.b(), bg_alpha);
+            painter.rect_filled(pill, CornerRadius::same(10), bg);
+            if is_active {
+                painter.rect_stroke(pill, CornerRadius::same(10),
+                    Stroke::new(1.5, fill_c), StrokeKind::Outside);
+            }
+            let txt_col = if is_active { Color32::from_rgb(20, 20, 30) } else { fill_c };
+            painter.text(pill.center(), Align2::CENTER_CENTER, label,
+                FontId::proportional(10.5), txt_col);
+            if let Some(cp) = click_pos {
+                if pill.expand(2.0).contains(cp) {
+                    self.tag_filter = if is_active { None } else { Some(*tag) };
+                }
+            }
+            x += pw + gap;
+        }
+    }
+
+    /// "Back to content" button — shown when user has panned away from all nodes.
+    fn draw_back_to_content(&mut self, painter: &egui::Painter, canvas_rect: Rect, ui: &mut egui::Ui) {
+        if self.document.nodes.is_empty() { return; }
+        let any_visible = self.document.nodes.iter().any(|n| {
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(n.pos()),
+                n.size_vec() * self.viewport.zoom,
+            );
+            sr.expand(40.0).intersects(canvas_rect)
+        });
+        if any_visible { return; }
+        let btn_center = Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 48.0);
+        let btn_size = Vec2::new(160.0, 30.0);
+        let btn_rect = Rect::from_center_size(btn_center, btn_size);
+        painter.rect_filled(btn_rect, CornerRadius::same(15),
+            Color32::from_rgba_premultiplied(35, 35, 55, 220));
+        painter.rect_stroke(btn_rect, CornerRadius::same(15),
+            Stroke::new(1.0, ACCENT.gamma_multiply(0.6)), StrokeKind::Outside);
+        painter.text(btn_center, Align2::CENTER_CENTER, "↩  Back to content",
+            FontId::proportional(12.5), TEXT_SECONDARY.gamma_multiply(1.2));
+        if ui.ctx().input(|i| i.pointer.any_click()) {
+            if let Some(mp) = ui.ctx().input(|i| i.pointer.latest_pos()) {
+                if btn_rect.contains(mp) {
+                    self.fit_to_content();
+                }
+            }
+        }
+    }
+
+    /// Multi-selection dashed bounding box with dimension labels.
+    fn draw_multi_selection_dimensions(&self, painter: &egui::Painter) {
+        if self.selection.node_ids.len() < 2 { return; }
+        let sel_nodes: Vec<&Node> = self.document.nodes.iter()
+            .filter(|n| self.selection.contains_node(&n.id))
+            .collect();
+        if sel_nodes.is_empty() { return; }
+        let mut min_x = f32::MAX; let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN; let mut max_y = f32::MIN;
+        for n in &sel_nodes {
+            let p = n.pos(); let s = n.size_vec();
+            min_x = min_x.min(p.x); min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x + s.x); max_y = max_y.max(p.y + s.y);
+        }
+        let tl = self.viewport.canvas_to_screen(Pos2::new(min_x, min_y));
+        let br = self.viewport.canvas_to_screen(Pos2::new(max_x, max_y));
+        let bbox = Rect::from_min_max(tl, br).expand(8.0);
+        // Dashed border
+        let dash_color = SELECTION_COLOR.gamma_multiply(0.55);
+        let dash_len = 6.0_f32;
+        let gap_len = 4.0_f32;
+        let corners = [bbox.left_top(), bbox.right_top(), bbox.right_bottom(), bbox.left_bottom(), bbox.left_top()];
+        for pair in corners.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let total = (b - a).length();
+            if total < 1.0 { continue; }
+            let dir = (b - a) / total;
+            let mut t = 0.0_f32;
+            let mut drawing = true;
+            while t < total {
+                let seg_end = (t + if drawing { dash_len } else { gap_len }).min(total);
+                if drawing {
+                    painter.line_segment([a + dir * t, a + dir * seg_end],
+                        Stroke::new(1.2, dash_color));
+                }
+                t = seg_end;
+                drawing = !drawing;
+            }
+        }
+        // Dimension labels
+        let w_canvas = max_x - min_x;
+        let h_canvas = max_y - min_y;
+        let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(9.0, 13.0);
+        let lbl_color = SELECTION_COLOR.gamma_multiply(0.75);
+        let bg = Color32::from_rgba_premultiplied(16, 16, 28, 180);
+        let w_text = format!("{:.0}", w_canvas);
+        let w_pos = Pos2::new(bbox.center().x, bbox.max.y + 10.0);
+        let w_galley = painter.layout_no_wrap(w_text.clone(), FontId::proportional(font_sz), lbl_color);
+        let wr = Rect::from_center_size(w_pos, w_galley.size()).expand2(Vec2::new(4.0, 2.0));
+        painter.rect_filled(wr, CornerRadius::same(3), bg);
+        painter.text(w_pos, Align2::CENTER_CENTER, &w_text, FontId::proportional(font_sz), lbl_color);
+        let h_text = format!("{:.0}", h_canvas);
+        let h_pos = Pos2::new(bbox.max.x + 10.0, bbox.center().y);
+        let h_galley = painter.layout_no_wrap(h_text.clone(), FontId::proportional(font_sz), lbl_color);
+        let hr = Rect::from_center_size(h_pos, h_galley.size()).expand2(Vec2::new(4.0, 2.0));
+        painter.rect_filled(hr, CornerRadius::same(3), bg);
+        painter.text(h_pos, Align2::CENTER_CENTER, &h_text, FontId::proportional(font_sz), lbl_color);
+        let count_text = format!("{}×", sel_nodes.len());
+        let count_pos = Pos2::new(bbox.min.x - 1.0, bbox.min.y - 10.0);
+        painter.text(count_pos, Align2::LEFT_BOTTOM, &count_text, FontId::proportional(font_sz), lbl_color);
+        let _ = (w_galley, h_galley);
+    }
+
+    /// Deletion ghost animations: shrink-fade over 0.25s.
+    fn draw_deletion_ghosts(&mut self, painter: &egui::Painter) {
+        let now = painter.ctx().input(|i| i.time);
+        let duration = 0.25_f64;
+        self.deletion_ghosts.retain(|g| now - g.3 < duration);
+        if self.deletion_ghosts.is_empty() { return; }
+        for &(center, size, fill, death_time) in &self.deletion_ghosts {
+            let t = ((now - death_time) / duration) as f32;
+            let scale = 1.0 - t * 0.5;
+            let alpha = ((1.0 - t).powf(1.5) * 180.0) as u8;
+            let screen_center = self.viewport.canvas_to_screen(Pos2::new(center[0], center[1]));
+            let sw = size[0] * self.viewport.zoom * scale;
+            let sh = size[1] * self.viewport.zoom * scale;
+            let ghost_rect = Rect::from_center_size(screen_center, Vec2::new(sw, sh));
+            let fill_col = Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], alpha);
+            painter.rect_filled(ghost_rect, CornerRadius::same(6), fill_col);
+            let stroke_col = Color32::from_rgba_unmultiplied(200, 80, 80, (alpha as f32 * 0.8) as u8);
+            painter.rect_stroke(ghost_rect, CornerRadius::same(6),
+                Stroke::new(1.5, stroke_col), StrokeKind::Outside);
+        }
+        painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+    }
+
+    /// Resize feedback: ghost outline of original rect + live size readout.
+    fn draw_resize_feedback(&self, painter: &egui::Painter, pointer_pos: Option<Pos2>) {
+        if let DragState::ResizingNode { node_id, start_rect, .. } = &self.drag {
+            // Live size readout near cursor
+            if let (Some(node), Some(mouse)) = (self.document.find_node(node_id), pointer_pos) {
+                let [w, h] = node.size;
+                let label = format!("{w:.0} × {h:.0}");
+                let lpos = mouse + Vec2::new(12.0, 12.0);
+                let font = FontId::proportional(11.0);
+                let galley = painter.layout_no_wrap(label.clone(), font.clone(), Color32::WHITE);
+                let bg = Rect::from_min_size(lpos - Vec2::new(4.0, 2.0), galley.size() + Vec2::new(8.0, 4.0));
+                painter.rect_filled(bg, CornerRadius::same(4),
+                    Color32::from_rgba_premultiplied(20, 20, 36, 220));
+                painter.rect_stroke(bg, CornerRadius::same(4),
+                    Stroke::new(0.5, ACCENT.gamma_multiply(0.5)), StrokeKind::Outside);
+                painter.text(lpos, Align2::LEFT_TOP, &label, font,
+                    Color32::from_rgba_unmultiplied(205, 214, 244, 240));
+            }
+            // Ghost outline of original rect
+            let sr = *start_rect;
+            let tl = self.viewport.canvas_to_screen(Pos2::new(sr[0], sr[1]));
+            let ghost_rect = Rect::from_min_size(tl, Vec2::new(sr[2], sr[3]) * self.viewport.zoom);
+            painter.rect_stroke(ghost_rect, CornerRadius::same(4),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 90)),
+                StrokeKind::Outside);
+            painter.rect_stroke(ghost_rect.expand(1.5), CornerRadius::same(5),
+                Stroke::new(0.5, Color32::from_rgba_unmultiplied(137, 180, 250, 40)),
+                StrokeKind::Outside);
+            painter.text(ghost_rect.center_bottom() + Vec2::new(0.0, 6.0), Align2::CENTER_TOP,
+                &format!("{:.0} × {:.0}", sr[2], sr[3]), FontId::proportional(9.0),
+                Color32::from_rgba_unmultiplied(137, 180, 250, 160));
+        }
+    }
+
+    /// Focus mode + tag filter dim overlays.
+    fn draw_focus_and_filter_overlays(
+        &self,
+        painter: &egui::Painter,
+        canvas_rect: Rect,
+        focus_neighbors: &std::collections::HashSet<NodeId>,
+    ) {
+        if self.focus_mode && !self.selection.is_empty() {
+            for node in &self.document.nodes {
+                if self.selection.contains_node(&node.id) { continue; }
+                let screen_pos = self.viewport.canvas_to_screen(node.pos());
+                let screen_size = node.size_vec() * self.viewport.zoom;
+                let screen_rect = Rect::from_min_size(screen_pos, screen_size);
+                if !screen_rect.intersects(canvas_rect) { continue; }
+                let alpha = if focus_neighbors.contains(&node.id) { 90u8 } else { 190u8 };
+                painter.rect_filled(screen_rect, CornerRadius::same(4),
+                    Color32::from_rgba_premultiplied(16, 16, 28, alpha));
+            }
+        }
+        if let Some(filter_tag) = self.tag_filter {
+            for node in &self.document.nodes {
+                if node.tag == Some(filter_tag) { continue; }
+                let screen_pos = self.viewport.canvas_to_screen(node.pos());
+                let screen_size = node.size_vec() * self.viewport.zoom;
+                let screen_rect = Rect::from_min_size(screen_pos, screen_size);
+                if !screen_rect.intersects(canvas_rect) { continue; }
+                painter.rect_filled(screen_rect, CornerRadius::same(4),
+                    Color32::from_rgba_premultiplied(12, 12, 22, 175));
+            }
+        }
+    }
+
+    /// Multi-node drag ghost: faint outlines at original positions.
+    fn draw_drag_ghosts(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        if let DragState::DraggingNode { start_positions, .. } = &self.drag {
+            if start_positions.len() >= 2 {
+                let ghost_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 60));
+                for (node_id, orig_pos) in start_positions {
+                    if let Some(node) = self.document.find_node(node_id) {
+                        let screen_tl = self.viewport.canvas_to_screen(*orig_pos);
+                        let ghost_rect = Rect::from_min_size(screen_tl, node.size_vec() * self.viewport.zoom);
+                        if ghost_rect.intersects(canvas_rect) {
+                            painter.rect_stroke(ghost_rect, CornerRadius::same(4), ghost_stroke, StrokeKind::Outside);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Multi-selection bounding box with corner + midpoint handles and size label.
+    fn draw_multi_selection_handles(&self, painter: &egui::Painter) {
+        if self.selection.node_ids.len() < 2 { return; }
+        let bb = self.selection.node_ids.iter()
+            .filter_map(|id| self.document.find_node(id))
+            .fold(Option::<Rect>::None, |acc, n| {
+                let sr = Rect::from_min_size(
+                    self.viewport.canvas_to_screen(n.pos()),
+                    n.size_vec() * self.viewport.zoom,
+                );
+                Some(acc.map_or(sr, |r| r.union(sr)))
+            });
+        let Some(bb) = bb else { return };
+        let expanded = bb.expand(6.0);
+        painter.rect_stroke(expanded, CornerRadius::same(4),
+            Stroke::new(1.0, Color32::from_rgba_unmultiplied(137, 180, 250, 80)),
+            StrokeKind::Outside);
+        for corner in [expanded.left_top(), expanded.right_top(), expanded.left_bottom(), expanded.right_bottom()] {
+            painter.circle_filled(corner, 4.0, Color32::from_rgba_unmultiplied(137, 180, 250, 180));
+            painter.circle_stroke(corner, 4.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(30, 30, 46, 200)));
+        }
+        for mid in [
+            Pos2::new(expanded.center().x, expanded.min.y),
+            Pos2::new(expanded.center().x, expanded.max.y),
+            Pos2::new(expanded.min.x, expanded.center().y),
+            Pos2::new(expanded.max.x, expanded.center().y),
+        ] {
+            painter.circle_filled(mid, 3.0, Color32::from_rgba_unmultiplied(137, 180, 250, 140));
+        }
+        let w = (bb.width() / self.viewport.zoom).round() as i32;
+        let h = (bb.height() / self.viewport.zoom).round() as i32;
+        painter.text(expanded.center_top() - Vec2::new(0.0, 14.0), Align2::CENTER_BOTTOM,
+            &format!("{w} × {h}"), FontId::proportional(9.0),
+            Color32::from_rgba_unmultiplied(137, 180, 250, 160));
     }
 }
 
