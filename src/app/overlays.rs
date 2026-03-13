@@ -711,6 +711,11 @@ impl FlowchartApp {
                             keep_open = false;
                         }
                         ui.add_space(4.0);
+                        if ui.small_button("⎘").on_hover_text("Copy spec to clipboard").clicked() {
+                            ui.ctx().copy_text(self.spec_editor_text.clone());
+                            self.status_message = Some(("Spec copied to clipboard".to_string(), std::time::Instant::now()));
+                        }
+                        ui.add_space(4.0);
                         if ui.small_button("↻").on_hover_text("Sync text from current canvas state").clicked() {
                             do_sync = true;
                         }
