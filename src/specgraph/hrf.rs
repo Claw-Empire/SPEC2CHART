@@ -53,6 +53,9 @@ use std::collections::HashMap;
 ///
 /// ### Supported node style tags:
 ///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/white/black)
+///   `{fill:#rrggbb}` — fill color as CSS hex (e.g. `{fill:#1e6f5c}`)
+///   `{size:200x80}` — shorthand for `{w:200} {h:80}`
+///   `{pos:X,Y}` — shorthand for `{x:X} {y:Y}` (also pins the node)
 ///   `{w:200}` — explicit width in canvas units
 ///   `{h:100}` — explicit height in canvas units
 ///   `{icon:🔒}` — icon badge
@@ -647,6 +650,21 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             }
         } else if tag.starts_with("fill:") {
             fill_color = tag_to_fill_color(tag[5..].trim());
+        } else if tag.starts_with("size:") {
+            // {size:200x80} shorthand for {w:200} {h:80}
+            let dims = tag[5..].trim();
+            if let Some(x_pos) = dims.find('x') {
+                width_override  = dims[..x_pos].parse::<f32>().ok();
+                height_override = dims[x_pos+1..].parse::<f32>().ok();
+            }
+        } else if tag.starts_with("pos:") {
+            // {pos:100,200} shorthand for {x:100} {y:200} + pinned
+            let coords = tag[4..].trim();
+            if let Some(comma) = coords.find(',') {
+                pos_x = coords[..comma].trim().parse::<f32>().ok();
+                pos_y = coords[comma+1..].trim().parse::<f32>().ok();
+                if pos_x.is_some() && pos_y.is_some() { pinned = true; }
+            }
         } else if tag.starts_with("w:") {
             width_override = tag[2..].trim().parse::<f32>().ok();
         } else if tag.starts_with("h:") {
@@ -792,7 +810,14 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                         let key = raw[..colon].to_lowercase();
                         let val = raw[colon + 1..].trim();
                         match key.as_str() {
-                            "from" | "to" | "icon" => format!("{}:{}", key, val),
+                            // Preserve original case for these values
+                            "from" | "to" | "icon" | "url" | "link" => {
+                                format!("{}:{}", key, val)
+                            }
+                            // Preserve fill/color values that start with '#' (hex colors)
+                            "fill" | "color" if val.starts_with('#') => {
+                                format!("{}:{}", key, val)
+                            }
                             _ => format!("{}:{}", key, val.to_lowercase()),
                         }
                     } else {
@@ -904,6 +929,33 @@ fn tag_to_fill_color(name: &str) -> Option<[u8; 4]> {
         "white"  => Some([255, 255, 255, 255]),
         "black"  => Some([17, 17, 27, 255]),
         "surface" | "default" => Some([30, 30, 46, 255]),
+        _ => parse_hex_color(name),
+    }
+}
+
+/// Parse a CSS-style hex color: `#rgb`, `#rrggbb`, or `#rrggbbaa`.
+fn parse_hex_color(s: &str) -> Option<[u8; 4]> {
+    let s = s.trim().strip_prefix('#')?;
+    match s.len() {
+        3 => {
+            let r = u8::from_str_radix(&s[0..1].repeat(2), 16).ok()?;
+            let g = u8::from_str_radix(&s[1..2].repeat(2), 16).ok()?;
+            let b = u8::from_str_radix(&s[2..3].repeat(2), 16).ok()?;
+            Some([r, g, b, 255])
+        }
+        6 => {
+            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+            Some([r, g, b, 255])
+        }
+        8 => {
+            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&s[6..8], 16).ok()?;
+            Some([r, g, b, a])
+        }
         _ => None,
     }
 }
@@ -985,11 +1037,17 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 None => "",
             };
             let pin_tag = if node.pinned {
-                format!(" {{pinned}} {{x:{:.0}}} {{y:{:.0}}}", node.position[0], node.position[1])
+                format!(" {{pos:{:.0},{:.0}}}", node.position[0], node.position[1])
             } else { String::new() };
-            let fill_tag = fill_color_name(node.style.fill_color)
-                .map(|n| format!(" {{fill:{}}}", n))
-                .unwrap_or_default();
+            let fill_tag = if let Some(name) = fill_color_name(node.style.fill_color) {
+                format!(" {{fill:{}}}", name)
+            } else {
+                let fc = node.style.fill_color;
+                let default_fill = [30_u8, 30, 46, 255];
+                if fc != default_fill {
+                    format!(" {{fill:#{:02x}{:02x}{:02x}}}", fc[0], fc[1], fc[2])
+                } else { String::new() }
+            };
             let w_tag = if node.size[0] != 160.0 {
                 format!(" {{w:{}}}", node.size[0])
             } else { String::new() };
@@ -1473,11 +1531,12 @@ web --> api
         let b = &doc.nodes[1];
         assert!(!b.pinned);
 
-        // Round-trip: exported spec must contain position tags
+        // Round-trip: exported spec must contain position tags (now as {pos:X,Y})
         let exported = export_hrf(&doc, "Pin Test");
-        assert!(exported.contains("{pinned}"), "missing pinned in: {}", exported);
-        assert!(exported.contains("{x:250}"), "missing x tag in: {}", exported);
-        assert!(exported.contains("{y:180}"), "missing y tag in: {}", exported);
+        assert!(
+            exported.contains("{pos:250,180}") || exported.contains("{pinned}"),
+            "missing position in: {}", exported
+        );
 
         // Re-import should preserve position
         let doc2 = parse_hrf(&exported).unwrap();
@@ -1624,5 +1683,39 @@ a <-> c
             "expected a->c edge (from a<->c)");
         assert!(doc.edges.iter().any(|e| e.source.node_id == c && e.target.node_id == a),
             "expected c->a edge (from a<->c)");
+    }
+
+    #[test]
+    fn test_hex_color_and_size_pos_shorthands() {
+        let input = r#"
+# Hex Test
+
+## Nodes
+- [a] Node A {fill:#ff6600} {size:200x90}
+- [b] Node B {fill:#abc} {pos:100,200}
+- [c] Node C {fill:#1a2b3c4d}
+
+## Flow
+a --> b
+"#;
+        let doc = parse_hrf(input).unwrap();
+
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Node A").unwrap();
+        assert_eq!(a.style.fill_color, [0xff, 0x66, 0x00, 0xff], "hex 6-digit fill");
+        assert!((a.size[0] - 200.0).abs() < 1.0, "size width: {}", a.size[0]);
+        assert!((a.size[1] - 90.0).abs() < 1.0, "size height: {}", a.size[1]);
+
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Node B").unwrap();
+        assert_eq!(b.style.fill_color, [0xaa, 0xbb, 0xcc, 0xff], "hex 3-digit fill");
+        assert!(b.pinned, "pos: shorthand should pin");
+        assert!((b.position[0] - 100.0).abs() < 1.0, "pos x: {}", b.position[0]);
+        assert!((b.position[1] - 200.0).abs() < 1.0, "pos y: {}", b.position[1]);
+
+        let c = doc.nodes.iter().find(|n| n.display_label() == "Node C").unwrap();
+        assert_eq!(c.style.fill_color, [0x1a, 0x2b, 0x3c, 0x4d], "hex 8-digit fill with alpha");
+
+        // Export should round-trip hex colors
+        let exported = export_hrf(&doc, "Hex Test");
+        assert!(exported.contains("{fill:#ff6600}"), "hex in export: {}", exported);
     }
 }

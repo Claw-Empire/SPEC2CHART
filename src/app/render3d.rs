@@ -903,6 +903,115 @@ impl FlowchartApp {
             self.theme.text_dim,
         );
 
+        // Camera preset buttons (top-right corner overlay)
+        {
+            let btn_w = 42.0_f32;
+            let btn_h = 22.0_f32;
+            let gap = 4.0_f32;
+            let margin = 8.0_f32;
+            let presets = [
+                ("Iso",   -0.4_f32, 0.6_f32),
+                ("Top",   -0.4_f32, 1.52_f32),
+                ("Front",  0.0_f32, 0.15_f32),
+                ("Side",   1.57_f32, 0.3_f32),
+            ];
+            let total_w = presets.len() as f32 * (btn_w + gap) - gap;
+            let start_x = canvas_rect.max.x - margin - total_w;
+            let y = canvas_rect.min.y + margin;
+            let pointer = ui.ctx().input(|i| i.pointer.hover_pos());
+            let clicked = ui.ctx().input(|i| i.pointer.primary_clicked());
+            for (k, (label, preset_yaw, preset_pitch)) in presets.iter().enumerate() {
+                let btn_rect = Rect::from_min_size(
+                    Pos2::new(start_x + k as f32 * (btn_w + gap), y),
+                    Vec2::new(btn_w, btn_h),
+                );
+                let is_active = (self.camera3d.pitch - preset_pitch).abs() < 0.05
+                    && (self.camera3d.yaw - preset_yaw).abs() < 0.05;
+                let hovered = pointer.map_or(false, |p| btn_rect.contains(p));
+                let bg = if is_active {
+                    Color32::from_rgba_premultiplied(139, 213, 202, 200)
+                } else if hovered {
+                    Color32::from_rgba_premultiplied(60, 60, 80, 200)
+                } else {
+                    Color32::from_rgba_premultiplied(20, 20, 35, 170)
+                };
+                painter.rect_filled(btn_rect, CornerRadius::same(5), bg);
+                painter.rect_stroke(
+                    btn_rect,
+                    CornerRadius::same(5),
+                    Stroke::new(1.0, Color32::from_rgba_premultiplied(100, 100, 140, 160)),
+                    StrokeKind::Inside,
+                );
+                let txt_color = if is_active {
+                    Color32::from_rgb(20, 20, 30)
+                } else {
+                    Color32::from_rgba_premultiplied(200, 200, 220, 220)
+                };
+                painter.text(
+                    btn_rect.center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    FontId::proportional(10.5),
+                    txt_color,
+                );
+                if hovered && clicked {
+                    self.camera3d.yaw = *preset_yaw;
+                    self.camera3d.pitch = *preset_pitch;
+                }
+            }
+        }
+
+        // Named layer pills (top-left corner legend)
+        if !self.document.layer_names.is_empty() {
+            let mut sorted_layers: Vec<(&i32, &String)> =
+                self.document.layer_names.iter().collect();
+            sorted_layers.sort_by_key(|(k, _)| **k);
+            let pill_colors = [
+                Color32::from_rgb(137, 180, 250), // blue
+                Color32::from_rgb(166, 227, 161), // green
+                Color32::from_rgb(249, 226, 175), // yellow
+                Color32::from_rgb(203, 166, 247), // mauve
+                Color32::from_rgb(243, 139, 168), // red
+                Color32::from_rgb(148, 226, 213), // teal
+            ];
+            let mut y = canvas_rect.min.y + 10.0;
+            for (i, (layer_idx, name)) in sorted_layers.iter().enumerate() {
+                let color = pill_colors[i % pill_colors.len()];
+                let text = format!("L{}  {}", layer_idx, name);
+                let galley = painter.layout_no_wrap(
+                    text.clone(),
+                    FontId::proportional(10.5),
+                    color,
+                );
+                let pill_w = galley.size().x + 14.0;
+                let pill_h = galley.size().y + 6.0;
+                let pill_rect = Rect::from_min_size(
+                    Pos2::new(canvas_rect.min.x + 8.0, y),
+                    Vec2::new(pill_w, pill_h),
+                );
+                let cr = CornerRadius::same((pill_h * 0.5) as u8);
+                painter.rect_filled(
+                    pill_rect,
+                    cr,
+                    Color32::from_rgba_premultiplied(10, 10, 20, 160),
+                );
+                painter.rect_stroke(
+                    pill_rect,
+                    cr,
+                    Stroke::new(1.0, color.gamma_multiply(0.55)),
+                    StrokeKind::Inside,
+                );
+                painter.text(
+                    pill_rect.center(),
+                    Align2::CENTER_CENTER,
+                    &text,
+                    FontId::proportional(10.5),
+                    color,
+                );
+                y += pill_h + 4.0;
+            }
+        }
+
         // Status toast
         if let Some((ref msg, time)) = self.status_message {
             let elapsed = time.elapsed().as_secs_f32();
