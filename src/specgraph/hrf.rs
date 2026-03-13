@@ -511,10 +511,12 @@ fn parse_flow_line_chain(
         let to_id = to_id_raw.split_whitespace().next().unwrap_or(&to_id_raw).to_string();
 
         let source_node_id = id_map.get(&from_id).ok_or_else(|| {
-            format!("Line {}: unknown node '{}' (not defined in ## Nodes)", line_num + 1, from_id)
+            let hint = suggest_id(&from_id, id_map.keys().map(|s| s.as_str()));
+            format!("Line {}: unknown node id '{}'{}", line_num + 1, from_id, hint)
         })?;
         let target_node_id = id_map.get(&to_id).ok_or_else(|| {
-            format!("Line {}: unknown node '{}' (not defined in ## Nodes)", line_num + 1, to_id)
+            let hint = suggest_id(&to_id, id_map.keys().map(|s| s.as_str()));
+            format!("Line {}: unknown node id '{}'{}", line_num + 1, to_id, hint)
         })?;
 
         // For reverse arrows (<--), swap source and target
@@ -612,6 +614,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut text_valign: Option<crate::model::TextVAlign> = None;
     let mut opacity_override: Option<f32> = None;
     let mut gradient = false;
+    let mut locked = false;
+    let mut url_override: Option<String> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -664,6 +668,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             }
         } else if tag == "gradient" || tag == "grad" {
             gradient = true;
+        } else if tag == "locked" || tag == "lock" {
+            locked = true;
+        } else if tag.starts_with("url:") || tag.starts_with("link:") {
+            let prefix_len = if tag.starts_with("url:") { 4 } else { 5 };
+            url_override = Some(tag[prefix_len..].trim().to_string());
         } else if tag == "shadow" || tag == "drop-shadow" {
             shadow = true;
         } else if tag == "bold" || tag == "strong" {
@@ -739,6 +748,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(tv) = text_valign { node.style.text_valign = tv; }
     if let Some(op) = opacity_override { node.style.opacity = op.clamp(0.0, 1.0); }
     if gradient { node.style.gradient = true; }
+    if locked { node.locked = true; }
+    if let Some(u) = url_override { node.url = u; }
 
     Ok((id, node))
 }
@@ -983,6 +994,10 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 format!(" {{opacity:{:.0}}}", node.style.opacity * 100.0)
             } else { String::new() };
             let gradient_tag = if node.style.gradient { " {gradient}" } else { "" };
+            let locked_tag = if node.locked { " {locked}" } else { "" };
+            let url_tag = if !node.url.is_empty() {
+                format!(" {{url:{}}}", node.url)
+            } else { String::new() };
             let align_tag = match node.style.text_align {
                 crate::model::TextAlign::Left => " {align:left}",
                 crate::model::TextAlign::Right => " {align:right}",
@@ -993,10 +1008,10 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 crate::model::TextVAlign::Bottom => " {valign:bottom}",
                 crate::model::TextVAlign::Middle => "",
             };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
-                border_tag, opacity_tag, align_tag, valign_tag, w_tag, h_tag));
+                border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag, w_tag, h_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
@@ -1045,6 +1060,23 @@ fn cardinality_str(c: &Cardinality) -> Option<&'static str> {
         Cardinality::ZeroOrOne => Some("0..1"),
         Cardinality::OneOrMany => Some("1..N"),
         Cardinality::ZeroOrMany => Some("0..N"),
+    }
+}
+
+/// Suggest similar IDs for better error messages using simple prefix/substring matching.
+fn suggest_id<'a>(bad_id: &str, candidates: impl Iterator<Item = &'a str>) -> String {
+    let bad_lower = bad_id.to_lowercase();
+    let matches: Vec<&str> = candidates
+        .filter(|c| {
+            let cl = c.to_lowercase();
+            cl.contains(&bad_lower[..bad_lower.len().min(3)]) || bad_lower.contains(&cl[..cl.len().min(3)])
+        })
+        .take(3)
+        .collect();
+    if matches.is_empty() {
+        " — define it in ## Nodes section".to_string()
+    } else {
+        format!(" — did you mean: {}?", matches.join(", "))
     }
 }
 
