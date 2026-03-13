@@ -310,24 +310,82 @@ impl FlowchartApp {
                     }
                 });
                 ui.add_space(2.0);
-                // Copy spec to clipboard (HRF format)
-                if ui
-                    .add_sized(
-                        egui::vec2(ui.available_width(), 24.0),
-                        egui::Button::new(
-                            egui::RichText::new("Copy Spec to Clipboard").size(11.0),
-                        )
-                        .fill(Color32::TRANSPARENT),
-                    )
-                    .on_hover_text("Copy diagram as HRF spec text (Cmd+Shift+S)")
-                    .clicked()
-                {
-                    let hrf = specgraph::export_hrf(&self.document, "Untitled Diagram");
-                    ui.ctx().copy_text(hrf);
-                    self.status_message = Some((
-                        "Spec copied to clipboard".to_string(),
-                        std::time::Instant::now(),
-                    ));
+                // Copy/paste spec clipboard row
+                ui.horizontal(|ui| {
+                    let half = (ui.available_width() - 4.0) / 2.0;
+                    let btn_size = egui::vec2(half, 24.0);
+                    if ui
+                        .add_sized(btn_size, egui::Button::new(
+                            egui::RichText::new("Copy Spec").size(11.0),
+                        ).fill(Color32::TRANSPARENT))
+                        .on_hover_text("Copy diagram as HRF spec (Cmd+Shift+S)")
+                        .clicked()
+                    {
+                        let hrf = specgraph::export_hrf(&self.document, "Untitled Diagram");
+                        ui.ctx().copy_text(hrf);
+                        self.status_message = Some((
+                            "Spec copied to clipboard".to_string(),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                    if ui
+                        .add_sized(btn_size, egui::Button::new(
+                            egui::RichText::new(if self.show_spec_paste_area { "▼ Paste Spec" } else { "▶ Paste Spec" }).size(11.0),
+                        ).fill(Color32::TRANSPARENT))
+                        .on_hover_text("Open text area to paste/type a spec (Cmd+Shift+P)")
+                        .clicked()
+                    {
+                        self.show_spec_paste_area = !self.show_spec_paste_area;
+                        if self.show_spec_paste_area {
+                            self.spec_paste_buf.clear();
+                        }
+                    }
+                });
+                // Paste spec text area
+                if self.show_spec_paste_area {
+                    ui.add_space(4.0);
+                    ui.group(|ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(egui::RichText::new("Paste spec text here:").size(10.0).color(self.theme.text_dim));
+                        ui.add_space(2.0);
+                        let te = egui::TextEdit::multiline(&mut self.spec_paste_buf)
+                            .desired_width(ui.available_width())
+                            .desired_rows(6)
+                            .font(FontId::monospace(10.0))
+                            .hint_text("# My Diagram\n\n## Nodes\n- [a] Node A\n\n## Flow\na --> b");
+                        ui.add(te);
+                        ui.add_space(4.0);
+                        let import_btn = ui.add_sized(
+                            egui::vec2(ui.available_width(), 26.0),
+                            egui::Button::new(egui::RichText::new("Import").size(11.5).color(self.theme.accent)),
+                        );
+                        if import_btn.clicked() && !self.spec_paste_buf.trim().is_empty() {
+                            let text = self.spec_paste_buf.clone();
+                            let llm_cfg = if self.llm_config.api_key.is_empty() {
+                                None
+                            } else { Some(&self.llm_config) };
+                            match specgraph::import_auto(&text, llm_cfg) {
+                                Ok(doc) => {
+                                    self.document = doc;
+                                    self.selection.clear();
+                                    self.history.push(&self.document);
+                                    self.pending_fit = true;
+                                    self.show_spec_paste_area = false;
+                                    self.spec_paste_buf.clear();
+                                    self.status_message = Some((
+                                        "Spec imported!".to_string(),
+                                        std::time::Instant::now(),
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.status_message = Some((
+                                        format!("Import error: {}", e),
+                                        std::time::Instant::now(),
+                                    ));
+                                }
+                            }
+                        }
+                    });
                 }
                 ui.add_space(2.0);
                 // Spec cheatsheet toggle
