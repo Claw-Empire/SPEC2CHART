@@ -1879,17 +1879,27 @@ impl FlowchartApp {
             }
         }
 
+        // Layer plane colors: distinct pastel tints per layer index
+        let layer_plane_colors = [
+            [137_u8, 180, 250],  // blue
+            [166, 227, 161],     // green
+            [249, 226, 175],     // yellow
+            [203, 166, 247],     // purple
+            [243, 139, 168],     // pink
+            [148, 226, 213],     // teal
+            [250, 179, 135],     // peach
+            [180, 190, 254],     // lavender
+        ];
+
         for layer in 1..=max_layer {
             let z = layer as f32 * Z_SPACING;
             let node_count = z_layers.values().filter(|&&l| l == layer).count();
 
             // Draw a subtle transparent grid plane for each non-zero layer
-            // to help visualize the 3D separation.
             if node_count > 0 {
-                let plane_alpha = 8u8; // very transparent
-                let plane_color = self.theme.accent.gamma_multiply(plane_alpha as f32 / 255.0);
-                let edge_alpha = 20u8;
-                let edge_color = self.theme.accent.gamma_multiply(edge_alpha as f32 / 255.0);
+                let lc = layer_plane_colors[(layer as usize - 1) % layer_plane_colors.len()];
+                let fill_color = Color32::from_rgba_unmultiplied(lc[0], lc[1], lc[2], 10);
+                let edge_color = Color32::from_rgba_unmultiplied(lc[0], lc[1], lc[2], 35);
 
                 // Draw 4 grid lines as a bounding frame on this plane
                 let plane_corners = [
@@ -1901,14 +1911,22 @@ impl FlowchartApp {
                 let projected_corners: Vec<Option<Pos2>> = plane_corners.iter()
                     .map(|&p| self.camera3d.project(p, screen_center, screen_size).map(|(s, _)| s))
                     .collect();
+                // Fill the plane quad if all corners are visible
+                let all_visible: Vec<Pos2> = projected_corners.iter().filter_map(|p| *p).collect();
+                if all_visible.len() == 4 {
+                    painter.add(egui::Shape::convex_polygon(
+                        all_visible.clone(),
+                        fill_color,
+                        Stroke::NONE,
+                    ));
+                }
                 // Draw frame lines
                 for i in 0..4 {
                     let next = (i + 1) % 4;
                     if let (Some(a), Some(b)) = (projected_corners[i], projected_corners[next]) {
-                        painter.line_segment([a, b], Stroke::new(0.5, edge_color));
+                        painter.line_segment([a, b], Stroke::new(0.8, edge_color));
                     }
                 }
-                let _ = plane_color; // used conceptually, polygon fill not shown for performance
             }
 
             let label_pos = [target[0] - grid_range, target[1] - grid_range, z];
