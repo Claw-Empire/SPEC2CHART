@@ -1064,12 +1064,30 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
                 out.push_str(&format!("grid-size = {}\n", vp.grid_size));
             }
             if vp.view_3d {
-                out.push_str("view = 3d\n");
-                if let Some(yaw) = vp.camera_yaw {
-                    out.push_str(&format!("camera_yaw = {:.4}\n", yaw));
-                }
-                if let Some(pitch) = vp.camera_pitch {
-                    out.push_str(&format!("camera_pitch = {:.4}\n", pitch));
+                // Check if (yaw, pitch) matches a named preset — prefer compact `camera = iso`
+                let preset_name = match (vp.camera_yaw, vp.camera_pitch) {
+                    (Some(y), Some(p)) => {
+                        let presets: &[(&str, f32, f32)] = &[
+                            ("iso",   -0.6, 0.5),
+                            ("top",    0.0, 1.55),
+                            ("front",  0.0, 0.05),
+                            ("side",   1.57, 0.05),
+                        ];
+                        presets.iter().find(|(_, py, pp)| (y - py).abs() < 0.08 && (p - pp).abs() < 0.08)
+                            .map(|(name, _, _)| *name)
+                    }
+                    _ => None,
+                };
+                if let Some(name) = preset_name {
+                    out.push_str(&format!("camera = {}\n", name));
+                } else {
+                    out.push_str("view = 3d\n");
+                    if let Some(yaw) = vp.camera_yaw {
+                        out.push_str(&format!("camera_yaw = {:.4}\n", yaw));
+                    }
+                    if let Some(pitch) = vp.camera_pitch {
+                        out.push_str(&format!("camera_pitch = {:.4}\n", pitch));
+                    }
                 }
             }
         }
