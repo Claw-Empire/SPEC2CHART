@@ -1744,6 +1744,18 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         let luma = 0.299 * fc[0] as f32 + 0.587 * fc[1] as f32 + 0.114 * fc[2] as f32;
         node.style.text_color = if luma > 140.0 { [15, 15, 20, 255] } else { [220, 220, 230, 255] };
     }
+    // Auto-size: expand width to fit label if no explicit {w:N} given.
+    // Uses an approximation: ~7.5px per character at the default font size.
+    // Only expands (never shrinks) and caps at 320px to stay readable.
+    if width_override.is_none() && !node.is_frame {
+        let label_chars = node.display_label().chars().count() as f32;
+        let sublabel_chars = node.sublabel.chars().count() as f32;
+        let longest = label_chars.max(sublabel_chars);
+        let auto_w = (longest * 7.5 + 44.0).clamp(100.0, 320.0);
+        if auto_w > node.size[0] {
+            node.size[0] = auto_w;
+        }
+    }
     if let Some(w) = width_override {
         node.size[0] = w;
     }
