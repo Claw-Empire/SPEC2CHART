@@ -2,16 +2,21 @@
 
 Three-tier cloud application with load balancing, microservices, and data layer.
 
+## Style
+// Reusable style templates
+tier-data     = {fill:blue} {sublabel:v15 · us-east-1}
+tier-api      = {fill:purple} {sublabel:v2 · running}
+tier-frontend = {fill:teal} {sublabel:React SPA}
+
 ## Config
-bg = dots
-flow = TB
+camera = iso
 layer0 = Data Tier
 layer1 = API Tier
 layer2 = Frontend
 
 ## Layer 0: Data Tier
 
-- [pg] PostgreSQL {database} {sublabel:v15 · us-east-1} {highlight}
+- [pg] PostgreSQL {database} {tier-data} {highlight}
   Primary relational store for users and orders.
 - [redis] Redis Cache {cache} {sublabel:TTL 5min}
   Session data and hot-path query cache.
@@ -22,7 +27,7 @@ layer2 = Frontend
 
 - [lb] Load Balancer {load-balancer} {sublabel:ALB · round-robin} {highlight}
   Routes traffic across API instances.
-- [auth] Auth Service {service} {sublabel:OAuth2 / JWT}
+- [auth] Auth Service {service} {tier-api}
   Token validation and issuance.
 - [api] REST API {service} {sublabel:v2 · /api/v2} {note:Entry point for all external traffic}
   Core business logic and routing.
@@ -35,26 +40,33 @@ layer2 = Frontend
 
 - [cdn] CDN {cloud} {sublabel:CloudFront} {note:Edge caching — 50+ PoPs globally}
   Static asset delivery at the edge.
-- [web] Web App {service} {sublabel:React SPA}
+- [web] Web App {service} {tier-frontend}
   Single-page application served from CDN.
 - [mobile] Mobile App {user} {sublabel:iOS / Android}
   Native mobile clients.
 
 ## Flow
 
+// External traffic
 internet -> lb {thick} {note:All external traffic enters here}
-lb -> auth
-lb -> api
-api -> pg
+
+// Load balancer
+lb -> [auth, api]
+
+// API service
+api -> [pg, redis, mq]
 api -> redis {note:session lookup}
 api -> mq {dashed} {note:async publish}
-mq -> worker
-worker -> pg
-worker -> s3 {dashed}
 api -> s3 {dashed}
+
+// Worker
+mq -> worker
+worker -> [pg, s3]
+
+// Frontend
 cdn -> web
-mobile -> lb
 web -> lb
+mobile -> lb
 
 ## Notes
 
