@@ -290,21 +290,11 @@ pub const MANTLE: Color32 = Color32::from_rgb(24, 24, 37);
 
 // Accent alpha variants
 pub const ACCENT_GLOW: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 30);
-pub const ACCENT_HOVER: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 80);
 pub const ACCENT_FAINT: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 15);
-pub const ACCENT_SELECT_BG: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 40);
-pub const ACCENT_SELECT_LIGHT: Color32 = Color32::from_rgba_premultiplied(137, 180, 250, 100);
 pub const TEXT_HOVER_BG: Color32 = Color32::from_rgba_premultiplied(205, 214, 244, 18);
-
-// Shadows
-pub const SHADOW_LIGHT: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 40);
-pub const SHADOW_MEDIUM: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 50);
 
 // ER diagram
 pub const FK_COLOR: Color32 = Color32::from_rgb(249, 226, 175);
-
-// Edge label background
-pub const EDGE_LABEL_BG: Color32 = Color32::from_rgba_premultiplied(30, 30, 30, 200);
 
 // Section divider
 pub const DIVIDER_COLOR: Color32 = Color32::from_rgba_premultiplied(69, 71, 90, 80);
