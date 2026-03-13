@@ -527,9 +527,11 @@ impl FlowchartApp {
                     (
                         "Search & Navigate",
                         &[
-                            ("⌘F", "Search nodes (spotlight)"),
+                            ("⌘F", "Search nodes (spotlight) — dims non-matches"),
                             ("↑ / ↓", "Navigate search results"),
                             ("Enter", "Jump to search result"),
+                            ("⌘H", "Find & replace node labels"),
+                            ("⌘E", "Live spec editor — edit HRF, canvas updates in real time"),
                             ("⌘⇧1–5", "Save viewport bookmark"),
                             ("⇧1–5", "Jump to bookmark"),
                         ],
@@ -580,5 +582,109 @@ impl FlowchartApp {
                     });
             });
         self.show_shortcuts_panel = open;
+    }
+
+    // -----------------------------------------------------------------------
+    // Live HRF Spec Editor (Cmd+E) — side panel that shows the current spec
+    // as editable text and re-parses after 400ms of idle typing.
+    // -----------------------------------------------------------------------
+    pub(crate) fn draw_spec_editor(&mut self, ctx: &egui::Context) {
+        if !self.show_spec_editor { return; }
+
+        let panel_w = 420.0_f32;
+        let theme = self.theme.clone();
+
+        let mut keep_open = true;
+        egui::SidePanel::right("spec_editor_panel")
+            .exact_width(panel_w)
+            .resizable(true)
+            .frame(egui::Frame::NONE
+                .fill(theme.surface0)
+                .inner_margin(egui::Margin::ZERO))
+            .show(ctx, |ui| {
+                // Header bar
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.colored_label(theme.text_primary,
+                        egui::RichText::new("Spec Editor").size(13.0).strong());
+                    ui.add_space(4.0);
+                    ui.colored_label(theme.text_dim,
+                        egui::RichText::new("— edit HRF, canvas updates live").size(10.5));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(8.0);
+                        if ui.small_button("✕").on_hover_text("Close spec editor  Cmd+E").clicked() {
+                            keep_open = false;
+                        }
+                    });
+                });
+
+                // Thin divider
+                let rect = ui.available_rect_before_wrap();
+                ui.painter().line_segment(
+                    [rect.left_top(), rect.right_top()],
+                    egui::Stroke::new(1.0, theme.surface1),
+                );
+                ui.add_space(1.0);
+
+                // Error banner (if last parse failed)
+                if let Some(ref err) = self.spec_editor_error.clone() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        ui.colored_label(
+                            Color32::from_rgb(243, 139, 168),
+                            egui::RichText::new(format!("⚠ {}", err)).size(10.5),
+                        );
+                    });
+                    ui.add_space(4.0);
+                }
+
+                // Main text editor
+                let available = ui.available_rect_before_wrap();
+                let mut ui2 = ui.new_child(
+                    egui::UiBuilder::new().max_rect(available)
+                );
+                let resp = ui2.add_sized(
+                    available.size(),
+                    egui::TextEdit::multiline(&mut self.spec_editor_text)
+                        .font(egui::FontId::monospace(12.5))
+                        .desired_rows(40)
+                        .lock_focus(false)
+                        .text_color(theme.text_secondary),
+                );
+                if resp.changed() {
+                    let now = ui2.ctx().input(|i| i.time);
+                    self.spec_editor_last_edit = Some(now);
+                    self.spec_editor_error = None;
+                    // Request repaint so debounce fires promptly
+                    ui2.ctx().request_repaint_after(std::time::Duration::from_millis(420));
+                }
+                // Escape closes panel
+                if ui2.ctx().input(|i| i.key_pressed(egui::Key::Escape)) && resp.has_focus() {
+                    keep_open = false;
+                }
+            });
+
+        if !keep_open {
+            self.show_spec_editor = false;
+        }
+    }
+
+    /// Parse `spec_editor_text` and apply to `document` if valid.
+    /// Called by the debounce timer in `update()`.
+    pub(crate) fn apply_spec_editor_text(&mut self) {
+        use crate::specgraph::hrf::parse_hrf;
+        match parse_hrf(&self.spec_editor_text) {
+            Ok(doc) => {
+                // Preserve viewport (don't jump around)
+                let vp = self.viewport.clone();
+                self.document = doc;
+                self.viewport = vp;
+                self.history.push(&self.document);
+                self.spec_editor_error = None;
+            }
+            Err(e) => {
+                self.spec_editor_error = Some(e.to_string());
+            }
+        }
     }
 }

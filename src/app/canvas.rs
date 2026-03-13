@@ -617,6 +617,20 @@ impl FlowchartApp {
 
         self.draw_deletion_ghosts(&painter);
 
+        // Search dim: when search is active with a query, dim non-matching nodes
+        if self.show_search && !self.search_query.is_empty() {
+            for node in &self.document.nodes {
+                if search_matches.contains(&node.id) { continue; }
+                let sp = self.viewport.canvas_to_screen(node.pos());
+                let ss = node.size_vec() * self.viewport.zoom;
+                let sr = Rect::from_min_size(sp, ss);
+                if sr.expand(20.0).intersects(canvas_rect) {
+                    let cr = CornerRadius::same(node.style.corner_radius as u8);
+                    painter.rect_filled(sr, cr, Color32::from_rgba_unmultiplied(0, 0, 0, 160));
+                }
+            }
+        }
+
         // Hover dim: when hovering a node with no selection, dim non-neighbor nodes
         if let Some(hid) = hover_node_id {
             if self.selection.is_empty() {

@@ -225,6 +225,14 @@ pub struct FlowchartApp {
     pub(crate) dark_mode: bool,
     /// Show minimap overlay in bottom-right corner of canvas (toggle M)
     pub(crate) show_minimap: bool,
+    /// Live HRF spec editor panel (toggle Cmd+E)
+    pub(crate) show_spec_editor: bool,
+    /// Text buffer for the live spec editor
+    pub(crate) spec_editor_text: String,
+    /// egui time of last keystroke in spec editor (for debounce)
+    pub(crate) spec_editor_last_edit: Option<f64>,
+    /// Last parse error from the spec editor (shown as inline warning)
+    pub(crate) spec_editor_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -332,6 +340,10 @@ impl FlowchartApp {
             theme: t,
             dark_mode: true,
             show_minimap: false,
+            show_spec_editor: false,
+            spec_editor_text: String::new(),
+            spec_editor_last_edit: None,
+            spec_editor_error: None,
         }
     }
 
@@ -507,5 +519,17 @@ impl eframe::App for FlowchartApp {
         self.draw_edge_label_editor(ctx);
         self.draw_comment_editor(ctx);
         self.draw_shortcuts_panel(ctx);
+        self.draw_spec_editor(ctx);
+
+        // Spec editor debounce: re-parse 400ms after last keystroke
+        if self.show_spec_editor {
+            if let Some(t) = self.spec_editor_last_edit {
+                let now = ctx.input(|i| i.time);
+                if now - t > 0.4 {
+                    self.spec_editor_last_edit = None;
+                    self.apply_spec_editor_text();
+                }
+            }
+        }
     }
 }

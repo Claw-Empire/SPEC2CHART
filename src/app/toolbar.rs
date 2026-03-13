@@ -321,6 +321,27 @@ impl FlowchartApp {
                     }
                 });
                 ui.add_space(2.0);
+                // Live spec editor button
+                if ui
+                    .add_sized(
+                        egui::vec2(ui.available_width(), 24.0),
+                        egui::Button::new(
+                            egui::RichText::new(if self.show_spec_editor { "▼ Live Spec Editor" } else { "▶ Live Spec Editor" })
+                                .size(11.0)
+                                .color(if self.show_spec_editor { self.theme.accent } else { self.theme.text_secondary }),
+                        ).fill(Color32::TRANSPARENT),
+                    )
+                    .on_hover_text("Open side panel to edit HRF spec live (Cmd+E)")
+                    .clicked()
+                {
+                    self.show_spec_editor = !self.show_spec_editor;
+                    if self.show_spec_editor {
+                        let title = self.document.title.clone();
+                        self.spec_editor_text = crate::specgraph::hrf::export_hrf(&self.document, &title);
+                        self.spec_editor_error = None;
+                    }
+                }
+                ui.add_space(2.0);
                 // Copy/paste spec clipboard row
                 ui.horizontal(|ui| {
                     let half = (ui.available_width() - 4.0) / 2.0;

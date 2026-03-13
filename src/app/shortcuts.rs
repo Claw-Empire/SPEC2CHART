@@ -539,6 +539,16 @@ impl FlowchartApp {
             if self.show_search { self.search_query.clear(); }
         }
 
+        // Cmd+E = live spec editor panel (populate with current HRF on open)
+        if ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.matches_exact(cmd)) {
+            self.show_spec_editor = !self.show_spec_editor;
+            if self.show_spec_editor {
+                let title = self.document.title.clone();
+                self.spec_editor_text = crate::specgraph::hrf::export_hrf(&self.document, &title);
+                self.spec_editor_error = None;
+            }
+        }
+
         // Cmd+Shift+F = zoom to fit selected nodes (or all if nothing selected)
         let cmd_shift = egui::Modifiers { command: true, shift: true, ..Default::default() };
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd_shift)) {
