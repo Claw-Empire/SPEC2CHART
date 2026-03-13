@@ -78,7 +78,7 @@ fn append_line_with_tags(
 ) {
     use egui::text::TextFormat;
     let c_comment = Color32::from_rgb(108, 112, 134);
-    let c_string  = Color32::from_rgb(249, 226, 175); // yellow — "quoted labels"
+    let c_string  = Color32::from_rgb(249, 226, 175); // yellow — "quoted labels" and |pipe labels|
     let fmt_base    = TextFormat { font_id: font.clone(), color: base_color, ..Default::default() };
     let fmt_tag     = TextFormat { font_id: font.clone(), color: tag_color,  ..Default::default() };
     let fmt_comment = TextFormat { font_id: font.clone(), color: c_comment,  ..Default::default() };
@@ -99,29 +99,38 @@ fn append_line_with_tags(
         (&line[..split], &line[split..])
     };
 
+    // Helper: find a |pipe| span — only valid if '|' appears in first half of remaining
+    // (to avoid triggering on arbitrary '|' that aren't pipe labels).
+    // We detect |..| only if it starts at position 0 or is preceded by whitespace/arrow.
+    fn find_pipe_label(s: &str) -> Option<usize> {
+        // Pipe label starts with '|' at position 0 or after whitespace
+        if s.starts_with('|') { return Some(0); }
+        None
+    }
+
     let mut remaining = code_part;
     while !remaining.is_empty() {
-        // Priority: {tag} > "string" — scan for whichever comes first
+        // Collect candidate positions for each special token type
         let tag_pos    = remaining.find('{');
         let string_pos = remaining.find('"');
-        match (tag_pos, string_pos) {
-            (Some(t), Some(s)) if s < t => {
-                // Quoted string comes first
-                if s > 0 { job.append(&remaining[..s], 0.0, fmt_base.clone()); }
-                remaining = &remaining[s..];
-                // Find closing quote
-                if let Some(end) = remaining[1..].find('"') {
-                    job.append(&remaining[..end + 2], 0.0, fmt_string.clone());
-                    remaining = &remaining[end + 2..];
-                } else {
-                    job.append(remaining, 0.0, fmt_string.clone());
-                    break;
-                }
-            }
-            (Some(t), _) => {
-                // Tag comes first (or there's no string)
-                if t > 0 { job.append(&remaining[..t], 0.0, fmt_base.clone()); }
-                remaining = &remaining[t..];
+        let pipe_pos   = find_pipe_label(remaining);
+
+        // Find the earliest special token
+        let earliest = [
+            tag_pos.map(|p| (p, 0u8)),
+            string_pos.map(|p| (p, 1u8)),
+            pipe_pos.map(|p| (p, 2u8)),
+        ]
+        .iter()
+        .flatten()
+        .copied()
+        .min_by_key(|&(pos, _)| pos);
+
+        match earliest {
+            Some((pos, 0)) => {
+                // {tag}
+                if pos > 0 { job.append(&remaining[..pos], 0.0, fmt_base.clone()); }
+                remaining = &remaining[pos..];
                 if let Some(close) = remaining.find('}') {
                     job.append(&remaining[..close + 1], 0.0, fmt_tag.clone());
                     remaining = &remaining[close + 1..];
@@ -130,10 +139,10 @@ fn append_line_with_tags(
                     break;
                 }
             }
-            (None, Some(s)) => {
-                // Only a quoted string remains
-                if s > 0 { job.append(&remaining[..s], 0.0, fmt_base.clone()); }
-                remaining = &remaining[s..];
+            Some((pos, 1)) => {
+                // "quoted string"
+                if pos > 0 { job.append(&remaining[..pos], 0.0, fmt_base.clone()); }
+                remaining = &remaining[pos..];
                 if let Some(end) = remaining[1..].find('"') {
                     job.append(&remaining[..end + 2], 0.0, fmt_string.clone());
                     remaining = &remaining[end + 2..];
@@ -142,7 +151,19 @@ fn append_line_with_tags(
                     break;
                 }
             }
-            (None, None) => {
+            Some((pos, 2)) => {
+                // |pipe label|
+                if pos > 0 { job.append(&remaining[..pos], 0.0, fmt_base.clone()); }
+                remaining = &remaining[pos..];
+                if let Some(end) = remaining[1..].find('|') {
+                    job.append(&remaining[..end + 2], 0.0, fmt_string.clone());
+                    remaining = &remaining[end + 2..];
+                } else {
+                    job.append(remaining, 0.0, fmt_string.clone());
+                    break;
+                }
+            }
+            _ => {
                 job.append(remaining, 0.0, fmt_base.clone());
                 break;
             }

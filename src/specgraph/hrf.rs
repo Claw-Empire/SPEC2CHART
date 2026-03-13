@@ -1464,6 +1464,20 @@ fn parse_flow_line_chain(
             (left.to_string(), String::new())
         };
 
+        // right may start with a Mermaid-style pipe label: |label text| node_id {tags}
+        // Detect and extract it BEFORE the extract_tags call.
+        let (right, pipe_label) = if right.starts_with('|') {
+            if let Some(close_pipe) = right[1..].find('|') {
+                let lbl = right[1..close_pipe + 1].trim().to_string();
+                let after_pipe = right[close_pipe + 2..].trim();
+                (after_pipe, lbl)
+            } else {
+                (right, String::new())
+            }
+        } else {
+            (right, String::new())
+        };
+
         // right: node id (first word), optional ": colon label", then optional {tags}
         // Supports: `b: performs auth {dashed}` or `b {dashed}` or `b`
         // We must extract {tags} first to avoid a colon inside a tag confusing us.
@@ -1482,8 +1496,14 @@ fn parse_flow_line_chain(
                 (first_token.to_string(), String::new())
             }
         };
-        // Prefix label wins over colon label if both specified
-        let label = if !label.is_empty() { label.clone() } else { colon_label };
+        // Prefix quoted label > pipe label > colon label (priority order)
+        let label = if !label.is_empty() {
+            label.clone()
+        } else if !pipe_label.is_empty() {
+            pipe_label
+        } else {
+            colon_label
+        };
 
         let source_node_id = id_map.get(&from_id).ok_or_else(|| {
             let hint = suggest_id(&from_id, id_map.keys().map(|s| s.as_str()));
@@ -3332,5 +3352,33 @@ b -> c: stores session {dashed}
         assert_eq!(ab.label, "authenticates user", "colon label on plain edge");
         assert_eq!(bc.label, "stores session", "colon label with {{dashed}} tag");
         assert!(bc.style.dashed, "dashed tag should apply even with colon label");
+    }
+
+    #[test]
+    fn test_pipe_label_on_edge() {
+        // Mermaid-style: a ->|label| b
+        let input = r#"
+# Pipe Label Test
+
+## Nodes
+- [x] Node X
+- [y] Node Y
+- [z] Node Z
+
+## Flow
+x ->|sends request| y
+y ->|returns data| z {dashed}
+"#;
+        let doc = parse_hrf(input).expect("pipe label parse");
+        let x = doc.nodes.iter().find(|n| n.display_label() == "Node X").unwrap();
+        let y = doc.nodes.iter().find(|n| n.display_label() == "Node Y").unwrap();
+        let z_node = doc.nodes.iter().find(|n| n.display_label() == "Node Z").unwrap();
+        let xy = doc.edges.iter().find(|e| e.source.node_id == x.id && e.target.node_id == y.id)
+            .expect("x->y edge");
+        let yz = doc.edges.iter().find(|e| e.source.node_id == y.id && e.target.node_id == z_node.id)
+            .expect("y->z edge");
+        assert_eq!(xy.label, "sends request", "pipe label on plain edge");
+        assert_eq!(yz.label, "returns data", "pipe label with {{dashed}} tag");
+        assert!(yz.style.dashed, "dashed tag applies with pipe label");
     }
 }
