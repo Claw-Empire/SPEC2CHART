@@ -65,6 +65,25 @@ impl FlowchartApp {
         // Bulk tag
         self.tag_submenu(ui, "🏷 Tag all…", None);
 
+        // Bulk highlight toggle
+        {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let all_highlighted = ids.iter().all(|id| {
+                self.document.find_node(id).map_or(false, |n| n.highlight)
+            });
+            let hl_label = if all_highlighted { "⭐ Remove Highlight All" } else { "⭐ Highlight All" };
+            if ui.button(hl_label).clicked() {
+                let new_val = !all_highlighted;
+                for id in &ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        node.highlight = new_val;
+                    }
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+        }
+
         ui.separator();
 
         // Align submenu
@@ -204,6 +223,19 @@ impl FlowchartApp {
         }
 
         self.tag_submenu(ui, "🏷 Tag…", Some(node_id));
+
+        // Highlight toggle
+        if let Some(node) = self.document.find_node(&node_id) {
+            let hl = node.highlight;
+            let hl_label = if hl { "⭐ Remove Highlight" } else { "⭐ Highlight" };
+            if ui.button(hl_label).clicked() {
+                if let Some(node) = self.document.find_node_mut(&node_id) {
+                    node.highlight = !hl;
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+        }
 
         ui.separator();
         if ui.button("🗑 Delete").clicked() {
