@@ -1763,6 +1763,21 @@ impl FlowchartApp {
             rows.push((desc.to_string(), self.theme.text_dim));
         }
         if rich_mode {
+            // Sublabel (if set and different from main label)
+            if !node.sublabel.is_empty() {
+                rows.push((node.sublabel.clone(), self.theme.text_dim.gamma_multiply(0.75)));
+            }
+            // Progress bar percentage
+            if node.progress > 0.0 {
+                let pct = (node.progress * 100.0).round() as u32;
+                let bar = "█".repeat((node.progress * 10.0) as usize);
+                let empty = "░".repeat(10 - (node.progress * 10.0) as usize);
+                rows.push((format!("{}% {}{}", pct, bar, empty),
+                    if node.progress >= 1.0 { Color32::from_rgb(166, 227, 161) }
+                    else if node.progress >= 0.6 { Color32::from_rgb(249, 226, 175) }
+                    else { Color32::from_rgb(243, 139, 168) }
+                ));
+            }
             if conn_in > 0 || conn_out > 0 {
                 rows.push((format!("↑{} in  ↓{} out", conn_in, conn_out), self.theme.text_dim));
             }

@@ -59,6 +59,7 @@ use std::collections::HashMap;
 ///   `{pinned}` — pin node to canvas position
 ///   `{x:N}` `{y:N}` — explicit canvas position (auto-included when pinned)
 ///   `{frame}` — group frame container (large translucent background box)
+///   `{collapsed}` / `{compact}` — render node as a compact pill (collapsed state)
 ///
 /// ### Supported node style tags:
 ///   `{fill:blue}` — fill color (blue/green/red/yellow/purple/pink/teal/orange/sky/lavender/gray/mauve/white/black/none)
@@ -1524,6 +1525,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut depth_3d: f32 = 0.0;
     let mut highlight = false;
     let mut progress: f32 = 0.0;
+    let mut collapsed = false;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -1604,6 +1606,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             opacity_override = Some(0.0);
         } else if tag == "gradient" || tag == "grad" {
             gradient = true;
+        } else if tag == "collapsed" || tag == "collapse" || tag == "compact" || tag == "pill" {
+            collapsed = true;
         } else if tag == "locked" || tag == "lock" {
             locked = true;
         } else if tag.starts_with("url:") || tag.starts_with("link:") {
@@ -1722,6 +1726,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(fs) = font_size_override { node.style.font_size = fs.clamp(6.0, 72.0); }
     if gradient { node.style.gradient = true; }
     if locked { node.locked = true; }
+    if collapsed { node.collapsed = true; }
     if let Some(u) = url_override { node.url = u; }
     if let Some(bc) = border_color { node.style.border_color = bc; }
     if let Some(tc) = text_color { node.style.text_color = tc; }
@@ -2126,6 +2131,7 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             } else { String::new() };
             let gradient_tag = if node.style.gradient { " {gradient}" } else { "" };
             let locked_tag = if node.locked { " {locked}" } else { "" };
+            let collapsed_tag = if node.collapsed { " {collapsed}" } else { "" };
             let url_tag = if !node.url.is_empty() {
                 format!(" {{url:{}}}", node.url)
             } else { String::new() };
@@ -2171,10 +2177,10 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let note_tag = if !node.comment.is_empty() {
                 format!(" {{note:{}}}", node.comment)
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
-                border_tag, opacity_tag, locked_tag, url_tag, align_tag, valign_tag,
+                border_tag, opacity_tag, locked_tag, collapsed_tag, url_tag, align_tag, valign_tag,
                 border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
