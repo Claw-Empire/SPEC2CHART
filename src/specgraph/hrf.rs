@@ -867,6 +867,35 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
     }
 
+    // Position sticky notes in a horizontal strip below the main diagram.
+    // Find the lowest y-coordinate of all non-note nodes, then place notes
+    // starting from there + a gap, arranged in a row.
+    {
+        let sticky_ids: Vec<NodeId> = doc.nodes.iter()
+            .filter(|n| matches!(n.kind, NodeKind::StickyNote { .. }) && n.position == [0.0, 0.0])
+            .map(|n| n.id)
+            .collect();
+        if !sticky_ids.is_empty() {
+            // Find bounding box of non-note nodes
+            let max_y_of_diagram = doc.nodes.iter()
+                .filter(|n| !matches!(n.kind, NodeKind::StickyNote { .. }))
+                .map(|n| n.position[1] + n.size[1])
+                .fold(0.0_f32, f32::max);
+            let min_x_of_diagram = doc.nodes.iter()
+                .filter(|n| !matches!(n.kind, NodeKind::StickyNote { .. }))
+                .map(|n| n.position[0])
+                .fold(f32::INFINITY, f32::min);
+            let note_y = max_y_of_diagram + 60.0;
+            let mut note_x = if min_x_of_diagram.is_finite() { min_x_of_diagram } else { 100.0 };
+            for nid in sticky_ids {
+                if let Some(node) = doc.nodes.iter_mut().find(|n| n.id == nid) {
+                    node.position = [note_x, note_y];
+                    note_x += node.size[0] + 16.0;
+                }
+            }
+        }
+    }
+
     Ok(doc)
 }
 
@@ -1912,11 +1941,11 @@ fn parse_note_line(line: &str) -> Result<Node, String> {
 
     for tag in &tags {
         match tag.as_str() {
-            "pink" => color = StickyColor::Pink,
-            "green" => color = StickyColor::Green,
-            "blue" => color = StickyColor::Blue,
-            "purple" => color = StickyColor::Purple,
-            "yellow" => color = StickyColor::Yellow,
+            "pink" | "red" | "critical" | "error" => color = StickyColor::Pink,
+            "green" | "ok" | "success" | "done" => color = StickyColor::Green,
+            "blue" | "info" | "note" | "sky" | "teal" => color = StickyColor::Blue,
+            "purple" | "mauve" | "violet" | "lavender" => color = StickyColor::Purple,
+            "yellow" | "warning" | "warn" | "caution" | "orange" | "peach" => color = StickyColor::Yellow,
             _ if tag.starts_with("z:") => {
                 if let Ok(v) = tag[2..].trim().parse::<f32>() {
                     z_offset = v;
