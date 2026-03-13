@@ -110,6 +110,17 @@ impl FlowchartApp {
                                 ui.add_space(6.0);
                                 let pos_text = format!("({},{}) {}×{}", pos.x.round() as i32, pos.y.round() as i32, node.size[0].round() as i32, node.size[1].round() as i32);
                                 label(ui, &pos_text, text_dim);
+                                // 3D layer info
+                                if node.z_offset != 0.0 {
+                                    ui.add_space(4.0);
+                                    label(ui, &format!("z:{}", node.z_offset.round() as i32), accent.gamma_multiply(0.7));
+                                }
+                                // Progress info
+                                if node.progress > 0.0 {
+                                    ui.add_space(4.0);
+                                    let pct = (node.progress * 100.0).round() as u32;
+                                    label(ui, &format!("▓ {}%", pct), text_dim);
+                                }
                             }
                         } else if sel_count > 1 {
                             // Bounding box of selection
