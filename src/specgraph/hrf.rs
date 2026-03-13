@@ -919,6 +919,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     _ => {}
                 }
             }
+            "auto-tier-color" | "tier-color" | "auto-color" | "tier-tint" => {
+                match val.to_lowercase().as_str() {
+                    "true" | "yes" | "on" | "1" => { doc.import_hints.auto_tier_color = true; }
+                    _ => {}
+                }
+            }
             // canvas background color: bg-color = #1e1e2e  or  bg-color = dark
             "bg-color" | "background-color" | "background" | "canvas-bg" | "canvas-color" => {
                 let v = val.trim();
@@ -996,6 +1002,16 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         for (i, node) in doc.nodes.iter_mut().enumerate() {
             if node.z_offset == 0.0 && !node.is_frame {
                 node.z_offset = topo_layer[i] as f32 * Z_SPACING;
+            }
+        }
+    }
+
+    // auto-tier-color: tint nodes with default fill based on their z-tier
+    if doc.import_hints.auto_tier_color {
+        let default_fill: [u8; 4] = [49, 50, 68, 255];
+        for node in doc.nodes.iter_mut() {
+            if !node.is_frame && node.z_offset != 0.0 && node.style.fill_color == default_fill {
+                node.style.fill_color = z_tier_fill_color(node.z_offset);
             }
         }
     }
@@ -1874,6 +1890,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut highlight = false;
     let mut progress: f32 = 0.0;
     let mut node_glow = false;
+    let mut tier_color_tag = false;
     let mut collapsed = false;
     for tag in &tags {
         if tag.starts_with("z:") {
@@ -1961,6 +1978,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
         } else if tag == "glow" || tag == "neon" || tag == "glow-node" {
             node_glow = true;
+        } else if tag == "tier-color" || tag == "auto-color" || tag == "tint" || tag == "tier-tint" {
+            // {tier-color}: auto-assign fill based on z-tier (applied after all tags)
+            tier_color_tag = true;
         } else if let Some(nt) = tag_to_node_tag(tag) {
             node_tag = Some(nt);
         } else if tag == "pinned" || tag == "pin" {
@@ -2091,6 +2111,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     // Apply explicit position (used when {pinned} {x:N} {y:N} are present)
     if let Some(x) = pos_x { node.position[0] = x; }
     if let Some(y) = pos_y { node.position[1] = y; }
+    // Apply tier-color: auto-assign fill based on z_offset tier when {tier-color} is used
+    // and no explicit fill color was given.
+    if tier_color_tag && fill_color.is_none() {
+        fill_color = Some(z_tier_fill_color(z_offset));
+    }
     if let Some(fc) = fill_color {
         node.style.fill_color = fc;
         // Auto-contrast: pick light or dark text based on fill luminance
@@ -2439,6 +2464,19 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "hexagon" | "hex" | "process" => NodeShape::Hexagon,
         "connector" | "api" | "interface" | "protocol" | "gateway" => NodeShape::Connector,
         _ => NodeShape::RoundedRect,
+    }
+}
+
+/// Returns a muted tier-specific fill color for a given z-offset.
+/// Used by the {tier-color} tag and auto-tier-color config option.
+fn z_tier_fill_color(z: f32) -> [u8; 4] {
+    match z.round() as i32 {
+        0   => [28, 55, 100, 255],   // db — deep navy (complements blue accent)
+        120 => [25, 80, 68, 255],    // api — deep teal
+        240 => [68, 40, 105, 255],   // frontend — deep purple
+        360 => [105, 65, 20, 255],   // edge — deep amber
+        480 => [48, 50, 70, 255],    // infra — deep slate
+        _   => [49, 50, 68, 255],    // unknown — default fill
     }
 }
 
@@ -3763,6 +3801,52 @@ b -> c: stores data {dashed}
         assert_eq!(a.z_offset, 240.0, "frontend tier");
         assert_eq!(b.z_offset, 120.0, "backend tier");
         assert_eq!(c.z_offset, 0.0,   "storage tier");
+    }
+
+    #[test]
+    fn test_tier_color_tag_and_config() {
+        let input = r#"
+# Tier Color Test
+
+## Config
+auto-tier-color = true
+view = 3d
+
+## Nodes
+- [db_node] Database {layer:db}
+- [api_node] REST API {layer:api}
+- [ui_node] UI App {layer:frontend}
+- [custom] Custom {layer:api} {fill:red}
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        let find = |label: &str| doc.nodes.iter().find(|n| n.display_label() == label).unwrap();
+
+        // auto-tier-color should tint nodes with default fill
+        let db_node = find("Database");
+        assert_eq!(db_node.z_offset, 0.0, "db tier → z=0");
+        // db is z=0, auto-tier-color only tints z!=0, so db stays default
+        // (z=0 nodes are the base layer and auto-tier-color skips them)
+
+        let api_node = find("REST API");
+        assert_eq!(api_node.z_offset, 120.0, "api tier → z=120");
+        let api_fill = api_node.style.fill_color;
+        assert_ne!(api_fill, [49, 50, 68, 255], "api should be tinted, not default fill");
+
+        let ui_node = find("UI App");
+        assert_eq!(ui_node.z_offset, 240.0, "frontend tier → z=240");
+        let ui_fill = ui_node.style.fill_color;
+        assert_ne!(ui_fill, [49, 50, 68, 255], "frontend should be tinted, not default fill");
+        // UI tier should be different from API tier
+        assert_ne!(ui_fill, api_fill, "different tiers should have different tints");
+
+        // explicit {fill:red} should override tier-color
+        let custom = find("Custom");
+        let red_fill = [243_u8, 139, 168, 255];
+        assert_eq!(custom.style.fill_color, red_fill, "explicit fill should override tier-color");
+
+        // Import hint should be set
+        assert!(doc.import_hints.auto_tier_color, "auto_tier_color hint should be set");
+        assert_eq!(doc.import_hints.view_3d, Some(true), "view=3d hint should be set");
     }
 
     #[test]

@@ -605,6 +605,7 @@ impl FlowchartApp {
                             ("3D cam cfg", "camera = iso|top|front|side  (## Config)"),
                             ("3D auto-z", "auto-z = true  (auto-assign z from topology)"),
                             ("3D named tier", "{layer:db}  {layer:api}  {layer:frontend}  {layer:edge}"),
+                            ("3D tier-color", "{tier-color} / auto-tier-color = true  (tier fill tints)"),
                             ("Grid layout", "## Grid cols=3  (auto grid layout, 3 columns)"),
                         ];
                         for (section, tags) in entries {

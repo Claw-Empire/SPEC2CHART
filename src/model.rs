@@ -707,6 +707,9 @@ pub struct ImportHints {
     pub project_title: Option<String>,
     /// Automatically assign z-offsets from topological layer ordering after import.
     pub auto_z: bool,
+    /// Automatically tint node fill colors based on their z-tier after import.
+    /// Nodes with the default fill color get a tier-specific tint.
+    pub auto_tier_color: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
