@@ -610,6 +610,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut border_width: Option<f32> = None;
     let mut text_align: Option<crate::model::TextAlign> = None;
     let mut text_valign: Option<crate::model::TextVAlign> = None;
+    let mut opacity_override: Option<f32> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -654,6 +655,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                 "bottom" => Some(crate::model::TextVAlign::Bottom),
                 _ => Some(crate::model::TextVAlign::Middle),
             };
+        } else if tag.starts_with("opacity:") || tag.starts_with("alpha:") {
+            let val_str = if tag.starts_with("opacity:") { &tag[8..] } else { &tag[6..] };
+            if let Ok(v) = val_str.trim().parse::<f32>() {
+                // Accept 0-100 percentage or 0.0-1.0 float
+                opacity_override = Some(if v > 1.0 { v / 100.0 } else { v });
+            }
         } else if tag == "shadow" || tag == "drop-shadow" {
             shadow = true;
         } else if tag == "bold" || tag == "strong" {
@@ -727,6 +734,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(bw) = border_width { node.style.border_width = bw; }
     if let Some(ta) = text_align { node.style.text_align = ta; }
     if let Some(tv) = text_valign { node.style.text_valign = tv; }
+    if let Some(op) = opacity_override { node.style.opacity = op.clamp(0.0, 1.0); }
 
     Ok((id, node))
 }
@@ -967,6 +975,9 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
             let border_tag = if (node.style.border_width - 1.5).abs() > 0.1 {
                 format!(" {{border:{}}}", node.style.border_width)
             } else { String::new() };
+            let opacity_tag = if (node.style.opacity - 1.0).abs() > 0.01 {
+                format!(" {{opacity:{:.0}}}", node.style.opacity * 100.0)
+            } else { String::new() };
             let align_tag = match node.style.text_align {
                 crate::model::TextAlign::Left => " {align:left}",
                 crate::model::TextAlign::Right => " {align:right}",
@@ -977,10 +988,10 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                 crate::model::TextVAlign::Bottom => " {valign:bottom}",
                 crate::model::TextVAlign::Middle => "",
             };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
-                border_tag, align_tag, valign_tag, w_tag, h_tag));
+                border_tag, opacity_tag, align_tag, valign_tag, w_tag, h_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
