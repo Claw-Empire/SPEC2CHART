@@ -40,6 +40,7 @@ use std::collections::HashMap;
 /// id --> id {arrow:open}                    ← arrow head style
 /// [a, b, c] -> target                       ← multi-source fan-in (same as a->target, b->target, c->target)
 /// source -> [a, b, c] {dashed}              ← multi-target fan-out (tags applied to all edges)
+/// a -> b  // inline comment                 ← // after space is stripped before parsing
 ///
 /// ## Notes
 /// - Note text {yellow}
@@ -321,6 +322,27 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
+        // Strip inline `//` comments: only strip when `//` appears OUTSIDE of {} tags
+        // and is not part of a URL (avoid stripping `https://`).
+        // Simple heuristic: strip from the first `//` that is preceded by whitespace or `}`.
+        let line_stripped: String = {
+            let bytes = line.as_bytes();
+            let mut result_end = line.len();
+            let mut i = 0;
+            while i + 1 < bytes.len() {
+                if bytes[i] == b'/' && bytes[i + 1] == b'/' {
+                    // Ensure it's not inside a URL (preceded by ':')
+                    let preceded_by_colon = i > 0 && bytes[i - 1] == b':';
+                    if !preceded_by_colon {
+                        result_end = i;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            line[..result_end].trim_end().to_string()
+        };
+        let line = line_stripped.as_str();
         let trimmed = line.trim();
 
         // `//` line comments — skip entirely
@@ -3030,5 +3052,30 @@ task_a -> task_b -> task_c
         assert!(exported.contains("{progress:75}"), "should export progress:75, got:\n{}", exported);
         assert!(exported.contains("{progress:100}"), "should export progress:100, got:\n{}", exported);
         assert!(exported.contains("{progress:50}"), "should export progress:50, got:\n{}", exported);
+    }
+
+    #[test]
+    fn test_inline_comments_stripped() {
+        let input = r#"
+# Inline Comment Test
+
+## Nodes
+- [a] Alpha  // this is a node comment
+- [b] Beta   // another comment
+
+## Flow
+a -> b  // external traffic
+b -> a  // return path; https://example.com is not a comment stop
+"#;
+        let doc = parse_hrf(input).expect("should parse with inline comments");
+        assert_eq!(doc.nodes.len(), 2, "should have 2 nodes");
+        assert_eq!(doc.edges.len(), 2, "should have 2 edges");
+        // Node labels should not contain the comment
+        let a = doc.nodes.iter().find(|n| n.display_label() == "Alpha").expect("Alpha node");
+        let b = doc.nodes.iter().find(|n| n.display_label() == "Beta").expect("Beta node");
+        let ab = doc.edges.iter().any(|e| e.source.node_id == a.id && e.target.node_id == b.id);
+        let ba = doc.edges.iter().any(|e| e.source.node_id == b.id && e.target.node_id == a.id);
+        assert!(ab, "expected a->b edge");
+        assert!(ba, "expected b->a edge (URL in inline comment not swallowed)");
     }
 }

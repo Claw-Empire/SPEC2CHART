@@ -583,6 +583,7 @@ impl FlowchartApp {
                             ("Cardinality", "{c-src:1} {c-tgt:0..N}"),
                             ("Ports", "{src-port:top/l/r/bottom} {tgt-port:...}"),
                             ("Arrow aliases", "-> (short) / <-- (reverse) / <-> (bidir)"),
+                            ("Inline comment", "a -> b  // this comment is ignored by parser"),
                             ("Multi-target", "a -> [b, c, d] {tags}  (shared-style fan-out)"),
                             ("Multi-source", "[a, b, c] -> target {tags}  (fan-in)"),
                             ("## Style", "primary = {fill:blue} {highlight}  →  use {primary}"),

@@ -65,7 +65,8 @@ fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::
     ui.fonts(|f| f.layout_job(job))
 }
 
-/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`.
+/// Append a line to the LayoutJob, colouring `{...}` tag spans in `tag_color`
+/// and inline `// ...` trailing comments in comment_color.
 fn append_line_with_tags(
     job: &mut egui::text::LayoutJob,
     line: &str,
@@ -74,10 +75,27 @@ fn append_line_with_tags(
     font: &egui::FontId,
 ) {
     use egui::text::TextFormat;
-    let fmt_base = TextFormat { font_id: font.clone(), color: base_color, ..Default::default() };
-    let fmt_tag  = TextFormat { font_id: font.clone(), color: tag_color,  ..Default::default() };
+    let c_comment = Color32::from_rgb(108, 112, 134);
+    let fmt_base    = TextFormat { font_id: font.clone(), color: base_color, ..Default::default() };
+    let fmt_tag     = TextFormat { font_id: font.clone(), color: tag_color,  ..Default::default() };
+    let fmt_comment = TextFormat { font_id: font.clone(), color: c_comment,  ..Default::default() };
 
-    let mut remaining = line;
+    // Split off inline comment (// not preceded by ':' to preserve URLs)
+    let (code_part, comment_part) = {
+        let bytes = line.as_bytes();
+        let mut split = line.len();
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            if bytes[i] == b'/' && bytes[i + 1] == b'/' && (i == 0 || bytes[i - 1] != b':') {
+                split = i;
+                break;
+            }
+            i += 1;
+        }
+        (&line[..split], &line[split..])
+    };
+
+    let mut remaining = code_part;
     while !remaining.is_empty() {
         if let Some(open) = remaining.find('{') {
             // Append the part before the tag
@@ -92,12 +110,17 @@ fn append_line_with_tags(
             } else {
                 // No closing brace — rest of line is a tag
                 job.append(remaining, 0.0, fmt_tag.clone());
+                remaining = "";
                 break;
             }
         } else {
             job.append(remaining, 0.0, fmt_base.clone());
             break;
         }
+    }
+    // Append inline comment part (if any) in comment color
+    if !comment_part.is_empty() {
+        job.append(comment_part, 0.0, fmt_comment);
     }
 }
 
