@@ -45,6 +45,10 @@ enum PaletteAction {
     OpenFindReplace,
     OpenSearch,
     ExportMermaid,
+    ToggleTimelineMode,
+    LoadHypothesisTemplate,
+    LoadSwotTemplate,
+    LoadRoadmapTemplate,
 }
 
 impl FlowchartApp {
@@ -335,6 +339,62 @@ impl FlowchartApp {
                 ctx.copy_text(mermaid);
                 self.status_message = Some(("Mermaid copied to clipboard".to_string(), std::time::Instant::now()));
             }
+            PaletteAction::ToggleTimelineMode => {
+                self.document.timeline_mode = !self.document.timeline_mode;
+                if self.document.timeline_mode {
+                    crate::specgraph::layout::auto_layout(&mut self.document);
+                    self.pending_fit = true;
+                    self.status_message = Some(("Timeline mode on".to_string(), std::time::Instant::now()));
+                } else {
+                    self.status_message = Some(("Timeline mode off".to_string(), std::time::Instant::now()));
+                }
+                self.history.push(&self.document);
+            }
+            PaletteAction::LoadHypothesisTemplate => {
+                let spec = include_str!("../../assets/examples/hypothesis_map.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Hypothesis map loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadSwotTemplate => {
+                let spec = include_str!("../../assets/examples/swot_analysis.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("SWOT analysis loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadRoadmapTemplate => {
+                let spec = include_str!("../../assets/examples/timeline_roadmap.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Roadmap template loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -374,6 +434,10 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⬡", label: "Switch to Flowchart mode",  category: "Diagram", action: PaletteAction::SwitchToFlowchart },
         PaletteEntry { icon: "◫", label: "Switch to ER mode",         category: "Diagram", action: PaletteAction::SwitchToER },
         PaletteEntry { icon: "★", label: "Switch to FigJam mode",     category: "Diagram", action: PaletteAction::SwitchToFigJam },
+        PaletteEntry { icon: "⊟", label: "Toggle timeline mode",      category: "Diagram", action: PaletteAction::ToggleTimelineMode },
+        PaletteEntry { icon: "💡", label: "Load hypothesis map template", category: "Templates", action: PaletteAction::LoadHypothesisTemplate },
+        PaletteEntry { icon: "⊞", label: "Load SWOT analysis template",  category: "Templates", action: PaletteAction::LoadSwotTemplate },
+        PaletteEntry { icon: "📅", label: "Load roadmap timeline template", category: "Templates", action: PaletteAction::LoadRoadmapTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
