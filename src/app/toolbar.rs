@@ -546,34 +546,48 @@ impl FlowchartApp {
                     });
                 }
                 ui.add_space(2.0);
-                // Example specs row
-                ui.label(egui::RichText::new("Load Example:").size(9.5).color(self.theme.text_dim));
-                ui.add_space(2.0);
-                let example_specs: &[(&str, &str)] = &[
+                // Example specs — categorized
+                let arch_specs: &[(&str, &str)] = &[
                     ("Flow", include_str!("../../assets/examples/flowchart.spec")),
                     ("3D Arch", include_str!("../../assets/examples/architecture_3d.spec")),
                     ("Cloud", include_str!("../../assets/examples/cloud_arch.spec")),
                     ("µSvc", include_str!("../../assets/examples/microservices.spec")),
-                    ("Dashboard", include_str!("../../assets/examples/project_dashboard.spec")),
-                    ("Auto3D", include_str!("../../assets/examples/auto3d.spec")),
-                    ("Showcase", include_str!("../../assets/examples/feature_showcase.spec")),
                     ("ER", include_str!("../../assets/examples/er_diagram.spec")),
                     ("Network", include_str!("../../assets/examples/network.spec")),
+                    ("Dashboard", include_str!("../../assets/examples/project_dashboard.spec")),
+                    ("Showcase", include_str!("../../assets/examples/feature_showcase.spec")),
+                ];
+                let design_specs: &[(&str, &str)] = &[
                     ("Hypothesis", include_str!("../../assets/examples/hypothesis_map.spec")),
-                    ("Roadmap", include_str!("../../assets/examples/timeline_roadmap.spec")),
                     ("SWOT", include_str!("../../assets/examples/swot_analysis.spec")),
+                    ("Roadmap", include_str!("../../assets/examples/timeline_roadmap.spec")),
                     ("Force Field", include_str!("../../assets/examples/force_field.spec")),
-                    ("Lean Canvas", include_str!("../../assets/examples/lean_canvas.spec")),
-                    ("OKR Tree", include_str!("../../assets/examples/okr_tree.spec")),
                     ("5 Whys", include_str!("../../assets/examples/five_whys.spec")),
+                    ("OKR Tree", include_str!("../../assets/examples/okr_tree.spec")),
+                    ("Lean Canvas", include_str!("../../assets/examples/lean_canvas.spec")),
                     ("Impact/Effort", include_str!("../../assets/examples/impact_effort.spec")),
                     ("Journey Map", include_str!("../../assets/examples/customer_journey.spec")),
                     ("Decision Log", include_str!("../../assets/examples/decision_record.spec")),
                 ];
+                ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
+                ui.add_space(1.0);
                 ui.horizontal_wrapped(|ui| {
-                    for (name, spec_text) in example_specs {
+                    for (name, spec_text) in arch_specs {
                         if ui.add(egui::Button::new(
-                            egui::RichText::new(*name).size(10.5).color(self.theme.accent)
+                            egui::RichText::new(*name).size(10.0).color(self.theme.accent)
+                        ).fill(self.theme.surface0)).clicked() {
+                            self.spec_paste_buf = spec_text.to_string();
+                            self.show_spec_paste_area = true;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Design Thinking:").size(9.0).color(self.theme.text_dim));
+                ui.add_space(1.0);
+                ui.horizontal_wrapped(|ui| {
+                    for (name, spec_text) in design_specs {
+                        if ui.add(egui::Button::new(
+                            egui::RichText::new(*name).size(10.0).color(self.theme.accent)
                         ).fill(self.theme.surface0)).clicked() {
                             self.spec_paste_buf = spec_text.to_string();
                             self.show_spec_paste_area = true;
