@@ -533,7 +533,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 "steps" | "step" | "process" | "procedure" | "workflow"
                 | "pipeline" | "sequence" | "tasks" | "task"
                 | "actions" | "action" | "instructions" | "instruction"
-                | "phases" | "phase" | "stages" | "stage" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
+                | "phases" | "phase" | "stages" | "stage"
+                | "timeline" | "roadmap" | "milestones" | "milestone"
+                | "journey" | "checklist" | "todo" | "plan" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
                     // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
                     // Parse optional cols parameter from header
@@ -1399,9 +1401,7 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
             if let Some(s) = cardinality_str(&edge.target_cardinality) {
                 style_tags.push(format!("c-tgt:{}", s));
             }
-            if !edge.comment.is_empty() {
-                style_tags.push(format!("note:{}", edge.comment));
-            }
+            // Note: edge.comment is emitted as indented continuation below (not here)
             (to, style_tags)
         };
 
@@ -1414,10 +1414,16 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
             } else {
                 format!(" {{{}}}", style_tags.join("} {"))
             };
-            if edge.label.is_empty() {
+            // Emit the edge declaration line, then an indented comment if present
+            let edge_line = if edge.label.is_empty() {
                 format!("{} --> {}{}\n", from, to, tag_str)
             } else {
                 format!("{} \"{}\" --> {}{}\n", from, edge.label, to, tag_str)
+            };
+            if !edge.comment.is_empty() {
+                format!("{}  {}\n", edge_line, edge.comment)
+            } else {
+                edge_line
             }
         };
 
@@ -2738,12 +2744,19 @@ fn is_emoji_only(tag: &str) -> bool {
 
 fn tag_to_shape(tag: &str) -> NodeShape {
     match tag {
-        "rectangle" | "rect" => NodeShape::Rectangle,
-        "diamond" | "decision" => NodeShape::Diamond,
-        "circle" => NodeShape::Circle,
-        "parallelogram" | "parallel" | "io" => NodeShape::Parallelogram,
-        "hexagon" | "hex" | "process" => NodeShape::Hexagon,
-        "connector" | "api" | "interface" | "protocol" | "gateway" => NodeShape::Connector,
+        // Rectangle variants
+        "rectangle" | "rect" | "box" | "square-shape" => NodeShape::Rectangle,
+        // Diamond / decision
+        "diamond" | "decision" | "rhombus" | "lozenge" | "branch" | "if" | "choice" => NodeShape::Diamond,
+        // Circle / oval
+        "circle" | "oval" | "ellipse" | "dot" | "bubble" | "round" => NodeShape::Circle,
+        // Parallelogram / IO
+        "parallelogram" | "parallel" | "io" | "skew" | "input" | "output" | "data" => NodeShape::Parallelogram,
+        // Hexagon
+        "hexagon" | "hex" | "process" | "cluster" | "hive" | "cell" => NodeShape::Hexagon,
+        // Connector / small circle
+        "connector" | "api" | "interface" | "protocol" | "gateway" | "port" | "endpoint" => NodeShape::Connector,
+        // Default
         _ => NodeShape::RoundedRect,
     }
 }
