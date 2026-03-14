@@ -1107,21 +1107,27 @@ impl FlowchartApp {
                 // Extract all data while document is immutably borrowed, then release before theme access.
                 let info = self.document.find_node(&hov_id).map(|n| {
                     let z_idx = (n.z_offset / 120.0).round() as i32;
-                    (n.display_label().to_string(), n.comment.clone(), n.sublabel.clone(), z_idx, n.z_offset)
+                    let desc = match &n.kind {
+                        NodeKind::Shape { description, .. } => description.clone(),
+                        _ => String::new(),
+                    };
+                    (n.display_label().to_string(), n.comment.clone(), n.sublabel.clone(), z_idx, n.z_offset, desc)
                 });
-                if let Some((lbl, comment, sublabel, z_idx, z_offset)) = info {
+                if let Some((lbl, comment, sublabel, z_idx, z_offset, desc)) = info {
                     let layer_name = self.document.layer_names.get(&z_idx).cloned().unwrap_or_default();
                     let has_comment  = !comment.is_empty();
                     let has_sublabel = !sublabel.is_empty();
                     let has_layer    = !layer_name.is_empty() || z_offset != 0.0;
+                    let has_desc     = !desc.is_empty();
 
                     // Show only when there's info beyond the visible label
-                    if has_comment || has_sublabel || has_layer {
+                    if has_comment || has_sublabel || has_layer || has_desc {
                         let pad   = 8.0_f32;
                         let w     = 210.0_f32;
                         let row_h = 15.0_f32;
                         let n_rows = 1
                             + if has_sublabel { 1 } else { 0 }
+                            + if has_desc     { 1 } else { 0 }
                             + if has_layer    { 1 } else { 0 }
                             + if has_comment  { 1 } else { 0 };
                         let h = n_rows as f32 * row_h + pad * 1.6;
@@ -1144,6 +1150,16 @@ impl FlowchartApp {
                             &lbl, font_main, self.theme.text_primary);
                         y += row_h;
 
+                        if has_desc {
+                            let preview = if desc.len() > 42 {
+                                format!("{}…", &desc[..42])
+                            } else {
+                                desc.clone()
+                            };
+                            painter.text(Pos2::new(tx + pad, y), Align2::LEFT_TOP,
+                                &preview, font_sm(), self.theme.text_secondary);
+                            y += row_h;
+                        }
                         if has_sublabel {
                             painter.text(Pos2::new(tx + pad, y), Align2::LEFT_TOP,
                                 &sublabel, font_sm(), self.theme.text_dim);
