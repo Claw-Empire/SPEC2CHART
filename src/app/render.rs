@@ -1822,6 +1822,44 @@ impl FlowchartApp {
         }
     }
 
+    /// Draw faint section labels above each cluster of nodes that share the same `section_name`.
+    /// Only shown in 2D non-timeline mode when zoomed in enough.
+    pub(crate) fn draw_section_labels(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
+        use std::collections::HashMap;
+        use egui::{Align2, FontId, Rect};
+
+        // Collect bounding boxes per section_name (non-empty sections only)
+        let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() { continue; }
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(node.pos()),
+                node.size_vec() * self.viewport.zoom,
+            );
+            // Only include nodes that are at least partially visible
+            if !sr.expand(200.0).intersects(canvas_rect) { continue; }
+            let entry = section_bounds.entry(&node.section_name).or_insert(sr);
+            *entry = entry.union(sr);
+        }
+        if section_bounds.is_empty() { return; }
+
+        let font_size = (10.0 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);
+        let label_color = self.theme.text_dim.gamma_multiply(0.45);
+
+        for (section_name, bounds) in &section_bounds {
+            let label_pos = egui::Pos2::new(bounds.min.x, bounds.min.y - font_size - 4.0);
+            // Don't draw labels off-screen
+            if !canvas_rect.expand(50.0).contains(label_pos) { continue; }
+            painter.text(
+                label_pos,
+                Align2::LEFT_BOTTOM,
+                *section_name,
+                FontId::proportional(font_size),
+                label_color,
+            );
+        }
+    }
+
     /// Draw the timeline grid overlay: period columns, lane rows, headers, and connectors.
     /// Called only when `doc.timeline_mode` is true and 2D view is active.
     pub(crate) fn draw_timeline_grid(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {

@@ -430,6 +430,13 @@ impl FlowchartApp {
             self.draw_timeline_grid(&painter, canvas_rect);
         }
 
+        // Section group labels (faint headers above node clusters, non-timeline mode)
+        if !self.document.timeline_mode && !matches!(self.view_mode, super::ViewMode::ThreeD)
+            && self.viewport.zoom > 0.3
+        {
+            self.draw_section_labels(&painter, canvas_rect);
+        }
+
         // Edges (visible only)
         for edge in &self.document.edges {
             let src_visible = node_idx

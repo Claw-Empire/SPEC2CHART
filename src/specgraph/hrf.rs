@@ -450,6 +450,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // ## Period sections: current period label for nodes parsed below
     let mut current_period: Option<String> = None;
 
+    // Current section display label (original case, e.g. "Hypotheses", "Evidence")
+    let mut current_section_label: String = String::new();
+
     // ## Palette section: handled via pre-expand pass (expand_palette above)
 
     // Deferred inline edges: (source_str_id, target_str_id, edge_tags)
@@ -514,7 +517,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "items" | "item" | "objects" | "object"
                 | "elements" | "element" | "actors" | "actor"
                 | "entities" | "entity" | "architecture"
-                | "parts" | "part" | "blocks" | "block"
+                | "parts" | "part" | "blocks" | "block" => {
+                    current_section_label = header_raw.to_string();
+                    Section::Nodes { default_z: 0.0 }
+                }
                 // Hypothesis / design-thinking section aliases
                 | "hypotheses" | "hypothesis" | "theories" | "theory"
                 | "assumptions" | "assumption" | "premises"
@@ -528,8 +534,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "experiments" | "tests"
                 | "metrics" | "kpis"
                 | "strengths" | "weaknesses" | "opportunities"
-                | "how-might-we" | "hmw"
-                => Section::Nodes { default_z: 0.0 },
+                | "how-might-we" | "hmw" => {
+                    current_section_label = header_raw.to_string();
+                    Section::Nodes { default_z: 0.0 }
+                }
                 // Edge / flow section aliases
                 "flow" | "flows" | "edges" | "connections" | "connection"
                 | "links" | "link" | "relations" | "relation"
@@ -727,6 +735,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     // Inherit current timeline period context
                     if node.timeline_period.is_none() {
                         node.timeline_period = current_period.clone();
+                    }
+                    // Record the section this node belongs to
+                    if node.section_name.is_empty() && !current_section_label.is_empty() {
+                        node.section_name = current_section_label.clone();
                     }
                     // Auto-discover lane in doc.timeline_lanes
                     if let Some(ref lane) = node.timeline_lane.clone() {

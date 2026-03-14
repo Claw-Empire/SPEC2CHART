@@ -479,6 +479,7 @@ impl FlowchartApp {
                 progress: 0.0,
                 timeline_period: None,
                 timeline_lane: None,
+                section_name: String::new(),
             };
             let id = node.id;
             self.document.nodes.push(node);

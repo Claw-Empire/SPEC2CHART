@@ -335,6 +335,10 @@ pub struct Node {
     /// Timeline swim-lane label — set from `{lane:Name}` tag in timeline mode.
     #[serde(default)]
     pub timeline_lane: Option<String>,
+    /// Section name — populated from the `## Section Header` that contained this node.
+    /// Used to draw faint section labels on the canvas (e.g. "Hypotheses", "Evidence").
+    #[serde(default)]
+    pub section_name: String,
 }
 
 impl Node {
@@ -355,7 +359,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(),
             style: NodeStyle::default(),
         }
     }
@@ -369,7 +373,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(),
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -390,7 +394,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(),
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -410,7 +414,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(),
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -437,7 +441,7 @@ impl Node {
             is_frame: true,
             locked: false,
             comment: String::new(),
-            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None,
+            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(),
             pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: [89, 91, 118, 0],  // transparent — frame_color is used
