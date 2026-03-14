@@ -511,7 +511,22 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "items" | "item" | "objects" | "object"
                 | "elements" | "element" | "actors" | "actor"
                 | "entities" | "entity" | "architecture"
-                | "parts" | "part" | "blocks" | "block" => Section::Nodes { default_z: 0.0 },
+                | "parts" | "part" | "blocks" | "block"
+                // Hypothesis / design-thinking section aliases
+                | "hypotheses" | "hypothesis" | "theories" | "theory"
+                | "assumptions" | "assumption" | "premises"
+                | "evidence" | "findings" | "facts"
+                | "questions" | "unknowns"
+                | "ideas" | "concepts" | "brainstorm"
+                | "causes" | "root-causes"
+                | "effects" | "impacts"
+                | "risks" | "threats"
+                | "goals" | "objectives" | "outcomes"
+                | "experiments" | "tests"
+                | "metrics" | "kpis"
+                | "strengths" | "weaknesses" | "opportunities"
+                | "how-might-we" | "hmw"
+                => Section::Nodes { default_z: 0.0 },
                 // Edge / flow section aliases
                 "flow" | "flows" | "edges" | "connections" | "connection"
                 | "links" | "link" | "relations" | "relation"
@@ -2756,6 +2771,8 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "hexagon" | "hex" | "process" | "cluster" | "hive" | "cell" => NodeShape::Hexagon,
         // Connector / small circle
         "connector" | "api" | "interface" | "protocol" | "gateway" | "port" | "endpoint" => NodeShape::Connector,
+        // Triangle / pyramid
+        "triangle" | "pyramid" | "hierarchy" | "peak" | "apex" => NodeShape::Triangle,
         // Default
         _ => NodeShape::RoundedRect,
     }
@@ -2800,6 +2817,40 @@ fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
                     => Some((NodeShape::Circle,      [166, 227, 161, 255])), // green
         "process"   | "task" | "step"
                     => Some((NodeShape::RoundedRect, [137, 180, 250, 255])), // blue
+        // Pyramid / hierarchy presets
+        "pyramid"   | "hierarchy" | "priority-level" | "tier"
+                    => Some((NodeShape::Triangle,    [203, 166, 247, 255])), // purple
+        // Hypothesis / design-thinking presets
+        "hypothesis" | "guess" | "theory"
+                    => Some((NodeShape::Diamond,     [250, 179, 135, 255])), // peach
+        "assumption" | "premise" | "given"
+                    => Some((NodeShape::Parallelogram, [137, 180, 250, 255])), // blue
+        "evidence"  | "fact" | "data" | "proof" | "finding"
+                    => Some((NodeShape::Rectangle,   [166, 227, 161, 255])), // green
+        "conclusion" | "result" | "outcome" | "insight"
+                    => Some((NodeShape::Hexagon,     [203, 166, 247, 255])), // purple
+        "question"  | "ask" | "unknown" | "query"
+                    => Some((NodeShape::Circle,      [249, 226, 175, 255])), // yellow
+        "cause"     | "root-cause" | "reason" | "why"
+                    => Some((NodeShape::Diamond,     [243, 139, 168, 255])), // red
+        "effect"    | "impact" | "consequence"
+                    => Some((NodeShape::RoundedRect, [148, 226, 213, 255])), // teal
+        "idea"      | "concept" | "brainstorm" | "thought"
+                    => Some((NodeShape::Circle,      [245, 194, 231, 255])), // pink
+        "risk"      | "threat" | "issue" | "blocker" | "concern"
+                    => Some((NodeShape::Diamond,     [250, 179, 135, 255])), // orange
+        "goal"      | "objective" | "target" | "aim" | "outcome"
+                    => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green
+        "strength"  => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green SWOT
+        "weakness"  => Some((NodeShape::RoundedRect, [243, 139, 168, 255])), // red SWOT
+        "opportunity" => Some((NodeShape::RoundedRect, [137, 180, 250, 255])), // blue SWOT
+        "threat-swot" => Some((NodeShape::RoundedRect, [249, 226, 175, 255])), // yellow SWOT
+        "how-might-we" | "hmw"
+                    => Some((NodeShape::RoundedRect, [245, 194, 231, 255])), // pink HMW
+        "experiment" | "test" | "trial"
+                    => Some((NodeShape::Hexagon,     [249, 226, 175, 255])), // yellow
+        "metric"    | "kpi" | "measure"
+                    => Some((NodeShape::Rectangle,   [148, 226, 213, 255])), // teal
         _ => None,
     }
 }
@@ -2828,6 +2879,7 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     NodeShape::Parallelogram => " {parallelogram}",
                     NodeShape::Hexagon => " {hexagon}",
                     NodeShape::Connector => " {connector}",
+                    NodeShape::Triangle => " {triangle}",
                 }
             };
             let tag_tag = match node.tag {

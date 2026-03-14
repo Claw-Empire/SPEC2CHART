@@ -74,8 +74,10 @@ impl FlowchartApp {
     // -----------------------------------------------------------------------
 
     fn hit_test_3d_node(mouse: Pos2, projections: &[NodeProjection]) -> Option<NodeId> {
+        // Expand hit rect slightly so small/distant nodes are easier to click.
+        let tolerance = 4.0;
         for proj in projections.iter().rev() {
-            if proj.screen_rect.contains(mouse) {
+            if proj.screen_rect.expand(tolerance).contains(mouse) {
                 return Some(proj.node_id);
             }
         }
@@ -419,18 +421,31 @@ impl FlowchartApp {
                 (sy, sx)
             });
 
-            // Vertical scroll → zoom-in/out with inertia.
-            // Accumulate into velocity; applied exponentially below.
-            if scroll_y.abs() > 0.1 {
-                self.cam3d_zoom_vel += scroll_y * 0.0018;
-            }
+            let cmd_held = ui.ctx().input(|i| i.modifiers.command);
+            if cmd_held {
+                // Cmd+scroll → pan camera target (translate view without orbiting).
+                let pan_scale = self.camera3d.distance * 0.0012;
+                if scroll_y.abs() > 0.5 {
+                    self.camera3d.target[1] -= scroll_y * pan_scale;
+                    ui.ctx().request_repaint();
+                }
+                if scroll_x.abs() > 0.5 {
+                    self.camera3d.target[0] += scroll_x * pan_scale;
+                    ui.ctx().request_repaint();
+                }
+            } else {
+                // Vertical scroll → zoom-in/out with inertia.
+                if scroll_y.abs() > 0.1 {
+                    self.cam3d_zoom_vel += scroll_y * 0.003;
+                }
 
-            // Horizontal scroll → yaw-orbit the camera (natural trackpad pan feel).
-            // Only when horizontal dominates (avoid diagonal diagonal triggering both).
-            if scroll_x.abs() > scroll_y.abs() * 0.5 && scroll_x.abs() > 0.5 {
-                let orbit_speed = 0.0015;
-                self.camera3d.yaw -= scroll_x * orbit_speed;
-                ui.ctx().request_repaint();
+                // Horizontal scroll → yaw-orbit the camera (natural trackpad pan feel).
+                // Only when horizontal dominates (avoid diagonal triggering both).
+                if scroll_x.abs() > scroll_y.abs() * 0.5 && scroll_x.abs() > 0.5 {
+                    let orbit_speed = 0.003;
+                    self.camera3d.yaw -= scroll_x * orbit_speed;
+                    ui.ctx().request_repaint();
+                }
             }
         }
 
@@ -598,9 +613,13 @@ impl FlowchartApp {
                             start_mouse: mouse,
                         };
                     } else {
-                        self.drag = DragState::Panning {
-                            start_offset: [self.camera3d.yaw, self.camera3d.pitch],
-                            start_mouse: mouse,
+                        // Empty space: box-select (Cmd = additive, else clear first).
+                        let cmd_held = ui.ctx().input(|i| i.modifiers.command);
+                        if !cmd_held {
+                            self.selection.clear();
+                        }
+                        self.drag = DragState::BoxSelect {
+                            start_canvas: mouse, // stores screen pos in 3D mode
                         };
                     }
                 }
@@ -739,6 +758,17 @@ impl FlowchartApp {
                         }
                     }
                 }
+                DragState::BoxSelect { start_canvas } => {
+                    let start = *start_canvas;
+                    if let Some(mouse) = pointer_pos {
+                        let sel_rect = Rect::from_two_pos(start, mouse);
+                        for proj in &projections {
+                            if sel_rect.intersects(proj.screen_rect) {
+                                self.selection.node_ids.insert(proj.node_id);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
             self.drag = DragState::None;
@@ -789,7 +819,7 @@ impl FlowchartApp {
                 egui::CursorIcon::Grabbing
             }
             DragState::ResizingNode { handle, .. } => Self::resize_cursor(*handle),
-            DragState::CreatingEdge { .. } => egui::CursorIcon::Crosshair,
+            DragState::CreatingEdge { .. } | DragState::BoxSelect { .. } => egui::CursorIcon::Crosshair,
             DragState::None => {
                 if self.space_held {
                     egui::CursorIcon::Grab
@@ -929,6 +959,15 @@ impl FlowchartApp {
             }
         }
 
+        // Box select preview
+        if let DragState::BoxSelect { start_canvas } = &self.drag {
+            if let Some(mouse) = pointer_pos {
+                let sel_rect = Rect::from_two_pos(*start_canvas, mouse);
+                painter.rect_filled(sel_rect, CornerRadius::ZERO, self.theme.box_select_fill);
+                painter.rect_stroke(sel_rect, CornerRadius::ZERO, Stroke::new(1.2, self.theme.box_select_stroke), StrokeKind::Outside);
+            }
+        }
+
         // Resize handles on selected node
         if self.tool == Tool::Select && self.selection.node_ids.len() == 1 {
             let selected_id = *self.selection.node_ids.iter().next().unwrap();
@@ -942,13 +981,13 @@ impl FlowchartApp {
         // Instructions
         let instructions = match (&self.tool, &self.drag) {
             (Tool::Connect, _) => {
-                "Click port to connect  |  Right-drag orbit  |  Scroll zoom  |  2 for 2D"
+                "Click port to connect  |  Right-drag orbit  |  Scroll zoom  |  Cmd+scroll pan  |  2 for 2D"
             }
             _ if !self.selection.is_empty() => {
-                "Drag move  |  Shift+drag Z-axis  |  Handles resize  |  Ports connect  |  Right-drag orbit"
+                "Drag move  |  Shift+drag Z-axis  |  Handles resize  |  Ports connect  |  Right-drag orbit  |  Cmd+scroll pan"
             }
             _ => {
-                "Click select  |  Drag move  |  Shift+drag Z-axis  |  Right-drag orbit  |  Scroll zoom"
+                "Click/drag select  |  Right-drag orbit  |  Scroll zoom  |  Cmd+scroll pan  |  Shift+drag Z-axis"
             }
         };
         painter.text(
@@ -1665,6 +1704,21 @@ impl FlowchartApp {
                     painter.add(egui::Shape::convex_polygon(hex_pts(extrude.x, extrude.y), shade_color(fill, 0.55), Stroke::NONE));
                     // Front face
                     painter.add(egui::Shape::convex_polygon(hex_pts(0.0, 0.0), fill, stroke));
+                }
+                NodeShape::Triangle => {
+                    // 3D Triangle — extruded isosceles
+                    let apex = Pos2::new(screen_rect.center().x, screen_rect.min.y);
+                    let bl   = Pos2::new(screen_rect.min.x,      screen_rect.max.y);
+                    let br   = Pos2::new(screen_rect.max.x,      screen_rect.max.y);
+                    let tri_pts = |dx: f32, dy: f32| vec![
+                        Pos2::new(apex.x + dx, apex.y + dy),
+                        Pos2::new(br.x + dx,   br.y + dy),
+                        Pos2::new(bl.x + dx,   bl.y + dy),
+                    ];
+                    // Back face
+                    painter.add(egui::Shape::convex_polygon(tri_pts(extrude.x, extrude.y), shade_color(fill, 0.50), Stroke::NONE));
+                    // Front face
+                    painter.add(egui::Shape::convex_polygon(tri_pts(0.0, 0.0), fill, stroke));
                 }
             },
             NodeKind::StickyNote { .. } => {

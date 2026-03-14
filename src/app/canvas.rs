@@ -1985,7 +1985,10 @@ impl FlowchartApp {
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
                 "Press N to pick a shape · or drag from toolbar",
-                "Build a flow, architecture, or idea map",
+                "Build a flow, architecture, mind map, or hypothesis",
+                "Try: ## Hypotheses then - My Idea {hypothesis}",
+                "Use {cause} {effect} {evidence} for design thinking",
+                "SPEC → Import to load a diagram instantly",
                 "Every great diagram starts with a single node",
                 "Press ? for all keyboard shortcuts",
             ],

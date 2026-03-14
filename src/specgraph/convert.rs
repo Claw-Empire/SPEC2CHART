@@ -386,6 +386,7 @@ fn shape_to_str(s: &NodeShape) -> &'static str {
         NodeShape::Parallelogram => "parallelogram",
         NodeShape::Hexagon => "hexagon",
         NodeShape::Connector => "connector",
+        NodeShape::Triangle => "triangle",
     }
 }
 
@@ -398,6 +399,7 @@ fn str_to_shape(s: &str) -> Result<NodeShape, String> {
         "parallelogram" => Ok(NodeShape::Parallelogram),
         "hexagon" => Ok(NodeShape::Hexagon),
         "connector" => Ok(NodeShape::Connector),
+        "triangle" => Ok(NodeShape::Triangle),
         other => Err(format!("Unknown shape: '{}'", other)),
     }
 }

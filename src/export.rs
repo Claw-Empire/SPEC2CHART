@@ -498,6 +498,19 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                             points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
                         ));
                     }
+                    NodeShape::Triangle => {
+                        let cx = nx + nw / 2.0;
+                        let points_str = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            cx, ny,          // apex top-center
+                            nx + nw, ny + nh, // bottom-right
+                            nx, ny + nh,     // bottom-left
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
                 }
                 svg.push('\n');
 
@@ -868,6 +881,20 @@ fn draw_pdf_node(
                     (Point::new(Mm(cx + hw),    Mm(cy)), false),
                     (Point::new(Mm(cx + inset), Mm(cy - hh)), false),
                     (Point::new(Mm(cx - inset), Mm(cy - hh)), false),
+                ];
+                let polygon = Polygon {
+                    rings: vec![points],
+                    mode: PaintMode::FillStroke,
+                    winding_order: printpdf::path::WindingOrder::NonZero,
+                };
+                layer.add_polygon(polygon);
+            }
+            NodeShape::Triangle => {
+                let cx = nx + nw / 2.0;
+                let points = vec![
+                    (Point::new(Mm(cx),      Mm(top_y)),    false), // apex
+                    (Point::new(Mm(nx + nw), Mm(bottom_y)), false), // bottom-right
+                    (Point::new(Mm(nx),      Mm(bottom_y)), false), // bottom-left
                 ];
                 let polygon = Polygon {
                     rings: vec![points],

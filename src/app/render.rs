@@ -844,6 +844,14 @@ impl FlowchartApp {
                     Stroke::NONE,
                 ));
             }
+            NodeShape::Triangle => {
+                // Isosceles triangle: apex at top-center, base at bottom
+                let apex   = Pos2::new(screen_rect.center().x, screen_rect.min.y);
+                let bl     = Pos2::new(screen_rect.min.x,      screen_rect.max.y);
+                let br     = Pos2::new(screen_rect.max.x,      screen_rect.max.y);
+                let points = vec![apex, br, bl];
+                painter.add(egui::Shape::convex_polygon(points.clone(), fill, stroke));
+            }
         }
 
         // Semantic watermark icon — drawn behind label text at low opacity

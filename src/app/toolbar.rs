@@ -596,7 +596,7 @@ impl FlowchartApp {
                     ui.group(|ui| {
                         ui.set_width(ui.available_width());
                         let entries: &[(&str, &str)] = &[
-                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps / ## Config"),
+                            ("Sections", "## Nodes / ## Flow / ## Notes / ## Groups / ## Steps / ## Config / ## Hypotheses"),
                             ("## Config", "bg = dots | snap = true | grid-size = 20 | zoom = 1.5 | flow = LR"),
                             ("## Palette", "brand = #1e3a5f  →  use {fill:brand} anywhere"),
                             ("Inline edges", "- [api] Service → db, cache {dashed}"),
@@ -604,9 +604,14 @@ impl FlowchartApp {
                             ("3D layers", "## Layer 0: Database / ## Layer 1: Backend"),
                             ("3D layers", "{z:N} (px) / {layer:N} (N×120px) / {3d-depth:80}"),
                             ("Comments", "// this line is ignored"),
-                            ("Shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector}"),
+                            ("Shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector} {triangle}"),
                             ("Semantic presets", "{server} {database} {cloud} {user} {service}"),
                             ("Semantic presets", "{queue} {cache} {internet} {decision} {start} {end}"),
+                            ("Design thinking", "{hypothesis} {assumption} {evidence} {conclusion}"),
+                            ("Design thinking", "{question} {cause} {effect} {idea} {risk} {goal}"),
+                            ("Design thinking", "{experiment} {metric} {strength} {weakness} {opportunity}"),
+                            ("Design sections", "## Hypotheses / ## Assumptions / ## Evidence / ## Questions"),
+                            ("Design sections", "## Ideas / ## Causes / ## Effects / ## Goals / ## Risks"),
                             ("Status tags", "{critical} {warning} {ok} {info}  — badge only"),
                             ("Status+progress", "{done} {wip} {review} {blocked} {todo}  — badge+progress"),
                             ("Node glow", "{glow} / {neon}  — neon border halo on node"),
@@ -1259,6 +1264,16 @@ impl FlowchartApp {
                 let radius = pill_h / 2.0;
                 painter.rect_filled(pill_rect, CornerRadius::same(radius as u8), shape_fill);
                 painter.rect_stroke(pill_rect, CornerRadius::same(radius as u8), shape_stroke, StrokeKind::Outside);
+            }
+            NodeShape::Triangle => {
+                let hw = pw * 0.5;
+                let hh = ph * 0.5;
+                let pts = vec![
+                    Pos2::new(preview_center.x,       preview_center.y - hh),
+                    Pos2::new(preview_center.x + hw,  preview_center.y + hh),
+                    Pos2::new(preview_center.x - hw,  preview_center.y + hh),
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
             }
         }
 

@@ -78,122 +78,124 @@ pub struct Theme {
 
 impl Theme {
     pub fn dark() -> Self {
+        // Catppuccin Mocha — deepened for stronger panel/canvas contrast
         Self {
-            canvas_bg: Color32::from_rgb(30, 30, 46),
-            grid_color: Color32::from_rgba_premultiplied(69, 71, 90, 50),
-            grid_major_color: Color32::from_rgba_premultiplied(88, 91, 112, 90),
+            canvas_bg: Color32::from_rgb(26, 27, 42),          // deeper canvas
+            grid_color: Color32::from_rgba_premultiplied(69, 71, 90, 55),
+            grid_major_color: Color32::from_rgba_premultiplied(88, 91, 112, 100),
             selection_color: Color32::from_rgb(137, 180, 250),
-            port_fill: Color32::from_rgb(49, 50, 68),
-            box_select_fill: Color32::from_rgba_premultiplied(137, 180, 250, 20),
-            box_select_stroke: Color32::from_rgba_premultiplied(137, 180, 250, 100),
+            port_fill: Color32::from_rgb(55, 56, 76),
+            box_select_fill: Color32::from_rgba_premultiplied(137, 180, 250, 22),
+            box_select_stroke: Color32::from_rgba_premultiplied(137, 180, 250, 120),
 
             accent: Color32::from_rgb(137, 180, 250),
-            text_primary: Color32::from_rgb(205, 214, 244),
-            text_secondary: Color32::from_rgb(166, 173, 200),
-            text_dim: Color32::from_rgb(108, 112, 134),
-            surface0: Color32::from_rgb(49, 50, 68),
-            surface1: Color32::from_rgb(69, 71, 90),
-            mantle: Color32::from_rgb(24, 24, 37),
+            text_primary: Color32::from_rgb(215, 222, 248),    // brighter — clearer reading
+            text_secondary: Color32::from_rgb(172, 180, 208),
+            text_dim: Color32::from_rgb(115, 119, 143),
+            surface0: Color32::from_rgb(45, 46, 64),           // panel items
+            surface1: Color32::from_rgb(65, 67, 87),           // borders/dividers
+            mantle: Color32::from_rgb(18, 18, 30),             // sidebar — clearly darker than canvas
 
-            accent_glow: Color32::from_rgba_premultiplied(137, 180, 250, 30),
-            accent_hover: Color32::from_rgba_premultiplied(137, 180, 250, 80),
-            accent_faint: Color32::from_rgba_premultiplied(137, 180, 250, 15),
-            accent_select_bg: Color32::from_rgba_premultiplied(137, 180, 250, 40),
-            accent_select_light: Color32::from_rgba_premultiplied(137, 180, 250, 100),
-            text_hover_bg: Color32::from_rgba_premultiplied(205, 214, 244, 18),
+            accent_glow: Color32::from_rgba_premultiplied(137, 180, 250, 35),
+            accent_hover: Color32::from_rgba_premultiplied(137, 180, 250, 85),
+            accent_faint: Color32::from_rgba_premultiplied(137, 180, 250, 18),
+            accent_select_bg: Color32::from_rgba_premultiplied(137, 180, 250, 45),
+            accent_select_light: Color32::from_rgba_premultiplied(137, 180, 250, 110),
+            text_hover_bg: Color32::from_rgba_premultiplied(215, 222, 248, 20),
 
-            shadow_light: Color32::from_rgba_premultiplied(0, 0, 0, 40),
-            shadow_medium: Color32::from_rgba_premultiplied(0, 0, 0, 50),
+            shadow_light: Color32::from_rgba_premultiplied(0, 0, 0, 50),
+            shadow_medium: Color32::from_rgba_premultiplied(0, 0, 0, 70),
 
             toast_success: Color32::from_rgb(166, 227, 161),
 
             fk_color: Color32::from_rgb(249, 226, 175),
 
-            minimap_bg: Color32::from_rgba_premultiplied(20, 20, 20, 200),
-            minimap_border: Color32::from_rgba_premultiplied(80, 80, 80, 180),
-            minimap_node: Color32::from_rgba_premultiplied(80, 160, 255, 220),
-            minimap_vp_fill: Color32::from_rgba_premultiplied(80, 160, 255, 30),
-            minimap_vp_stroke: Color32::from_rgba_premultiplied(80, 160, 255, 150),
+            minimap_bg: Color32::from_rgba_premultiplied(14, 14, 24, 220),
+            minimap_border: Color32::from_rgba_premultiplied(80, 82, 104, 200),
+            minimap_node: Color32::from_rgba_premultiplied(100, 170, 255, 230),
+            minimap_vp_fill: Color32::from_rgba_premultiplied(100, 170, 255, 35),
+            minimap_vp_stroke: Color32::from_rgba_premultiplied(100, 170, 255, 160),
 
-            edge_label_bg: Color32::from_rgba_premultiplied(30, 30, 30, 200),
+            edge_label_bg: Color32::from_rgba_premultiplied(18, 18, 30, 220),
 
-            divider_color: Color32::from_rgba_premultiplied(69, 71, 90, 80),
-            row_divider: Color32::from_rgba_premultiplied(100, 100, 100, 60),
+            divider_color: Color32::from_rgba_premultiplied(65, 67, 87, 90),
+            row_divider: Color32::from_rgba_premultiplied(90, 92, 115, 65),
 
-            preview_fill: Color32::from_rgba_premultiplied(100, 160, 255, 80),
+            preview_fill: Color32::from_rgba_premultiplied(100, 160, 255, 90),
 
-            tooltip_bg: Color32::from_rgba_premultiplied(18, 18, 30, 230),
-            tooltip_border: Color32::from_rgba_premultiplied(69, 71, 90, 200),
+            tooltip_bg: Color32::from_rgba_premultiplied(14, 14, 26, 240),
+            tooltip_border: Color32::from_rgba_premultiplied(65, 67, 87, 220),
 
-            ghost_stroke: Color32::from_rgba_premultiplied(137, 180, 250, 60),
-            dim_overlay: Color32::from_rgba_premultiplied(16, 16, 28, 180),
-            dim_overlay_heavy: Color32::from_rgba_premultiplied(12, 12, 22, 175),
-            focus_dim_near: Color32::from_rgba_premultiplied(16, 16, 28, 90),
-            focus_dim_far: Color32::from_rgba_premultiplied(16, 16, 28, 190),
+            ghost_stroke: Color32::from_rgba_premultiplied(137, 180, 250, 70),
+            dim_overlay: Color32::from_rgba_premultiplied(12, 12, 22, 185),
+            dim_overlay_heavy: Color32::from_rgba_premultiplied(8, 8, 18, 180),
+            focus_dim_near: Color32::from_rgba_premultiplied(12, 12, 22, 95),
+            focus_dim_far: Color32::from_rgba_premultiplied(12, 12, 22, 195),
 
-            crust: Color32::from_rgb(17, 17, 27),
+            crust: Color32::from_rgb(12, 12, 22),
             surface2: Color32::from_rgb(88, 91, 112),
             lavender: Color32::from_rgb(180, 190, 254),
         }
     }
 
     pub fn light() -> Self {
+        // Catppuccin Latte — cleaner canvas, stronger panel separation
         Self {
-            canvas_bg: Color32::from_rgb(239, 241, 245),
-            grid_color: Color32::from_rgba_premultiplied(172, 176, 190, 60),
-            grid_major_color: Color32::from_rgba_premultiplied(140, 143, 161, 100),
-            selection_color: Color32::from_rgb(30, 102, 245),
-            port_fill: Color32::from_rgb(204, 208, 218),
-            box_select_fill: Color32::from_rgba_premultiplied(30, 102, 245, 25),
-            box_select_stroke: Color32::from_rgba_premultiplied(30, 102, 245, 120),
+            canvas_bg: Color32::from_rgb(253, 253, 255),        // near-white clean canvas
+            grid_color: Color32::from_rgba_premultiplied(180, 184, 200, 55),
+            grid_major_color: Color32::from_rgba_premultiplied(150, 154, 175, 110),
+            selection_color: Color32::from_rgb(22, 96, 232),
+            port_fill: Color32::from_rgb(195, 200, 215),
+            box_select_fill: Color32::from_rgba_premultiplied(22, 96, 232, 22),
+            box_select_stroke: Color32::from_rgba_premultiplied(22, 96, 232, 130),
 
-            accent: Color32::from_rgb(30, 102, 245),
-            text_primary: Color32::from_rgb(76, 79, 105),
-            text_secondary: Color32::from_rgb(92, 95, 119),
-            text_dim: Color32::from_rgb(140, 143, 161),
-            surface0: Color32::from_rgb(204, 208, 218),
-            surface1: Color32::from_rgb(188, 192, 204),
-            mantle: Color32::from_rgb(230, 233, 239),
+            accent: Color32::from_rgb(22, 96, 232),             // crisp blue accent
+            text_primary: Color32::from_rgb(40, 44, 68),        // deep, high-contrast text
+            text_secondary: Color32::from_rgb(76, 80, 108),
+            text_dim: Color32::from_rgb(132, 138, 160),
+            surface0: Color32::from_rgb(218, 222, 234),         // panel items (clearly distinct from canvas)
+            surface1: Color32::from_rgb(196, 200, 218),         // borders — visible against white canvas
+            mantle: Color32::from_rgb(210, 215, 228),           // sidebar — noticeably different from canvas
 
-            accent_glow: Color32::from_rgba_premultiplied(30, 102, 245, 30),
-            accent_hover: Color32::from_rgba_premultiplied(30, 102, 245, 80),
-            accent_faint: Color32::from_rgba_premultiplied(30, 102, 245, 15),
-            accent_select_bg: Color32::from_rgba_premultiplied(30, 102, 245, 40),
-            accent_select_light: Color32::from_rgba_premultiplied(30, 102, 245, 120),
-            text_hover_bg: Color32::from_rgba_premultiplied(76, 79, 105, 18),
+            accent_glow: Color32::from_rgba_premultiplied(22, 96, 232, 30),
+            accent_hover: Color32::from_rgba_premultiplied(22, 96, 232, 75),
+            accent_faint: Color32::from_rgba_premultiplied(22, 96, 232, 14),
+            accent_select_bg: Color32::from_rgba_premultiplied(22, 96, 232, 38),
+            accent_select_light: Color32::from_rgba_premultiplied(22, 96, 232, 115),
+            text_hover_bg: Color32::from_rgba_premultiplied(40, 44, 68, 14),
 
-            shadow_light: Color32::from_rgba_premultiplied(0, 0, 0, 20),
-            shadow_medium: Color32::from_rgba_premultiplied(0, 0, 0, 30),
+            shadow_light: Color32::from_rgba_premultiplied(0, 0, 0, 18),
+            shadow_medium: Color32::from_rgba_premultiplied(0, 0, 0, 28),
 
-            toast_success: Color32::from_rgb(64, 160, 43),
+            toast_success: Color32::from_rgb(52, 148, 36),
 
-            fk_color: Color32::from_rgb(223, 142, 29),
+            fk_color: Color32::from_rgb(200, 118, 18),
 
-            minimap_bg: Color32::from_rgba_premultiplied(230, 230, 235, 200),
-            minimap_border: Color32::from_rgba_premultiplied(170, 170, 180, 180),
-            minimap_node: Color32::from_rgba_premultiplied(30, 102, 245, 220),
-            minimap_vp_fill: Color32::from_rgba_premultiplied(30, 102, 245, 30),
-            minimap_vp_stroke: Color32::from_rgba_premultiplied(30, 102, 245, 150),
+            minimap_bg: Color32::from_rgba_premultiplied(218, 220, 232, 215),
+            minimap_border: Color32::from_rgba_premultiplied(155, 160, 185, 190),
+            minimap_node: Color32::from_rgba_premultiplied(22, 96, 232, 220),
+            minimap_vp_fill: Color32::from_rgba_premultiplied(22, 96, 232, 28),
+            minimap_vp_stroke: Color32::from_rgba_premultiplied(22, 96, 232, 155),
 
-            edge_label_bg: Color32::from_rgba_premultiplied(240, 240, 245, 220),
+            edge_label_bg: Color32::from_rgba_premultiplied(252, 252, 255, 240),
 
-            divider_color: Color32::from_rgba_premultiplied(172, 176, 190, 80),
-            row_divider: Color32::from_rgba_premultiplied(160, 160, 170, 60),
+            divider_color: Color32::from_rgba_premultiplied(170, 175, 195, 85),
+            row_divider: Color32::from_rgba_premultiplied(155, 160, 182, 65),
 
-            preview_fill: Color32::from_rgba_premultiplied(30, 102, 245, 80),
+            preview_fill: Color32::from_rgba_premultiplied(22, 96, 232, 75),
 
-            tooltip_bg: Color32::from_rgba_premultiplied(245, 245, 250, 235),
-            tooltip_border: Color32::from_rgba_premultiplied(172, 176, 190, 200),
+            tooltip_bg: Color32::from_rgba_premultiplied(248, 249, 254, 245),
+            tooltip_border: Color32::from_rgba_premultiplied(165, 170, 192, 210),
 
-            ghost_stroke: Color32::from_rgba_premultiplied(30, 102, 245, 60),
-            dim_overlay: Color32::from_rgba_premultiplied(220, 220, 230, 140),
-            dim_overlay_heavy: Color32::from_rgba_premultiplied(210, 210, 220, 160),
-            focus_dim_near: Color32::from_rgba_premultiplied(200, 200, 210, 70),
-            focus_dim_far: Color32::from_rgba_premultiplied(200, 200, 210, 160),
+            ghost_stroke: Color32::from_rgba_premultiplied(22, 96, 232, 65),
+            dim_overlay: Color32::from_rgba_premultiplied(210, 213, 228, 135),
+            dim_overlay_heavy: Color32::from_rgba_premultiplied(200, 204, 220, 155),
+            focus_dim_near: Color32::from_rgba_premultiplied(195, 198, 215, 65),
+            focus_dim_far: Color32::from_rgba_premultiplied(195, 198, 215, 155),
 
-            crust: Color32::from_rgb(220, 224, 232),
-            surface2: Color32::from_rgb(172, 176, 190),
-            lavender: Color32::from_rgb(114, 135, 253),
+            crust: Color32::from_rgb(200, 205, 220),
+            surface2: Color32::from_rgb(165, 170, 190),
+            lavender: Color32::from_rgb(100, 124, 242),
         }
     }
 }
