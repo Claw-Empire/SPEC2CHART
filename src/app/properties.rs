@@ -382,8 +382,38 @@ impl FlowchartApp {
                             .hint_text("e.g. v2.1 · running")
                             .font(FontId::proportional(11.5)),
                     );
-                    // Progress bar (0–100%)
+                    // Quick status buttons
                     ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Status").size(11.0).color(theme.text_dim));
+                    ui.add_space(3.0);
+                    // (label, tag, progress, color)
+                    let statuses: &[(&str, Option<NodeTag>, f32, egui::Color32)] = &[
+                        ("✅ Done",    Some(NodeTag::Ok),       1.0, egui::Color32::from_rgb(166, 227, 161)),
+                        ("🔄 WIP",     Some(NodeTag::Info),     0.5, egui::Color32::from_rgb(137, 180, 250)),
+                        ("👁 Review",  Some(NodeTag::Warning),  0.75, egui::Color32::from_rgb(249, 226, 175)),
+                        ("⛔ Blocked", Some(NodeTag::Critical), 0.0, egui::Color32::from_rgb(243, 139, 168)),
+                        ("📋 Todo",    Some(NodeTag::Warning),  0.0, egui::Color32::from_rgb(203, 166, 247)),
+                        ("— None",    None,                    0.0, theme.surface1),
+                    ];
+                    let mut status_pick: Option<(Option<NodeTag>, f32)> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        for (label, tag, prog, col) in statuses {
+                            let is_active = node.tag == *tag && (node.progress - prog).abs() < 0.01;
+                            let btn = egui::Button::new(
+                                egui::RichText::new(*label).size(10.0)
+                            ).fill(if is_active { *col } else { theme.surface0 });
+                            if ui.add(btn).clicked() {
+                                status_pick = Some((*tag, *prog));
+                            }
+                        }
+                    });
+                    if let Some((tag, prog)) = status_pick {
+                        node.tag = tag;
+                        node.progress = prog;
+                    }
+
+                    // Progress bar (0–100%)
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Progress").size(11.0).color(theme.text_dim));
                         let pct = (node.progress * 100.0).round() as i32;
