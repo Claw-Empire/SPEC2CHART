@@ -705,6 +705,17 @@ impl FlowchartApp {
                         ],
                     ),
                     (
+                        "Design Thinking",
+                        &[
+                            ("H", "Quick-create Hypothesis node (diamond, peach)"),
+                            ("Y", "Quick-create Assumption node (parallelogram, blue)"),
+                            ("W", "Quick-create Evidence node (rectangle, green)"),
+                            ("Right-click → Design Type…", "Apply design thinking type to any node"),
+                            ("⌘K → Templates", "Load Hypothesis Map, SWOT, Lean Canvas, OKR, 5 Whys…"),
+                            ("Properties → Status", "Set Done / WIP / Review / Blocked / Todo in one click"),
+                        ],
+                    ),
+                    (
                         "View",
                         &[
                             ("⌘1", "Fit all to view"),
