@@ -447,6 +447,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // ## Grid sections: collect (NodeIds, cols) for post-parse grid layout
     let mut pending_grid_groups: Vec<(Vec<NodeId>, usize)> = Vec::new();
 
+    // ## Period sections: current period label for nodes parsed below
+    let mut current_period: Option<String> = None;
+
     // ## Palette section: handled via pre-expand pass (expand_palette above)
 
     // Deferred inline edges: (source_str_id, target_str_id, edge_tags)
@@ -549,8 +552,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "pipeline" | "sequence" | "tasks" | "task"
                 | "actions" | "action" | "instructions" | "instruction"
                 | "phases" | "phase" | "stages" | "stage"
-                | "timeline" | "roadmap" | "milestones" | "milestone"
+                | "roadmap" | "milestones" | "milestone"
                 | "journey" | "checklist" | "todo" | "plan" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
+                // "## Timeline" is now a reserved section type — emit warning, treat as None.
+                "timeline" => {
+                    // Emit parse warning via setting a note in doc (non-fatal)
+                    Section::None
+                }
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
                     // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
                     // Parse optional cols parameter from header
@@ -572,10 +580,67 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     Section::Grid { cols, default_z: 0.0, nodes: Vec::new() }
                 }
                 _ => {
+                    // Check for "Period N" or "Period N: Label" patterns
+                    if header.starts_with("period") {
+                        let after_raw = header_raw[6..].trim();
+                        // Parse "Period N: Label" — extract index and label
+                        let (idx, label) = if let Some(colon_pos) = after_raw.find(':') {
+                            let num_str = after_raw[..colon_pos].trim();
+                            let idx = num_str.parse::<usize>().unwrap_or(0);
+                            let label = after_raw[colon_pos+1..].trim().to_string();
+                            (idx, if label.is_empty() { format!("Period {}", idx) } else { label })
+                        } else {
+                            let idx = after_raw.trim().parse::<usize>().unwrap_or(0);
+                            (idx, format!("Period {}", idx))
+                        };
+                        // Register in doc.timeline_periods at the right index position
+                        // Grow the vec if needed
+                        while doc.timeline_periods.len() < idx {
+                            doc.timeline_periods.push(format!("Period {}", doc.timeline_periods.len() + 1));
+                        }
+                        if idx > 0 {
+                            if idx - 1 < doc.timeline_periods.len() {
+                                doc.timeline_periods[idx - 1] = label.clone();
+                            } else {
+                                doc.timeline_periods.push(label.clone());
+                            }
+                        } else {
+                            doc.timeline_periods.push(label.clone());
+                        }
+                        current_period = Some(label.clone());
+                        Section::Period { label }
+                    // Check for "Lane N" or "Lane N: Name" patterns
+                    } else if header.starts_with("lane") {
+                        let after_raw = header_raw[4..].trim();
+                        let (idx, label) = if let Some(colon_pos) = after_raw.find(':') {
+                            let num_str = after_raw[..colon_pos].trim();
+                            let idx = num_str.parse::<usize>().unwrap_or(0);
+                            let label = after_raw[colon_pos+1..].trim().to_string();
+                            (idx, if label.is_empty() { format!("Lane {}", idx) } else { label })
+                        } else {
+                            let idx = after_raw.trim().parse::<usize>().unwrap_or(0);
+                            (idx, format!("Lane {}", idx))
+                        };
+                        // Register in doc.timeline_lanes preserving order
+                        while doc.timeline_lanes.len() < idx.saturating_sub(1) {
+                            doc.timeline_lanes.push(format!("Lane {}", doc.timeline_lanes.len() + 1));
+                        }
+                        if !doc.timeline_lanes.contains(&label) {
+                            if idx > 0 && idx - 1 <= doc.timeline_lanes.len() {
+                                if idx - 1 == doc.timeline_lanes.len() {
+                                    doc.timeline_lanes.push(label);
+                                } else {
+                                    doc.timeline_lanes[idx - 1] = label;
+                                }
+                            } else {
+                                doc.timeline_lanes.push(label);
+                            }
+                        }
+                        Section::Lane
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
                     // "layer z:120", "layer z=120" → z = 120 (explicit)
-                    if header.starts_with("layer") {
+                    } else if header.starts_with("layer") {
                         let after_lower = header[5..].trim();
                         let after_raw = header_raw[5..].trim();
                         let z = if after_lower.is_empty() {
@@ -657,6 +722,16 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                                 }
                                 break;
                             }
+                        }
+                    }
+                    // Inherit current timeline period context
+                    if node.timeline_period.is_none() {
+                        node.timeline_period = current_period.clone();
+                    }
+                    // Auto-discover lane in doc.timeline_lanes
+                    if let Some(ref lane) = node.timeline_lane.clone() {
+                        if !doc.timeline_lanes.contains(lane) {
+                            doc.timeline_lanes.push(lane.clone());
                         }
                     }
                     // Defer inline edge creation
@@ -876,6 +951,38 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.nodes.push(node);
                 }
             }
+            Section::Period { .. } => {
+                // Nodes parsed under a Period section are handled by Section::Nodes logic
+                // after the section header sets current_period. Here we parse them the
+                // same way — route through the Nodes arm by converting on the fly.
+                if trimmed.starts_with("- ") {
+                    let stripped = &trimmed[2..];
+                    let (node_part, inline_targets) = split_inline_edges(stripped);
+                    let (id, mut node) = parse_node_line(node_part, line_num)?;
+                    node.timeline_period = current_period.clone();
+                    if let Some(ref lane) = node.timeline_lane.clone() {
+                        if !doc.timeline_lanes.contains(lane) {
+                            doc.timeline_lanes.push(lane.clone());
+                        }
+                    }
+                    last_node_id = Some(node.id);
+                    id_map.insert(id.clone(), node.id);
+                    label_map.insert(slugify(node.display_label(), 0), node.id);
+                    for (target_id, edge_tags) in inline_targets {
+                        deferred_inline_edges.push((id.clone(), target_id, edge_tags));
+                    }
+                    doc.nodes.push(node);
+                } else if line.starts_with("  ") || line.starts_with("\t") {
+                    if let Some(nid) = last_node_id {
+                        if let Some(node) = doc.find_node_mut(&nid) {
+                            append_description(node, trimmed);
+                        }
+                    }
+                }
+            }
+            Section::Lane => {
+                // Lane declarations are header-only — body lines are ignored
+            }
             Section::None => {}
         }
     }
@@ -987,6 +1094,18 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.import_hints.view_3d = Some(true);
                 }
             }
+            "timeline" => {
+                match val.to_lowercase().as_str() {
+                    "true" | "yes" | "on" | "1" => { doc.timeline_mode = true; }
+                    _ => {}
+                }
+            }
+            "timeline-dir" | "timeline_dir" => {
+                doc.timeline_dir = match val.to_uppercase().as_str() {
+                    "TB" | "TOP-BOTTOM" | "VERTICAL" => "TB".to_string(),
+                    _ => "LR".to_string(),
+                };
+            }
             "flow" | "layout" | "direction" | "layout-dir" | "layout_dir" => {
                 let dir = match val.to_uppercase().as_str() {
                     "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => "LR",
@@ -1069,8 +1188,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
     }
 
-    // Auto-layout: topological / hierarchical placement
-    super::layout::hierarchical_layout(&mut doc);
+    // Auto-layout: timeline or hierarchical placement
+    if doc.timeline_mode {
+        super::layout::timeline_layout(&mut doc);
+    } else {
+        super::layout::hierarchical_layout(&mut doc);
+    }
 
     // auto-z: assign z-offsets from topological layer ordering (only for nodes at z=0)
     if doc.import_hints.auto_z {
@@ -1295,7 +1418,50 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
         .filter(|n| !matches!(n.kind, NodeKind::StickyNote { .. }))
         .collect();
 
-    if !shape_nodes.is_empty() {
+    if !shape_nodes.is_empty() && doc.timeline_mode {
+        // Timeline export: group nodes by period, emit ## Period N: sections
+        // First emit ## Lane declarations (if any)
+        for (i, lane) in doc.timeline_lanes.iter().enumerate() {
+            out.push_str(&format!("## Lane {}: {}\n", i + 1, lane));
+        }
+        if !doc.timeline_lanes.is_empty() { out.push('\n'); }
+
+        let periods = &doc.timeline_periods;
+        for (p_idx, period_label) in periods.iter().enumerate() {
+            let period_nodes: Vec<&Node> = shape_nodes.iter().copied()
+                .filter(|n| n.timeline_period.as_deref() == Some(period_label.as_str()))
+                .collect();
+            out.push_str(&format!("## Period {}: {}\n", p_idx + 1, period_label));
+            for node in period_nodes {
+                let id = id_map.get(&node.id).cloned().unwrap_or_default();
+                let lane_suffix = node.timeline_lane.as_ref()
+                    .map(|l| format!(" {{lane:{}}}", l))
+                    .unwrap_or_default();
+                // Emit lane tag inline with the node line
+                // We use a temporary approach: export normally then append lane tag
+                let mut node_line = String::new();
+                export_node_to_hrf(node, &id, "", &mut node_line);
+                // Insert lane tag before the trailing newline
+                let node_line = if !lane_suffix.is_empty() {
+                    node_line.trim_end_matches('\n').to_string() + &lane_suffix + "\n"
+                } else { node_line };
+                out.push_str(&node_line);
+            }
+            out.push('\n');
+        }
+        // Emit nodes with no period assignment in a trailing ## Nodes section
+        let unperioded: Vec<&Node> = shape_nodes.iter().copied()
+            .filter(|n| n.timeline_period.is_none())
+            .collect();
+        if !unperioded.is_empty() {
+            out.push_str("## Nodes\n");
+            for node in unperioded {
+                let id = id_map.get(&node.id).cloned().unwrap_or_default();
+                export_node_to_hrf(node, &id, "", &mut out);
+            }
+            out.push('\n');
+        }
+    } else if !shape_nodes.is_empty() {
         // Collect distinct z-offsets (preserve insertion order via Vec dedup)
         let mut z_groups: Vec<f32> = Vec::new();
         for n in &shape_nodes {
@@ -1554,11 +1720,20 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
     let has_viewport = viewport.is_some();
     let has_layout_dir = !doc.layout_dir.is_empty() && doc.layout_dir != "TB";
     let has_title = !doc.title.is_empty();
-    if has_layer_names || has_viewport || has_layout_dir {
+    let has_timeline = doc.timeline_mode;
+    if has_layer_names || has_viewport || has_layout_dir || has_timeline {
         out.push_str("## Config\n");
         // Project title (if set and not already the document heading)
         if has_title {
             out.push_str(&format!("title = {}\n", doc.title));
+        }
+        // Timeline mode
+        if has_timeline {
+            out.push_str("timeline = true\n");
+            let tdir = if doc.timeline_dir.is_empty() { "LR" } else { &doc.timeline_dir };
+            if tdir != "LR" {
+                out.push_str(&format!("timeline-dir = {}\n", tdir));
+            }
         }
         // Layout direction (non-default TB is always exported)
         if has_layout_dir {
@@ -1643,6 +1818,10 @@ enum Section {
     /// `## Grid [cols=N]` — nodes are laid out in a grid (cols wide).
     /// Nodes are collected in order; positions are assigned after the section ends.
     Grid { cols: usize, default_z: f32, nodes: Vec<NodeId> },
+    /// `## Period N: Label` — nodes parsed below belong to this timeline period.
+    Period { label: String },
+    /// `## Lane N: Name` — declares a swim-lane (order preserved in doc.timeline_lanes).
+    Lane,
 }
 
 // ---------------------------------------------------------------------------
@@ -2076,6 +2255,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut gradient_angle: Option<u8> = None;
     let mut frame_color_override: Option<[u8; 4]> = None;
     let mut collapsed = false;
+    let mut lane_tag: Option<String> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -2296,6 +2476,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag.starts_with("url:") || tag.starts_with("link:") {
             let prefix_len = if tag.starts_with("url:") { 4 } else { 5 };
             url_override = Some(tag[prefix_len..].trim().to_string());
+        } else if tag.starts_with("lane:") {
+            // {lane:Name} — assign node to a timeline swim-lane
+            let lane_name = tag[5..].trim().to_string();
+            if !lane_name.is_empty() {
+                lane_tag = Some(lane_name);
+            }
         } else if tag.starts_with("tooltip:") || tag.starts_with("tip:") || tag.starts_with("desc:") {
             let prefix = if tag.starts_with("tooltip:") { 8 } else if tag.starts_with("tip:") { 4 } else { 5 };
             tooltip_text = Some(tag[prefix..].trim().to_string());
@@ -2454,6 +2640,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(nn) = node_note_text {
         node.comment = nn;
     }
+    if let Some(lane) = lane_tag {
+        node.timeline_lane = Some(lane);
+    }
 
     Ok((id, node))
 }
@@ -2533,7 +2722,9 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                         match key.as_str() {
                             // Preserve original case for these values
                             "from" | "to" | "icon" | "url" | "link"
-                            | "tooltip" | "tip" | "desc" => {
+                            | "tooltip" | "tip" | "desc"
+                            | "lane" | "sublabel" | "sub" | "subtitle" | "caption"
+                            | "note" | "annotation" | "comment" => {
                                 format!("{}:{}", key, val)
                             }
                             // Preserve fill/color values that start with '#' (hex colors)
@@ -4422,5 +4613,61 @@ auth "calls" --> db
         assert!(exported.contains("{muted}"),  "muted should export as {{muted}}");
         assert!(exported.contains("{hidden}"), "hidden should export as {{hidden}}");
         assert!(exported.contains("{opacity:50}"), "50% should export as {{opacity:50}}");
+    }
+
+    #[test]
+    fn test_timeline_period_lane_parse() {
+        let input = r#"
+# Product Roadmap
+
+## Config
+timeline = true
+timeline-dir = LR
+
+## Period 1: Q1 — Foundation
+- [mvp] MVP Launch {done} {lane:Product}
+- [auth] Auth System {wip} {lane:Backend}
+
+## Period 2: Q2 — Growth
+- [api] Public API {lane:Backend}
+- [onboard] Onboarding {lane:Product}
+
+## Lane 1: Product
+## Lane 2: Backend
+
+## Flow
+auth --> api: builds on
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+
+        // timeline_mode should be set
+        assert!(doc.timeline_mode, "timeline_mode should be true");
+
+        // periods should be detected
+        assert_eq!(doc.timeline_periods.len(), 2);
+        assert!(doc.timeline_periods[0].contains("Q1"));
+        assert!(doc.timeline_periods[1].contains("Q2"));
+
+        // lanes should be detected
+        assert!(doc.timeline_lanes.contains(&"Product".to_string()));
+        assert!(doc.timeline_lanes.contains(&"Backend".to_string()));
+
+        // nodes should have period and lane assigned
+        let mvp = doc.nodes.iter().find(|n| n.display_label() == "MVP Launch").unwrap();
+        assert!(mvp.timeline_period.as_deref().map_or(false, |p| p.contains("Q1")));
+        assert_eq!(mvp.timeline_lane.as_deref(), Some("Product"));
+
+        let api = doc.nodes.iter().find(|n| n.display_label() == "Public API").unwrap();
+        assert!(api.timeline_period.as_deref().map_or(false, |p| p.contains("Q2")));
+        assert_eq!(api.timeline_lane.as_deref(), Some("Backend"));
+
+        // edges should be parsed
+        assert_eq!(doc.edges.len(), 1);
+
+        // export roundtrip should include Period sections
+        let exported = export_hrf(&doc, "Product Roadmap");
+        assert!(exported.contains("timeline = true"), "should export timeline = true");
+        assert!(exported.contains("## Period 1:"), "should export period sections");
+        assert!(exported.contains("## Period 2:"), "should export period 2");
     }
 }

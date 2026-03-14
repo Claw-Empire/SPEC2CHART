@@ -306,7 +306,7 @@ impl FlowchartApp {
             PaletteAction::AutoLayout => {
                 let mut doc_clone = self.document.clone();
                 for node in doc_clone.nodes.iter_mut() { if !node.pinned { node.position = [0.0, 0.0]; } }
-                crate::specgraph::layout::hierarchical_layout(&mut doc_clone);
+                crate::specgraph::layout::auto_layout(&mut doc_clone);
                 self.layout_targets.clear();
                 for node in &doc_clone.nodes { self.layout_targets.insert(node.id, node.position); }
                 self.pending_fit = true;

@@ -1,6 +1,142 @@
 use std::collections::{HashMap, VecDeque};
 use crate::model::{FlowchartDocument, NodeId};
 
+/// Timeline grid layout.
+///
+/// Builds a Period × Lane grid and positions nodes into cells.
+/// If `doc.timeline_dir` is "TB", periods run top-to-bottom and lanes left-to-right.
+/// Otherwise (default "LR"), periods run left-to-right and lanes top-to-bottom.
+pub fn timeline_layout(doc: &mut FlowchartDocument) {
+    const CELL_PAD: f32 = 16.0;   // padding inside each cell
+    const HEADER_H: f32 = 36.0;   // period header height (LR mode)
+    const HEADER_W: f32 = 120.0;  // lane label width (LR mode)
+    const CELL_GAP: f32 = 12.0;   // gap between nodes in same cell
+    const ORIGIN_X: f32 = 140.0;  // canvas left margin (LR: reserves lane label column)
+    const ORIGIN_Y: f32 = 60.0;   // canvas top margin (LR: reserves period header row)
+    const MIN_CELL_W: f32 = 180.0;
+    const MIN_CELL_H: f32 = 80.0;
+
+    let periods = doc.timeline_periods.clone();
+    let mut lanes = doc.timeline_lanes.clone();
+
+    if periods.is_empty() { return; }
+
+    // Collect nodes by (period, lane)
+    let mut cell_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    let mut unlaned: Vec<usize> = Vec::new(); // nodes with no lane
+    let mut unperioded: Vec<usize> = Vec::new(); // nodes with no period
+
+    // Auto-discover lanes from nodes in document order
+    for (ni, node) in doc.nodes.iter().enumerate() {
+        let p_idx = node.timeline_period.as_ref()
+            .and_then(|p| periods.iter().position(|x| x == p));
+        let l_idx = node.timeline_lane.as_ref().map(|l| {
+            if let Some(pos) = lanes.iter().position(|x| x == l) {
+                pos
+            } else {
+                lanes.push(l.clone());
+                lanes.len() - 1
+            }
+        });
+        match (p_idx, l_idx) {
+            (Some(p), Some(l)) => { cell_map.entry((p, l)).or_default().push(ni); }
+            (Some(p), None) => {
+                // If lanes exist, put in implicit unlaned slot at end
+                if !lanes.is_empty() {
+                    unlaned.push(ni);
+                } else {
+                    // No lanes at all — create a single implicit "all" lane
+                    cell_map.entry((p, 0)).or_default().push(ni);
+                }
+            }
+            _ => { unperioded.push(ni); }
+        }
+    }
+
+    // Update doc.timeline_lanes with any auto-discovered lanes
+    doc.timeline_lanes = lanes.clone();
+
+    let num_periods = periods.len();
+    let num_lanes = if lanes.is_empty() { 1 } else { lanes.len() + if !unlaned.is_empty() { 1 } else { 0 } };
+
+    // Compute cell sizes: each cell is sized to fit its node count
+    // Column widths (one per period), row heights (one per lane)
+    let mut col_w: Vec<f32> = vec![MIN_CELL_W; num_periods];
+    let mut row_h: Vec<f32> = vec![MIN_CELL_H; num_lanes];
+
+    for (&(p, l), node_indices) in &cell_map {
+        if p >= num_periods || l >= num_lanes { continue; }
+        let total_h: f32 = node_indices.iter().map(|&ni| doc.nodes[ni].size[1]).sum::<f32>()
+            + CELL_GAP * (node_indices.len().saturating_sub(1)) as f32
+            + CELL_PAD * 2.0;
+        let max_w: f32 = node_indices.iter().map(|&ni| doc.nodes[ni].size[0]).fold(MIN_CELL_W, f32::max)
+            + CELL_PAD * 2.0;
+        col_w[p] = col_w[p].max(max_w);
+        row_h[l] = row_h[l].max(total_h);
+    }
+
+    // Compute cumulative column X positions and row Y positions (LR mode)
+    let mut col_x: Vec<f32> = Vec::with_capacity(num_periods);
+    let mut cx = ORIGIN_X;
+    for w in &col_w { col_x.push(cx); cx += w; }
+
+    let mut row_y: Vec<f32> = Vec::with_capacity(num_lanes);
+    let mut ry = ORIGIN_Y + HEADER_H;
+    for h in &row_h { row_y.push(ry); ry += h; }
+
+    // Position nodes into their cells
+    for (&(p, l), node_indices) in &cell_map {
+        if p >= num_periods || l >= num_lanes { continue; }
+        let cell_left = col_x[p] + CELL_PAD;
+        let mut y = row_y[l] + CELL_PAD;
+        for &ni in node_indices {
+            doc.nodes[ni].position = [cell_left, y];
+            y += doc.nodes[ni].size[1] + CELL_GAP;
+        }
+    }
+
+    // Position unperioded nodes far below the grid
+    let grid_bottom = row_y.last().copied().unwrap_or(ORIGIN_Y + HEADER_H)
+        + row_h.last().copied().unwrap_or(MIN_CELL_H) + 60.0;
+    let mut ux = ORIGIN_X;
+    for &ni in &unperioded {
+        doc.nodes[ni].position = [ux, grid_bottom];
+        ux += doc.nodes[ni].size[0] + CELL_GAP;
+    }
+
+    // Position unlaned nodes in the last implicit row
+    if !unlaned.is_empty() && !row_y.is_empty() {
+        let unlaned_y = row_y.last().copied().unwrap_or(0.0)
+            + row_h.last().copied().unwrap_or(MIN_CELL_H);
+        // Group by period
+        let mut unlaned_by_period: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &ni in &unlaned {
+            let p = doc.nodes[ni].timeline_period.as_ref()
+                .and_then(|p| periods.iter().position(|x| x == p))
+                .unwrap_or(0);
+            unlaned_by_period.entry(p).or_default().push(ni);
+        }
+        for (p, nodes) in &unlaned_by_period {
+            if *p >= num_periods { continue; }
+            let cell_left = col_x[*p] + CELL_PAD;
+            let mut y = unlaned_y + CELL_PAD;
+            for &ni in nodes {
+                doc.nodes[ni].position = [cell_left, y];
+                y += doc.nodes[ni].size[1] + CELL_GAP;
+            }
+        }
+    }
+}
+
+/// Dispatch helper — calls timeline_layout or hierarchical_layout based on doc.timeline_mode.
+pub fn auto_layout(doc: &mut FlowchartDocument) {
+    if doc.timeline_mode {
+        timeline_layout(doc);
+    } else {
+        hierarchical_layout(doc);
+    }
+}
+
 /// Hierarchical (layered) auto-layout.
 ///
 /// Nodes are assigned to layers based on their longest path from

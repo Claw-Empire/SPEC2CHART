@@ -52,7 +52,7 @@ pub fn specgraph_to_document(sg: &SpecGraph) -> Result<FlowchartDocument, String
     }
 
     // Auto-layout: assign positions to nodes that don't have them
-    super::layout::hierarchical_layout(&mut doc);
+    super::layout::auto_layout(&mut doc);
 
     Ok(doc)
 }

@@ -718,7 +718,7 @@ impl FlowchartApp {
             for node in doc_clone.nodes.iter_mut() {
                 if !node.pinned { node.position = [0.0, 0.0]; }
             }
-            crate::specgraph::layout::hierarchical_layout(&mut doc_clone);
+            crate::specgraph::layout::auto_layout(&mut doc_clone);
             // Store final positions as animation targets without touching the live document
             self.layout_targets.clear();
             for node in &doc_clone.nodes {

@@ -1822,6 +1822,171 @@ impl FlowchartApp {
         }
     }
 
+    /// Draw the timeline grid overlay: period columns, lane rows, headers, and connectors.
+    /// Called only when `doc.timeline_mode` is true and 2D view is active.
+    pub(crate) fn draw_timeline_grid(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
+        use egui::{FontId, Align2};
+
+        let periods = &self.document.timeline_periods;
+        let lanes = &self.document.timeline_lanes;
+        if periods.is_empty() { return; }
+
+        // Layout constants (must match layout.rs timeline_layout constants)
+        const CELL_PAD: f32 = 16.0;
+        const HEADER_H: f32 = 36.0;
+        const HEADER_W: f32 = 120.0;
+        const CELL_GAP: f32 = 12.0;
+        const ORIGIN_X: f32 = 140.0;
+        const ORIGIN_Y: f32 = 60.0;
+        const MIN_CELL_W: f32 = 180.0;
+        const MIN_CELL_H: f32 = 80.0;
+
+        let num_periods = periods.len();
+        let num_lanes = if lanes.is_empty() { 1 } else { lanes.len() };
+
+        // Compute cell sizes matching layout.rs
+        let mut col_w: Vec<f32> = vec![MIN_CELL_W; num_periods];
+        let mut row_h: Vec<f32> = vec![MIN_CELL_H; num_lanes];
+        for node in &self.document.nodes {
+            let p_idx = node.timeline_period.as_ref()
+                .and_then(|p| periods.iter().position(|x| x == p));
+            let l_idx = node.timeline_lane.as_ref()
+                .and_then(|l| lanes.iter().position(|x| x == l));
+            if let (Some(p), Some(l)) = (p_idx, l_idx) {
+                col_w[p] = col_w[p].max(node.size[0] + CELL_PAD * 2.0);
+                row_h[l] = row_h[l].max(node.size[1] + CELL_PAD * 2.0 + CELL_GAP);
+            }
+        }
+
+        let mut col_x: Vec<f32> = Vec::new();
+        let mut cx = ORIGIN_X;
+        for w in &col_w { col_x.push(cx); cx += w; }
+        let total_w = cx - ORIGIN_X;
+
+        let mut row_y: Vec<f32> = Vec::new();
+        let mut ry = ORIGIN_Y + HEADER_H;
+        for h in &row_h { row_y.push(ry); ry += h; }
+        let total_h = ry - ORIGIN_Y - HEADER_H;
+
+        let vp = &self.viewport;
+        let to_screen = |wx: f32, wy: f32| -> egui::Pos2 {
+            vp.canvas_to_screen(egui::Pos2::new(wx, wy))
+        };
+        let scale = vp.zoom;
+
+        let theme = &self.theme;
+
+        // --- Lane row backgrounds (alternating) ---
+        for (l, y_start) in row_y.iter().enumerate() {
+            let y_end = *y_start + row_h[l];
+            let grid_left = ORIGIN_X;
+            let grid_right = ORIGIN_X + total_w;
+            let rect = egui::Rect::from_min_max(
+                to_screen(grid_left, *y_start),
+                to_screen(grid_right, y_end),
+            );
+            if rect.width() < 1.0 || rect.height() < 1.0 { continue; }
+            if !rect.intersects(canvas_rect) { continue; }
+            let alpha = if l % 2 == 0 { 10u8 } else { 20u8 };
+            let bg = egui::Color32::from_rgba_premultiplied(100, 120, 200, alpha);
+            painter.rect_filled(rect, egui::CornerRadius::same(0), bg);
+        }
+
+        // --- Period column backgrounds ---
+        for (p, x_start) in col_x.iter().enumerate() {
+            let x_end = *x_start + col_w[p];
+            let y_top = ORIGIN_Y + HEADER_H;
+            let y_bot = y_top + total_h;
+            let rect = egui::Rect::from_min_max(
+                to_screen(*x_start, y_top),
+                to_screen(x_end, y_bot),
+            );
+            if rect.width() < 1.0 || rect.height() < 1.0 { continue; }
+            if !rect.intersects(canvas_rect) { continue; }
+            let bg = egui::Color32::from_rgba_premultiplied(140, 160, 220, 8);
+            painter.rect_filled(rect, egui::CornerRadius::same(0), bg);
+        }
+
+        // --- Grid lines ---
+        let grid_color = egui::Color32::from_rgba_premultiplied(120, 130, 170, 50);
+        let grid_stroke = egui::Stroke::new(1.0, grid_color);
+        // Horizontal lines (lane boundaries)
+        for y_start in &row_y {
+            let p0 = to_screen(ORIGIN_X, *y_start);
+            let p1 = to_screen(ORIGIN_X + total_w, *y_start);
+            if canvas_rect.contains(p0) || canvas_rect.contains(p1) {
+                painter.line_segment([p0, p1], grid_stroke);
+            }
+        }
+        // Bottom edge
+        let bot_y = ORIGIN_Y + HEADER_H + total_h;
+        painter.line_segment([to_screen(ORIGIN_X, bot_y), to_screen(ORIGIN_X + total_w, bot_y)], grid_stroke);
+        // Vertical lines (period boundaries)
+        for x_start in &col_x {
+            let p0 = to_screen(*x_start, ORIGIN_Y + HEADER_H);
+            let p1 = to_screen(*x_start, bot_y);
+            if canvas_rect.contains(p0) || canvas_rect.contains(p1) {
+                painter.line_segment([p0, p1], grid_stroke);
+            }
+        }
+        // Right edge
+        let right_x = ORIGIN_X + total_w;
+        painter.line_segment([to_screen(right_x, ORIGIN_Y + HEADER_H), to_screen(right_x, bot_y)], grid_stroke);
+
+        // --- Period header row ---
+        for (p, period_label) in periods.iter().enumerate() {
+            let x_center = col_x[p] + col_w[p] * 0.5;
+            let y_center = ORIGIN_Y + HEADER_H * 0.5;
+            let hdr_rect = egui::Rect::from_min_max(
+                to_screen(col_x[p], ORIGIN_Y),
+                to_screen(col_x[p] + col_w[p], ORIGIN_Y + HEADER_H),
+            );
+            if !hdr_rect.intersects(canvas_rect) { continue; }
+            // Header background
+            let hdr_bg = egui::Color32::from_rgba_premultiplied(100, 130, 220, 35);
+            painter.rect_filled(hdr_rect, egui::CornerRadius::same(0), hdr_bg);
+            // Header text
+            let font_size = (13.0 * scale).clamp(9.0, 20.0);
+            let center_screen = to_screen(x_center, y_center);
+            painter.text(
+                center_screen,
+                Align2::CENTER_CENTER,
+                period_label,
+                FontId::proportional(font_size),
+                theme.text_primary,
+            );
+
+            // Arrow connector to next period (→)
+            if p + 1 < num_periods {
+                let arrow_x = col_x[p] + col_w[p];
+                let arrow_y = ORIGIN_Y + HEADER_H * 0.5;
+                let p_from = to_screen(arrow_x - 6.0, arrow_y);
+                let p_to = to_screen(col_x[p + 1] + 4.0, arrow_y);
+                let arrow_color = egui::Color32::from_rgba_premultiplied(120, 150, 220, 120);
+                painter.arrow(p_from, p_to - p_from, egui::Stroke::new(1.5, arrow_color));
+            }
+        }
+
+        // --- Lane labels (left sidebar) ---
+        for (l, lane_label) in lanes.iter().enumerate() {
+            let y_center = row_y[l] + row_h[l] * 0.5;
+            let label_rect = egui::Rect::from_min_max(
+                to_screen(ORIGIN_X - HEADER_W, row_y[l]),
+                to_screen(ORIGIN_X, row_y[l] + row_h[l]),
+            );
+            if !label_rect.intersects(canvas_rect) { continue; }
+            let font_size = (12.0 * scale).clamp(8.0, 16.0);
+            let center_screen = to_screen(ORIGIN_X - HEADER_W * 0.5, y_center);
+            painter.text(
+                center_screen,
+                Align2::CENTER_CENTER,
+                lane_label,
+                FontId::proportional(font_size),
+                theme.text_secondary,
+            );
+        }
+    }
+
     pub(crate) fn draw_resize_handles(&self, painter: &egui::Painter, screen_rect: Rect) {
         let handle_half = 5.0;
         let handles = Self::resize_handle_positions(screen_rect);

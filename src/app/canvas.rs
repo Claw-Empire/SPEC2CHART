@@ -425,6 +425,11 @@ impl FlowchartApp {
             std::collections::HashSet::new()
         };
 
+        // Timeline grid overlay (drawn before edges/nodes so it's underneath)
+        if self.document.timeline_mode && !matches!(self.view_mode, super::ViewMode::ThreeD) {
+            self.draw_timeline_grid(&painter, canvas_rect);
+        }
+
         // Edges (visible only)
         for edge in &self.document.edges {
             let src_visible = node_idx

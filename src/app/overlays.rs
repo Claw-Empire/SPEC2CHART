@@ -477,6 +477,8 @@ impl FlowchartApp {
                 depth_3d: 0.0,
                 highlight: false,
                 progress: 0.0,
+                timeline_period: None,
+                timeline_lane: None,
             };
             let id = node.id;
             self.document.nodes.push(node);
