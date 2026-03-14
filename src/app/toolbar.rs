@@ -236,6 +236,25 @@ impl FlowchartApp {
                                                 specgraph::SpecFormat::Hrf => "Spec",
                                                 specgraph::SpecFormat::Prose => "Prose (LLM)",
                                             };
+                                            // Apply import hints from ## Config section
+                                            if let Some(z) = doc.import_hints.zoom {
+                                                self.viewport.zoom = z;
+                                            }
+                                            if let Some(true) = doc.import_hints.view_3d {
+                                                self.view_mode = super::ViewMode::ThreeD;
+                                            }
+                                            if let Some(yaw) = doc.import_hints.camera_yaw {
+                                                self.camera3d.yaw = yaw;
+                                            }
+                                            if let Some(pitch) = doc.import_hints.camera_pitch {
+                                                self.camera3d.pitch = pitch;
+                                            }
+                                            if let Some(bg) = doc.import_hints.canvas_bg {
+                                                self.canvas_bg = bg;
+                                            }
+                                            if let Some(ref title) = doc.import_hints.project_title.clone() {
+                                                self.project_title = title.clone();
+                                            }
                                             self.document = doc;
                                             self.selection.clear();
                                             self.history.push(&self.document);
@@ -471,6 +490,11 @@ impl FlowchartApp {
                                     if let Some(gs) = doc.import_hints.grid_size {
                                         self.grid_size = gs;
                                     }
+                                    // Apply zoom: specific value skips auto-fit; "fit"/"auto" triggers it.
+                                    let specific_zoom = doc.import_hints.zoom;
+                                    if let Some(z) = specific_zoom {
+                                        self.viewport.zoom = z;
+                                    }
                                     // Apply 3D camera hints
                                     if let Some(yaw) = doc.import_hints.camera_yaw {
                                         self.camera3d.yaw = yaw;
@@ -487,10 +511,12 @@ impl FlowchartApp {
                                     if let Some(ref title) = doc.import_hints.project_title.clone() {
                                         self.project_title = title.clone();
                                     }
+                                    // Fit to content unless a specific zoom level was given
+                                    let do_fit = doc.import_hints.auto_fit || specific_zoom.is_none();
                                     self.document = doc;
                                     self.selection.clear();
                                     self.history.push(&self.document);
-                                    self.pending_fit = true;
+                                    self.pending_fit = do_fit;
                                     self.show_spec_paste_area = false;
                                     self.spec_paste_buf.clear();
                                     self.status_message = Some((
