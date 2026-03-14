@@ -565,6 +565,8 @@ impl FlowchartApp {
                     ("Force Field", include_str!("../../assets/examples/force_field.spec")),
                     ("Lean Canvas", include_str!("../../assets/examples/lean_canvas.spec")),
                     ("OKR Tree", include_str!("../../assets/examples/okr_tree.spec")),
+                    ("5 Whys", include_str!("../../assets/examples/five_whys.spec")),
+                    ("Impact/Effort", include_str!("../../assets/examples/impact_effort.spec")),
                 ];
                 ui.horizontal_wrapped(|ui| {
                     for (name, spec_text) in example_specs {
