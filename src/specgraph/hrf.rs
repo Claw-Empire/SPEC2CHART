@@ -116,6 +116,11 @@ use std::collections::HashMap;
 ///   `{c-tgt:0..N}` — target cardinality (1 / 0..1 / 1..N / 0..N)
 ///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
 ///   `{note:text}` / `{comment:text}` — annotation shown as tooltip when hovering the edge
+///   Indented line after an edge → sets the edge comment (multi-word description):
+///   ```
+///   api -> db
+///     Reads and writes user records. Uses connection pooling.
+///   ```
 ///
 /// ### `## Style` section
 /// ```text
@@ -426,6 +431,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     // Track the last node added in Nodes section for multi-line descriptions
     let mut last_node_id: Option<NodeId> = None;
+    // Track the last edges added in Flow section for indented description continuation
+    let mut last_flow_edge_ids: Vec<crate::model::EdgeId> = Vec::new();
 
     // ## Groups section: (group_id, label, fill_color, member_ids)
     let mut groups: Vec<(String, String, Option<[u8;4]>, Vec<String>)> = Vec::new();
@@ -486,6 +493,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         if trimmed.starts_with("## ") {
             seen_section = true;
             last_node_id = None;
+            last_flow_edge_ids.clear();
             // Finalise Grid section before switching away
             if let Section::Grid { cols, nodes, .. } = &section {
                 if !nodes.is_empty() {
@@ -658,19 +666,36 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             Section::Flow => {
                 if !trimmed.is_empty() {
-                    // Expand multi-source: `[a, b] -> target {tags}` → multiple lines
-                    // Expand multi-target: `source -> [a, b, c] {tags}` → multiple lines
-                    let lines_to_parse: Vec<String> = if let Some(expanded) = expand_multi_source(trimmed) {
-                        expanded
-                    } else if let Some(expanded) = expand_multi_target(trimmed) {
-                        expanded
+                    // Indented continuation → set description/comment on last added edge(s)
+                    if (line.starts_with("  ") || line.starts_with('\t')) && !last_flow_edge_ids.is_empty() {
+                        let desc = trimmed.to_string();
+                        for eid in &last_flow_edge_ids {
+                            if let Some(edge) = doc.edges.iter_mut().find(|e| e.id == *eid) {
+                                if edge.comment.is_empty() {
+                                    edge.comment = desc.clone();
+                                } else {
+                                    edge.comment.push(' ');
+                                    edge.comment.push_str(&desc);
+                                }
+                            }
+                        }
                     } else {
-                        vec![trimmed.to_string()]
-                    };
-                    for expanded_line in &lines_to_parse {
-                        let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, &label_map, line_num)?;
-                        for edge in edges {
-                            doc.edges.push(edge);
+                        // Expand multi-source: `[a, b] -> target {tags}` → multiple lines
+                        // Expand multi-target: `source -> [a, b, c] {tags}` → multiple lines
+                        let lines_to_parse: Vec<String> = if let Some(expanded) = expand_multi_source(trimmed) {
+                            expanded
+                        } else if let Some(expanded) = expand_multi_target(trimmed) {
+                            expanded
+                        } else {
+                            vec![trimmed.to_string()]
+                        };
+                        last_flow_edge_ids.clear();
+                        for expanded_line in &lines_to_parse {
+                            let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, &label_map, line_num)?;
+                            for edge in edges {
+                                last_flow_edge_ids.push(edge.id);
+                                doc.edges.push(edge);
+                            }
                         }
                     }
                 }
