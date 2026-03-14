@@ -76,7 +76,7 @@ use std::collections::HashMap;
 ///   `{pos:X,Y}` — shorthand for `{x:X} {y:Y}` (also pins the node)
 ///   `{w:200}` — explicit width in canvas units
 ///   `{h:100}` — explicit height in canvas units
-///   `{icon:🔒}` — icon badge
+///   `{icon:🔒}` — icon badge (or bare `{🔒}` — bare emoji shorthand, no prefix needed)
 ///   `{shadow}` — drop shadow effect
 ///   `{highlight}` / `{pulse}` / `{starred}` / `{important}` — slow amber pulsing ring (important node marker)
 ///   `{glow}` / `{neon}` — neon glow effect on node border
@@ -2294,6 +2294,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if fill_color.is_none() {
                 fill_color = Some(preset_color);
             }
+        } else if is_emoji_only(tag) {
+            // {🔒} / {⚡} / {🗄️} — bare emoji shorthand: treated as {icon:emoji}
+            if icon.is_none() {
+                icon = Some(tag.to_string());
+            }
         } else {
             shape = tag_to_shape(tag);
         }
@@ -2680,6 +2685,30 @@ fn edge_color_name(color: [u8; 4]) -> Option<&'static str> {
         [203, 166, 247, 255] => Some("purple"),
         _ => None,
     }
+}
+
+/// Returns true if the tag consists entirely of emoji/pictograph characters
+/// with no ASCII letters or digits — used to detect bare emoji icon shorthands.
+fn is_emoji_only(tag: &str) -> bool {
+    if tag.is_empty() { return false; }
+    // Must have at least one non-ASCII char (emoji are > U+007F)
+    if tag.is_ascii() { return false; }
+    // Must not contain alphanumeric ASCII (letters or digits) or '-'/'_'
+    if tag.bytes().any(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return false;
+    }
+    // Check that all scalar values are in recognized emoji/symbol ranges
+    tag.chars().all(|c| {
+        let cp = c as u32;
+        cp > 0x7F && (
+            (0x1F300..=0x1FAFF).contains(&cp)  // emoji: misc symbols, transport, nature, food, etc.
+            || (0x2600..=0x27FF).contains(&cp)  // misc symbols, dingbats
+            || (0x1F900..=0x1F9FF).contains(&cp)// supplemental symbols
+            || (0x231A..=0x27BF).contains(&cp)  // watchface, arrows, dingbats
+            || c == '\u{FE0F}'                   // variation selector-16 (emoji modifier)
+            || c == '\u{20E3}'                   // combining enclosing keycap
+        )
+    })
 }
 
 fn tag_to_shape(tag: &str) -> NodeShape {
