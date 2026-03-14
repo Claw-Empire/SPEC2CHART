@@ -559,6 +559,9 @@ impl FlowchartApp {
                     ("Showcase", include_str!("../../assets/examples/feature_showcase.spec")),
                     ("ER", include_str!("../../assets/examples/er_diagram.spec")),
                     ("Network", include_str!("../../assets/examples/network.spec")),
+                    ("Hypothesis", include_str!("../../assets/examples/hypothesis_map.spec")),
+                    ("Roadmap", include_str!("../../assets/examples/timeline_roadmap.spec")),
+                    ("SWOT", include_str!("../../assets/examples/swot_analysis.spec")),
                 ];
                 ui.horizontal_wrapped(|ui| {
                     for (name, spec_text) in example_specs {
