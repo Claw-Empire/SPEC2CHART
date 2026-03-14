@@ -534,7 +534,24 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "experiments" | "tests"
                 | "metrics" | "kpis"
                 | "strengths" | "weaknesses" | "opportunities"
-                | "how-might-we" | "hmw" => {
+                | "how-might-we" | "hmw"
+                // Customer journey / UX research section aliases
+                | "touchpoints" | "touchpoint"
+                | "pain points" | "painpoints" | "pain-points"
+                | "emotions" | "emotion" | "feelings"
+                | "channels" | "channel"
+                // Decision / ADR section aliases
+                | "decisions" | "decision"
+                | "background"
+                | "alternatives" | "alternative"
+                | "consequences" | "consequence" | "tradeoffs" | "trade-offs"
+                | "constraints" | "constraint"
+                | "stakeholders" | "stakeholder" | "personas" | "persona"
+                // Strategic / OKR section aliases
+                | "initiatives" | "initiative"
+                | "countermeasures" | "countermeasure" | "mitigations" | "mitigation"
+                | "driving forces" | "restraining forces"
+                => {
                     current_section_label = header_raw.to_string();
                     Section::Nodes { default_z: 0.0 }
                 }
