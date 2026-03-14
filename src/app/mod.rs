@@ -236,6 +236,9 @@ pub struct FlowchartApp {
     /// 3D zoom momentum: accumulated scroll velocity, decays each frame.
     /// Positive = zooming in (distance decreasing), negative = zooming out.
     pub(crate) cam3d_zoom_vel: f32,
+    /// Canvas-space position captured at the moment of secondary-click, used by the
+    /// context menu so hit-testing stays correct while the popup is open.
+    pub(crate) context_menu_origin: Option<egui::Pos2>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,6 +351,7 @@ impl FlowchartApp {
             spec_editor_last_edit: None,
             spec_editor_error: None,
             cam3d_zoom_vel: 0.0,
+            context_menu_origin: None,
         }
     }
 

@@ -1100,6 +1100,79 @@ impl FlowchartApp {
             }
         }
 
+        // 3D hover tooltip — show node label, sublabel, layer, and comment on hover.
+        // Only rendered when the hovered node has info beyond what the label in-canvas shows.
+        if let Some(hov_id) = hovered_node_id {
+            if let Some(mouse) = pointer_pos {
+                // Extract all data while document is immutably borrowed, then release before theme access.
+                let info = self.document.find_node(&hov_id).map(|n| {
+                    let z_idx = (n.z_offset / 120.0).round() as i32;
+                    (n.display_label().to_string(), n.comment.clone(), n.sublabel.clone(), z_idx, n.z_offset)
+                });
+                if let Some((lbl, comment, sublabel, z_idx, z_offset)) = info {
+                    let layer_name = self.document.layer_names.get(&z_idx).cloned().unwrap_or_default();
+                    let has_comment  = !comment.is_empty();
+                    let has_sublabel = !sublabel.is_empty();
+                    let has_layer    = !layer_name.is_empty() || z_offset != 0.0;
+
+                    // Show only when there's info beyond the visible label
+                    if has_comment || has_sublabel || has_layer {
+                        let pad   = 8.0_f32;
+                        let w     = 210.0_f32;
+                        let row_h = 15.0_f32;
+                        let n_rows = 1
+                            + if has_sublabel { 1 } else { 0 }
+                            + if has_layer    { 1 } else { 0 }
+                            + if has_comment  { 1 } else { 0 };
+                        let h = n_rows as f32 * row_h + pad * 1.6;
+
+                        let mut tx = mouse.x + 14.0;
+                        let mut ty = mouse.y - h - 6.0;
+                        if tx + w > canvas_rect.max.x { tx = mouse.x - w - 14.0; }
+                        if ty < canvas_rect.min.y + 4.0 { ty = mouse.y + 14.0; }
+
+                        let bg_rect = Rect::from_min_size(Pos2::new(tx, ty), Vec2::new(w, h));
+                        painter.rect_filled(bg_rect, CornerRadius::same(5), self.theme.tooltip_bg);
+                        painter.rect_stroke(bg_rect, CornerRadius::same(5),
+                            Stroke::new(1.0, self.theme.tooltip_border), StrokeKind::Outside);
+
+                        let font_main = FontId::proportional(11.0);
+                        let font_sm   = || FontId::proportional(10.0);
+                        let mut y = ty + pad;
+
+                        painter.text(Pos2::new(tx + pad, y), Align2::LEFT_TOP,
+                            &lbl, font_main, self.theme.text_primary);
+                        y += row_h;
+
+                        if has_sublabel {
+                            painter.text(Pos2::new(tx + pad, y), Align2::LEFT_TOP,
+                                &sublabel, font_sm(), self.theme.text_dim);
+                            y += row_h;
+                        }
+                        if has_layer {
+                            let layer_str = if !layer_name.is_empty() {
+                                format!("⧫ {}", layer_name)
+                            } else {
+                                format!("⧫ z = {}", z_offset.round() as i32)
+                            };
+                            painter.text(Pos2::new(tx + pad, y), Align2::LEFT_TOP,
+                                &layer_str, font_sm(), self.theme.accent.gamma_multiply(0.85));
+                            y += row_h;
+                        }
+                        if has_comment {
+                            let preview = if comment.len() > 40 {
+                                format!("💬 {}…", &comment[..40])
+                            } else {
+                                format!("💬 {}", comment)
+                            };
+                            painter.text(Pos2::new(tx + pad, y), Align2::LEFT_TOP,
+                                &preview, font_sm(), self.theme.text_dim);
+                        }
+                    }
+                }
+            }
+        }
+
         // Compass rose (bottom-right corner) — shows world X/Y axis directions
         {
             let cx = canvas_rect.max.x - 42.0;

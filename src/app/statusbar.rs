@@ -194,9 +194,17 @@ impl FlowchartApp {
                         }
                         separator(ui, surface1);
                         ui.add_space(8.0);
-                        // Zoom
+                        // Zoom — clickable button: single click resets to 100%
                         let zoom_text = format!("{zoom_pct}%");
-                        label(ui, &zoom_text, if zoom_pct == 100 { text_secondary } else { accent });
+                        let zoom_color = if zoom_pct == 100 { text_secondary } else { accent };
+                        let zoom_resp = ui.add(
+                            egui::Button::new(RichText::new(&zoom_text).size(11.0).color(zoom_color))
+                                .frame(false)
+                                .min_size(egui::vec2(0.0, 0.0))
+                        ).on_hover_text("Click to reset zoom to 100%");
+                        if zoom_resp.clicked() {
+                            self.viewport.zoom = 1.0;
+                        }
                         ui.add_space(8.0);
                         separator(ui, surface1);
                         ui.add_space(8.0);

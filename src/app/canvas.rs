@@ -273,9 +273,15 @@ impl FlowchartApp {
             }
         }
 
-        // Right-click context menu
+        // Right-click context menu.
+        // Capture the pointer position at the moment of secondary click so that
+        // hit-testing inside draw_context_menu stays correct — once the popup
+        // opens, response.hover_pos() returns None (cursor is over the popup).
+        if response.secondary_clicked() {
+            self.context_menu_origin = pointer_pos;
+        }
         response.context_menu(|ui| {
-            self.draw_context_menu(ui, pointer_pos);
+            self.draw_context_menu(ui, self.context_menu_origin);
         });
 
         // Double-click to focus label editing, or create new node on empty space
