@@ -867,6 +867,7 @@ impl FlowchartApp {
         }
 
         // Nodes (back to front) with 3D shapes
+        let max_z_layer = projections.iter().map(|p| p.z_layer).max().unwrap_or(0);
         for proj in &projections {
             let node = &self.document.nodes[proj.node_idx];
             let thickness = if node.depth_3d > 0.0 { node.depth_3d } else { CUBE_THICKNESS };
@@ -882,6 +883,7 @@ impl FlowchartApp {
                 proj.screen_pos,
                 proj.depth_scale,
                 proj.z_layer,
+                max_z_layer,
                 extrude,
             );
         }
@@ -1294,6 +1296,7 @@ impl FlowchartApp {
         screen_pos: Pos2,
         depth_scale: f32,
         z_layer: i32,
+        max_z_layer: i32,
         extrude: Vec2,
     ) {
         let scale = depth_scale.clamp(0.15, 3.0);
@@ -1303,7 +1306,15 @@ impl FlowchartApp {
 
         let is_selected = self.selection.contains_node(&node.id);
         let opacity = (scale * 0.8).clamp(0.3, 1.0);
-        let alpha = (opacity * 255.0) as u8;
+        // Depth fog: nodes further from camera are dimmed 0–30% based on their layer depth.
+        // Only applies when there are multiple layers (max_z_layer > 0).
+        let fog = if max_z_layer > 0 {
+            let t = z_layer as f32 / max_z_layer as f32; // 0=background, 1=foreground
+            1.0 - (1.0 - t) * 0.30 // background nodes get up to 30% dimmed
+        } else {
+            1.0_f32
+        };
+        let alpha = (opacity * fog * 255.0) as u8;
 
         let layer_tint = match z_layer % 4 {
             0 => [0_i16, 0, 0],

@@ -54,6 +54,7 @@ use std::collections::HashMap;
 ///   `{z:N}` — 3D layer offset (positive = closer to camera)
 ///   `{layer:N}` / `{level:N}` / `{tier:N}` — 3D layer as index × 120 (N=0,1,2…)
 ///   `{layer:db}` `{layer:api}` `{layer:frontend}` `{layer:edge}` `{layer:infra}` — semantic tier names
+///   `{back}` `{far}` `{mid}` `{near}` `{front}` — 3D depth shortcuts (z=0/120/240/360/480)
 ///   `{3d-depth:N}` / `{depth:N}` — custom extrusion thickness in 3D view (world units; default 40)
 ///   `{critical}` `{warning}` `{ok}` `{info}` — status tag badge
 ///   `{badge:text}` / `{v:text}` — text/version badge (alias for icon)
@@ -70,6 +71,8 @@ use std::collections::HashMap;
 ///   `{text-color:white}` or `{color:white}` — text color override
 ///   `{tooltip:text}` or `{tip:text}` or `{desc:text}` — inline description/tooltip text
 ///   `{size:200x80}` — shorthand for `{w:200} {h:80}`
+///   `{tiny}` / `{small}` / `{medium}` / `{large}` / `{xlarge}` — size presets (70–300 × 36–140)
+///   `{wide}` — wide-and-short preset (240×60); `{tall}` — narrow-and-tall preset (80×180)
 ///   `{pos:X,Y}` — shorthand for `{x:X} {y:Y}` (also pins the node)
 ///   `{w:200}` — explicit width in canvas units
 ///   `{h:100}` — explicit height in canvas units
@@ -1178,6 +1181,21 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
     }
 
+    // Auto-suggest 3D view when the spec has nodes at 2+ distinct z-levels
+    // and the user has not explicitly set `view = 2d` in Config.
+    if doc.import_hints.view_3d.is_none() {
+        let mut distinct_z: std::collections::HashSet<i32> = std::collections::HashSet::new();
+        for node in &doc.nodes {
+            if !node.is_frame {
+                distinct_z.insert(node.z_offset.round() as i32);
+            }
+        }
+        if distinct_z.len() >= 2 {
+            doc.import_hints.view_3d = Some(true);
+            doc.import_hints.auto_fit = true;
+        }
+    }
+
     Ok(doc)
 }
 
@@ -2023,6 +2041,17 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if let Ok(d) = tag[colon+1..].trim().parse::<f32>() {
                 depth_3d = d.clamp(0.0, 400.0);
             }
+        } else if tag == "back" || tag == "background" || tag == "ground" {
+            // Depth shortcuts — snap to standard 3D tiers without knowing numbers
+            z_offset = 0.0;
+        } else if tag == "far" {
+            z_offset = 120.0;
+        } else if tag == "mid" || tag == "middle" || tag == "center-z" {
+            z_offset = 240.0;
+        } else if tag == "near" || tag == "close" {
+            z_offset = 360.0;
+        } else if tag == "front" || tag == "foreground" || tag == "top-z" {
+            z_offset = 480.0;
         } else if tag.starts_with("layer:") || tag.starts_with("level:") || tag.starts_with("tier:") {
             // {layer:N} / {level:N} / {tier:N} — numeric: z = N * 120
             // {layer:name} — named semantic tier (db=0, api=120, frontend=240, edge=360, infra=480)
@@ -2066,6 +2095,28 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             width_override = tag[2..].trim().parse::<f32>().ok();
         } else if tag.starts_with("h:") {
             height_override = tag[2..].trim().parse::<f32>().ok();
+        } else if tag == "tiny" || tag == "xs" {
+            // Size shorthands — set both width and height
+            width_override  = Some(70.0);
+            height_override = Some(36.0);
+        } else if tag == "small" || tag == "sm" {
+            width_override  = Some(110.0);
+            height_override = Some(50.0);
+        } else if tag == "medium" || tag == "md" {
+            width_override  = Some(160.0);
+            height_override = Some(70.0);
+        } else if tag == "large" || tag == "lg" {
+            width_override  = Some(220.0);
+            height_override = Some(100.0);
+        } else if tag == "xlarge" || tag == "xl" {
+            width_override  = Some(300.0);
+            height_override = Some(140.0);
+        } else if tag == "wide" {
+            width_override  = Some(240.0);
+            height_override = Some(60.0);
+        } else if tag == "tall" {
+            width_override  = Some(80.0);
+            height_override = Some(180.0);
         } else if tag.starts_with("r:") || tag.starts_with("radius:") || tag.starts_with("corner:") {
             let colon = tag.find(':').unwrap();
             corner_radius = tag[colon+1..].trim().parse::<f32>().ok();
