@@ -1501,6 +1501,43 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
         }
         z_groups.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
+        // If all nodes are on z=0 and have section_name set, group by section_name
+        let all_z0 = z_groups.len() == 1 && z_groups[0].abs() < 0.5;
+        let any_section = shape_nodes.iter().any(|n| !n.section_name.is_empty());
+        if all_z0 && any_section {
+            // Collect section names in document order (preserve first occurrence order)
+            let mut section_order: Vec<String> = Vec::new();
+            for n in &shape_nodes {
+                if !n.section_name.is_empty() && !section_order.contains(&n.section_name) {
+                    section_order.push(n.section_name.clone());
+                }
+            }
+            let mut used_ids: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+            for section in &section_order {
+                let group: Vec<&Node> = shape_nodes.iter().copied()
+                    .filter(|n| &n.section_name == section)
+                    .collect();
+                out.push_str(&format!("## {}\n", section));
+                for node in group {
+                    let id = id_map.get(&node.id).cloned().unwrap_or_default();
+                    export_node_to_hrf(node, &id, "", &mut out);
+                    used_ids.insert(node.id);
+                }
+                out.push('\n');
+            }
+            let unsectioned: Vec<&Node> = shape_nodes.iter().copied()
+                .filter(|n| !used_ids.contains(&n.id))
+                .collect();
+            if !unsectioned.is_empty() {
+                out.push_str("## Nodes\n");
+                for node in unsectioned {
+                    let id = id_map.get(&node.id).cloned().unwrap_or_default();
+                    export_node_to_hrf(node, &id, "", &mut out);
+                }
+                out.push('\n');
+            }
+        } else {
+
         let use_layers = z_groups.len() > 1;
 
         for section_z in &z_groups {
@@ -1565,6 +1602,7 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
             }
             out.push('\n');
         }
+        } // close `else` of `if all_z0 && any_section`
     }
 
     // Flow section — edges grouped by source node for human readability
@@ -4698,5 +4736,36 @@ auth --> api: builds on
         assert!(exported.contains("timeline = true"), "should export timeline = true");
         assert!(exported.contains("## Period 1:"), "should export period sections");
         assert!(exported.contains("## Period 2:"), "should export period 2");
+    }
+
+    #[test]
+    fn test_section_name_preserved_in_export() {
+        let input = r#"
+# Hypothesis Map
+
+## Hypotheses
+- [h1] Users churn due to bad onboarding {hypothesis}
+
+## Evidence
+- [e1] 68% drop-off at step 3 {evidence} {done}
+
+## Flow
+e1 --> h1: supports
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+
+        // Nodes should have section_name set
+        let h1 = doc.nodes.iter().find(|n| n.display_label() == "Users churn due to bad onboarding")
+            .expect("h1 node");
+        assert_eq!(h1.section_name, "Hypotheses");
+
+        let e1 = doc.nodes.iter().find(|n| n.display_label() == "68% drop-off at step 3")
+            .expect("e1 node");
+        assert_eq!(e1.section_name, "Evidence");
+
+        // Export should use section names as section headers
+        let exported = export_hrf(&doc, "Hypothesis Map");
+        assert!(exported.contains("## Hypotheses"), "export should have Hypotheses section");
+        assert!(exported.contains("## Evidence"), "export should have Evidence section");
     }
 }
