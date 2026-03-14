@@ -54,6 +54,7 @@ enum PaletteAction {
     LoadOkrTreeTemplate,
     LoadFiveWhysTemplate,
     LoadImpactEffortTemplate,
+    LoadCustomerJourneyTemplate,
 }
 
 impl FlowchartApp {
@@ -475,6 +476,21 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadCustomerJourneyTemplate => {
+                let spec = include_str!("../../assets/examples/customer_journey.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Customer journey loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -523,6 +539,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⊙",  label: "Load OKR tree template",          category: "Templates", action: PaletteAction::LoadOkrTreeTemplate },
         PaletteEntry { icon: "❓",  label: "Load 5 Whys root cause template", category: "Templates", action: PaletteAction::LoadFiveWhysTemplate },
         PaletteEntry { icon: "⊞",  label: "Load Impact/Effort matrix",        category: "Templates", action: PaletteAction::LoadImpactEffortTemplate },
+        PaletteEntry { icon: "🗺",  label: "Load customer journey map",        category: "Templates", action: PaletteAction::LoadCustomerJourneyTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },

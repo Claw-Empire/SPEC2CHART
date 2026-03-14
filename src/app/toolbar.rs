@@ -567,6 +567,7 @@ impl FlowchartApp {
                     ("OKR Tree", include_str!("../../assets/examples/okr_tree.spec")),
                     ("5 Whys", include_str!("../../assets/examples/five_whys.spec")),
                     ("Impact/Effort", include_str!("../../assets/examples/impact_effort.spec")),
+                    ("Journey Map", include_str!("../../assets/examples/customer_journey.spec")),
                 ];
                 ui.horizontal_wrapped(|ui| {
                     for (name, spec_text) in example_specs {
