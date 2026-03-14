@@ -309,6 +309,7 @@ impl FlowchartApp {
                                     bg_pattern: bg_str,
                                     snap: self.snap_to_grid,
                                     grid_size: self.grid_size,
+                                    zoom: self.viewport.zoom,
                                     view_3d: is_3d,
                                     camera_yaw: if is_3d { Some(self.camera3d.yaw) } else { None },
                                     camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
@@ -387,6 +388,7 @@ impl FlowchartApp {
                             bg_pattern: bg_str,
                             snap: self.snap_to_grid,
                             grid_size: self.grid_size,
+                            zoom: self.viewport.zoom,
                             view_3d: is_3d,
                             camera_yaw: if is_3d { Some(self.camera3d.yaw) } else { None },
                             camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
@@ -425,7 +427,7 @@ impl FlowchartApp {
                             .hint_text("# My Diagram\n\n## Nodes\n- [a] Node A\n\n## Flow\na --> b");
                         ui.add(te);
                         ui.add_space(4.0);
-                        // Inline parse preview: show node/edge count if parseable
+                        // Inline parse preview: show node/edge count + config hints if parseable
                         if !self.spec_paste_buf.trim().is_empty() {
                             let preview_text = match specgraph::hrf::parse_hrf(&self.spec_paste_buf) {
                                 Ok(doc) => {
@@ -441,13 +443,22 @@ impl FlowchartApp {
                                     };
                                     let title_bit = if doc.title.is_empty() { String::new() }
                                         else { format!("\"{}\"  ", doc.title) };
-                                    let layers_bit = if layers > 1 { format!("  {layers}L") } else { String::new() };
+                                    let layers_bit = if layers > 1 { format!("  {}L", layers) } else { String::new() };
                                     let named_bit = if !doc.layer_names.is_empty() {
                                         format!("  ({} named)", doc.layer_names.len())
                                     } else { String::new() };
+                                    // Config hints: 3D view, camera preset, zoom
+                                    let view_bit = if doc.import_hints.view_3d == Some(true) {
+                                        "  3D"
+                                    } else { "" };
+                                    let zoom_bit = if let Some(z) = doc.import_hints.zoom {
+                                        format!("  zoom={:.0}%", z * 100.0)
+                                    } else if doc.import_hints.auto_fit {
+                                        "  zoom=fit".to_string()
+                                    } else { String::new() };
                                     egui::RichText::new(format!(
-                                        "✓ {}{} nodes, {} edges{}{}",
-                                        title_bit, n, e, layers_bit, named_bit
+                                        "✓ {}{} nodes, {} edges{}{}{}{}",
+                                        title_bit, n, e, layers_bit, named_bit, view_bit, zoom_bit
                                     ))
                                         .size(9.5)
                                         .color(egui::Color32::from_rgb(166, 227, 161))

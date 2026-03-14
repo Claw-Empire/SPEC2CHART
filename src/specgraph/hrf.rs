@@ -11,7 +11,7 @@ use std::collections::HashMap;
 /// Overall description paragraph that explains the whole diagram.
 /// Can span multiple lines.
 ///
-/// ## Nodes
+/// ## Nodes  (or: Components / Services / Modules / Architecture / Actors / …)
 /// - [id] Label text
 ///   Description of this node. Can span multiple indented lines.
 ///   More detail here.
@@ -32,7 +32,7 @@ use std::collections::HashMap;
 /// ## Layer 120                             ← explicit z value (> 10 = raw z)
 /// - [frontend] Web App {z:240}             ← {z:N} explicit raw z
 ///
-/// ## Flow
+/// ## Flow  (or: Edges / Connections / Dependencies / Links / Interactions / …)
 /// id "label" --> id
 /// id --> id
 /// id "label" --> id {dashed}                ← dashed edge
@@ -493,16 +493,36 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             let header_raw = trimmed[3..].trim();
             let header = header_raw.to_lowercase();
             section = match header.as_str() {
-                "nodes" | "node" | "components" => Section::Nodes { default_z: 0.0 },
-                "flow" | "flows" | "edges" | "connections" => Section::Flow,
-                "notes" | "note" | "stickies" => Section::Notes,
-                "groups" | "group" | "clusters" => Section::Groups,
-                "config" | "settings" | "meta" | "diagram" | "options" => Section::Config,
-                "summary" | "about" | "overview" | "readme" | "description" => Section::Summary,
-                "palette" | "colors" | "colour" | "colours" | "theme" => Section::Palette,
-                "style" | "styles" | "template" | "templates" | "vars" | "macros" => Section::Palette, // skip: handled by expand_styles
+                // Node / component section aliases
+                "nodes" | "node" | "components" | "component"
+                | "services" | "service" | "modules" | "module"
+                | "systems" | "system" | "resources" | "resource"
+                | "items" | "item" | "objects" | "object"
+                | "elements" | "element" | "actors" | "actor"
+                | "entities" | "entity" | "architecture"
+                | "parts" | "part" | "blocks" | "block" => Section::Nodes { default_z: 0.0 },
+                // Edge / flow section aliases
+                "flow" | "flows" | "edges" | "connections" | "connection"
+                | "links" | "link" | "relations" | "relation"
+                | "relationships" | "relationship"
+                | "dependencies" | "dependency"
+                | "interactions" | "interaction"
+                | "data flow" | "dataflow" | "api" | "events" => Section::Flow,
+                "notes" | "note" | "stickies" | "sticky" | "annotations" | "annotation" => Section::Notes,
+                "groups" | "group" | "clusters" | "cluster"
+                | "frames" | "frame" | "containers" | "container"
+                | "packages" | "package" | "sections" => Section::Groups,
+                "config" | "settings" | "meta" | "diagram" | "options" | "configuration" | "setup" => Section::Config,
+                "summary" | "about" | "overview" | "readme" | "description"
+                | "intro" | "introduction" | "context" => Section::Summary,
+                "palette" | "colors" | "colour" | "colours" | "theme" | "themes" => Section::Palette,
+                "style" | "styles" | "template" | "templates" | "vars" | "macros" | "variables" => Section::Palette, // skip: handled by expand_styles
                 "layers" | "layer-map" | "layer-names" | "z-layers" => Section::Palette, // skip: handled by expand_layers pre-pass
-                "steps" | "step" | "process" | "procedure" | "workflow" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
+                // Ordered / sequential section aliases
+                "steps" | "step" | "process" | "procedure" | "workflow"
+                | "pipeline" | "sequence" | "tasks" | "task"
+                | "actions" | "action" | "instructions" | "instruction"
+                | "phases" | "phase" | "stages" | "stage" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
                     // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
                     // Parse optional cols parameter from header
@@ -1167,6 +1187,8 @@ pub struct ViewportExportConfig<'a> {
     pub bg_pattern: &'a str,
     pub snap: bool,
     pub grid_size: f32,
+    /// Current zoom level (1.0 = 100%). Emitted as `zoom = N.N` when != 1.0.
+    pub zoom: f32,
     /// 3D camera yaw (radians). None = omit from config.
     pub camera_yaw: Option<f32>,
     /// 3D camera pitch (radians). None = omit from config.
@@ -1478,6 +1500,11 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
             }
             if (vp.grid_size - 20.0).abs() > 0.5 {
                 out.push_str(&format!("grid-size = {}\n", vp.grid_size));
+            }
+            if (vp.zoom - 1.0).abs() > 0.01 {
+                // Round to 2 decimal places for readability
+                let z = (vp.zoom * 100.0).round() / 100.0;
+                out.push_str(&format!("zoom = {}\n", z));
             }
             if vp.view_3d {
                 // Check if (yaw, pitch) matches a named preset — prefer compact `camera = iso`

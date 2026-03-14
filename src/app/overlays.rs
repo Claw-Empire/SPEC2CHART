@@ -839,7 +839,23 @@ impl FlowchartApp {
                 });
                 if do_sync {
                     let title = self.document.title.clone();
-                    self.spec_editor_text = crate::specgraph::hrf::export_hrf(&self.document, &title);
+                    let is_3d = matches!(self.view_mode, super::ViewMode::ThreeD);
+                    let bg_str = match self.bg_pattern {
+                        super::BgPattern::Dots       => "dots",
+                        super::BgPattern::Lines      => "lines",
+                        super::BgPattern::Crosshatch => "crosshatch",
+                        super::BgPattern::None       => "none",
+                    };
+                    let vp = crate::specgraph::hrf::ViewportExportConfig {
+                        bg_pattern: bg_str,
+                        snap: self.snap_to_grid,
+                        grid_size: self.grid_size,
+                        zoom: self.viewport.zoom,
+                        view_3d: is_3d,
+                        camera_yaw:   if is_3d { Some(self.camera3d.yaw) }   else { None },
+                        camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
+                    };
+                    self.spec_editor_text = crate::specgraph::hrf::export_hrf_ex(&self.document, &title, Some(&vp));
                     self.spec_editor_last_edit = None;
                     self.spec_editor_error = None;
                 }

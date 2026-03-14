@@ -544,7 +544,23 @@ impl FlowchartApp {
             self.show_spec_editor = !self.show_spec_editor;
             if self.show_spec_editor {
                 let title = self.document.title.clone();
-                self.spec_editor_text = crate::specgraph::hrf::export_hrf(&self.document, &title);
+                let is_3d = matches!(self.view_mode, super::ViewMode::ThreeD);
+                let bg_str = match self.bg_pattern {
+                    super::BgPattern::Dots       => "dots",
+                    super::BgPattern::Lines      => "lines",
+                    super::BgPattern::Crosshatch => "crosshatch",
+                    super::BgPattern::None       => "none",
+                };
+                let vp = crate::specgraph::hrf::ViewportExportConfig {
+                    bg_pattern: bg_str,
+                    snap: self.snap_to_grid,
+                    grid_size: self.grid_size,
+                    zoom: self.viewport.zoom,
+                    view_3d: is_3d,
+                    camera_yaw:   if is_3d { Some(self.camera3d.yaw) }   else { None },
+                    camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
+                };
+                self.spec_editor_text = crate::specgraph::hrf::export_hrf_ex(&self.document, &title, Some(&vp));
                 self.spec_editor_error = None;
             }
         }
@@ -568,7 +584,23 @@ impl FlowchartApp {
         // Cmd+Shift+S = copy current diagram as HRF spec to system clipboard
         let cmd_shift_s = Modifiers { shift: true, ..cmd };
         if ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd_shift_s)) {
-            let hrf = crate::specgraph::export_hrf(&self.document, "Untitled Diagram");
+            let is_3d = matches!(self.view_mode, super::ViewMode::ThreeD);
+            let bg_str = match self.bg_pattern {
+                super::BgPattern::Dots      => "dots",
+                super::BgPattern::Lines     => "lines",
+                super::BgPattern::Crosshatch => "crosshatch",
+                super::BgPattern::None      => "none",
+            };
+            let vp = crate::specgraph::hrf::ViewportExportConfig {
+                bg_pattern: bg_str,
+                snap: self.snap_to_grid,
+                grid_size: self.grid_size,
+                zoom: self.viewport.zoom,
+                view_3d: is_3d,
+                camera_yaw:   if is_3d { Some(self.camera3d.yaw) }   else { None },
+                camera_pitch: if is_3d { Some(self.camera3d.pitch) } else { None },
+            };
+            let hrf = crate::specgraph::hrf::export_hrf_ex(&self.document, "Untitled Diagram", Some(&vp));
             ctx.copy_text(hrf);
             self.status_message = Some((
                 "Spec copied to clipboard".to_string(),

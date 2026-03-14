@@ -5,7 +5,9 @@ Use the 3D view (toggle with Tab) to see the layers separated in space.
 
 ## Config
 bg = dots
+view = 3d
 camera = iso
+zoom = fit
 layer0 = Data Tier
 layer1 = App Tier
 layer2 = Frontend

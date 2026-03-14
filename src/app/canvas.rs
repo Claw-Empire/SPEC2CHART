@@ -1825,8 +1825,21 @@ impl FlowchartApp {
                         format!(" {{z:{:.0}}}", node.z_offset)
                     }
                 } else { String::new() };
-                if !shape_hint.is_empty() || !z_hint.is_empty() {
-                    Some(format!("spec: [id] label{}{}", shape_hint, z_hint))
+                // 3D per-node extrusion depth (only when non-default)
+                let depth_hint = if node.depth_3d > 0.0 {
+                    format!(" {{3d-depth:{:.0}}}", node.depth_3d)
+                } else { String::new() };
+                // Status shorthands: highlight/tag/progress
+                let status_hint = match (node.highlight, node.tag) {
+                    (true, _) => " {highlight}",
+                    (_, Some(crate::model::NodeTag::Critical)) => " {blocked}",
+                    (_, Some(crate::model::NodeTag::Warning))  => " {warning}",
+                    (_, Some(crate::model::NodeTag::Ok))       => " {done}",
+                    (_, Some(crate::model::NodeTag::Info))     => " {info}",
+                    _ => "",
+                };
+                if !shape_hint.is_empty() || !z_hint.is_empty() || !depth_hint.is_empty() || !status_hint.is_empty() {
+                    Some(format!("spec: [id] label{}{}{}{}", shape_hint, z_hint, depth_hint, status_hint))
                 } else { None }
             };
             if let Some(hint) = spec_hint {
