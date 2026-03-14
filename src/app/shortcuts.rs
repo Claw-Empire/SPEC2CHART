@@ -347,6 +347,39 @@ impl FlowchartApp {
             self.shape_picker = None;
         }
 
+        // Design thinking quick-create shortcuts (skip when editing text)
+        // (shape, fill, label, status_msg)
+        let dt_presets: &[(crate::model::NodeShape, [u8;4], &str, &str)] = &[
+            (crate::model::NodeShape::Diamond,       [250, 179, 135, 255], "Hypothesis",  "H"),
+            (crate::model::NodeShape::Parallelogram, [137, 180, 250, 255], "Assumption",  "Y"),
+            (crate::model::NodeShape::Rectangle,     [166, 227, 161, 255], "Evidence",    "W"),
+        ];
+        // H = Hypothesis, Y = Assumption (A conflicts with select all), W = evidence (E conflicts with Connect)
+        let dt_keys = [Key::H, Key::Y, Key::W];
+        for ((&key, preset)) in dt_keys.iter().zip(dt_presets.iter()) {
+            if !any_text_focused && ctx.input(|i| i.key_pressed(key) && i.modifiers.is_none()) {
+                let (shape, fill, label, status) = preset;
+                let canvas_center = {
+                    let c = self.canvas_rect.center();
+                    self.viewport.screen_to_canvas(c)
+                };
+                let mut node = crate::model::Node::new(*shape, canvas_center);
+                let w = node.size[0]; let h = node.size[1];
+                node.set_pos(egui::Pos2::new(canvas_center.x - w / 2.0, canvas_center.y - h / 2.0));
+                node.style.fill_color = *fill;
+                node.style.text_color = crate::app::theme::auto_contrast_text(*fill);
+                if let crate::model::NodeKind::Shape { label: ref mut l, .. } = node.kind {
+                    *l = label.to_string();
+                }
+                let id = node.id;
+                self.document.nodes.push(node);
+                self.selection.select_node(id);
+                self.focus_label_edit = true;
+                self.history.push(&self.document);
+                self.status_message = Some((format!("{status}: {label} created"), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+Shift+A = select connected nodes
         let cmd_shift = Modifiers { shift: true, ..cmd };
         if ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.matches_exact(cmd_shift)) {

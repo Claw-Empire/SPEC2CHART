@@ -2020,9 +2020,9 @@ impl FlowchartApp {
         );
 
         // Quick-start shortcut row
-        let hints = [("N", "shape"), ("E", "connect"), ("⌘K", "commands"), ("?", "help")];
-        let row_y = center.y + btn_r + 40.0;
+        let hints = [("H", "hypothesis"), ("N", "shape"), ("E", "connect"), ("⌘K", "commands"), ("?", "help")];
         let total_w = hints.len() as f32 * 50.0;
+        let row_y = center.y + btn_r + 40.0;
         let start_x = center.x - total_w / 2.0 + 4.0;
         for (i, (key, desc)) in hints.iter().enumerate() {
             let x = start_x + i as f32 * 50.0;

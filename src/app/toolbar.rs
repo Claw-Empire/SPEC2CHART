@@ -618,6 +618,7 @@ impl FlowchartApp {
                             ("Design thinking", "{hypothesis} {assumption} {evidence} {conclusion}"),
                             ("Design thinking", "{question} {cause} {effect} {idea} {risk} {goal}"),
                             ("Design thinking", "{experiment} {metric} {strength} {weakness} {opportunity}"),
+                            ("Design keys", "H = hypothesis · Y = assumption · W = evidence  (quick-create)"),
                             ("Design sections", "## Hypotheses / ## Assumptions / ## Evidence / ## Questions"),
                             ("Design sections", "## Ideas / ## Causes / ## Effects / ## Goals / ## Risks"),
                             ("Status tags", "{critical} {warning} {ok} {info}  — badge only"),
