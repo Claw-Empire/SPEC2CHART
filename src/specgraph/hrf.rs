@@ -1488,8 +1488,18 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
     // ## Config section — include layer names and viewport hints
     let has_layer_names = !doc.layer_names.is_empty();
     let has_viewport = viewport.is_some();
-    if has_layer_names || has_viewport {
+    let has_layout_dir = !doc.layout_dir.is_empty() && doc.layout_dir != "TB";
+    let has_title = !doc.title.is_empty();
+    if has_layer_names || has_viewport || has_layout_dir {
         out.push_str("## Config\n");
+        // Project title (if set and not already the document heading)
+        if has_title {
+            out.push_str(&format!("title = {}\n", doc.title));
+        }
+        // Layout direction (non-default TB is always exported)
+        if has_layout_dir {
+            out.push_str(&format!("flow = {}\n", doc.layout_dir));
+        }
         if let Some(vp) = viewport {
             // Only emit non-default values to keep the config section clean
             if vp.bg_pattern != "dots" {

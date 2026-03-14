@@ -1211,6 +1211,8 @@ impl FlowchartApp {
         painter: &egui::Painter,
         node_idx: &std::collections::HashMap<NodeId, usize>,
         hover_canvas_pos: Option<egui::Pos2>,
+        // Extra perpendicular bend to separate parallel edges (0.0 = none).
+        extra_bend: f32,
     ) {
         let src_node = node_idx
             .get(&edge.source.node_id)
@@ -1270,11 +1272,12 @@ impl FlowchartApp {
         let offset = 60.0 * self.viewport.zoom;
         let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
 
-        // Apply curve bend — perpendicular offset proportional to zoom
-        if edge.style.curve_bend.abs() > 0.1 {
+        // Apply curve bend (user-defined) plus extra_bend (parallel-edge auto-offset)
+        let total_bend = edge.style.curve_bend + extra_bend;
+        if total_bend.abs() > 0.02 {
             let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
             let perp = Vec2::new(-dir.y, dir.x);
-            let bend_screen = edge.style.curve_bend * self.viewport.zoom;
+            let bend_screen = total_bend * self.viewport.zoom;
             cp1 = cp1 + perp * bend_screen;
             cp2 = cp2 + perp * bend_screen;
         }

@@ -341,6 +341,32 @@ impl FlowchartApp {
             }
         };
 
+        // Pre-compute parallel-edge bends: when 2+ edges share the same node pair,
+        // spread them apart with a perpendicular offset so they're individually readable.
+        let parallel_bends: std::collections::HashMap<EdgeId, f32> = {
+            let mut group: std::collections::HashMap<(NodeId, NodeId), Vec<EdgeId>> = std::collections::HashMap::new();
+            for edge in &self.document.edges {
+                // Use (src, tgt) order as-is so A→B and B→A are treated independently.
+                group.entry((edge.source.node_id, edge.target.node_id))
+                    .or_default()
+                    .push(edge.id);
+            }
+            let mut bends = std::collections::HashMap::new();
+            for edge_ids in group.values() {
+                if edge_ids.len() > 1 {
+                    let count = edge_ids.len() as f32;
+                    // Spread parallel edges apart with a perpendicular canvas-unit offset.
+                    // step=30: two edges → -15 and +15; three → -30, 0, +30 (clearly separated).
+                    let step = 30.0_f32;
+                    for (i, &eid) in edge_ids.iter().enumerate() {
+                        let offset = (i as f32 - (count - 1.0) / 2.0) * step;
+                        bends.insert(eid, offset);
+                    }
+                }
+            }
+            bends
+        };
+
         // Hovered node for connection highlighting (not dragging)
         let hover_node_id: Option<NodeId> = match &self.drag {
             DragState::None => hover_pos.and_then(|hp| {
@@ -456,7 +482,8 @@ impl FlowchartApp {
                     let tgt_rel = self.selection.contains_node(&edge.target.node_id)
                         || focus_neighbors.contains(&edge.target.node_id);
                     if src_rel || tgt_rel {
-                        self.draw_edge(edge, &painter, &node_idx, hover_canvas);
+                        let pb = parallel_bends.get(&edge.id).copied().unwrap_or(0.0);
+                        self.draw_edge(edge, &painter, &node_idx, hover_canvas, pb);
                     } else if let (Some(&si), Some(&ti)) = (node_idx.get(&edge.source.node_id), node_idx.get(&edge.target.node_id)) {
                         if let (Some(sn), Some(tn)) = (self.document.nodes.get(si), self.document.nodes.get(ti)) {
                             let s = self.viewport.canvas_to_screen(sn.port_position(edge.source.side));
@@ -471,7 +498,8 @@ impl FlowchartApp {
                         }
                     }
                 } else {
-                    self.draw_edge(edge, &painter, &node_idx, hover_canvas);
+                    let pb = parallel_bends.get(&edge.id).copied().unwrap_or(0.0);
+                    self.draw_edge(edge, &painter, &node_idx, hover_canvas, pb);
                 }
                 // Draw path highlight overlay
                 if path_edge_ids.contains(&edge.id) {
