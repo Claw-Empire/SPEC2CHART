@@ -1993,6 +1993,8 @@ impl FlowchartApp {
                 "Build a flow, architecture, mind map, or hypothesis",
                 "Try: ## Hypotheses then - My Idea {hypothesis}",
                 "Use {cause} {effect} {evidence} for design thinking",
+                "SWOT: ## Strengths / ## Weaknesses / ## Opportunities",
+                "Roadmap: timeline = true · ## Period 1: Q1",
                 "SPEC → Import to load a diagram instantly",
                 "Every great diagram starts with a single node",
                 "Press ? for all keyboard shortcuts",
