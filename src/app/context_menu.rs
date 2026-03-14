@@ -224,6 +224,38 @@ impl FlowchartApp {
 
         self.tag_submenu(ui, "🏷 Tag…", Some(node_id));
 
+        // Design Thinking type picker
+        ui.menu_button("💡 Design Type…", |ui| {
+            // (shape, fill_color, label)
+            let presets: &[(NodeShape, [u8; 4], &str)] = &[
+                (NodeShape::Diamond,      [250, 179, 135, 255], "💡 Hypothesis"),
+                (NodeShape::Parallelogram,[137, 180, 250, 255], "📐 Assumption"),
+                (NodeShape::Rectangle,   [166, 227, 161, 255], "✅ Evidence"),
+                (NodeShape::Hexagon,     [203, 166, 247, 255], "🏁 Conclusion"),
+                (NodeShape::Circle,      [249, 226, 175, 255], "❓ Question"),
+                (NodeShape::Hexagon,     [249, 226, 175, 255], "🧪 Experiment"),
+                (NodeShape::Rectangle,   [148, 226, 213, 255], "📊 Metric"),
+                (NodeShape::RoundedRect, [245, 194, 231, 255], "🤔 How-might-we"),
+                (NodeShape::RoundedRect, [166, 227, 161, 255], "⭐ Strength"),
+                (NodeShape::RoundedRect, [243, 139, 168, 255], "⚠️ Weakness"),
+                (NodeShape::RoundedRect, [137, 180, 250, 255], "🌱 Opportunity"),
+                (NodeShape::RoundedRect, [249, 226, 175, 255], "🚨 Threat"),
+            ];
+            for (shape, fill, label) in presets {
+                if ui.button(*label).clicked() {
+                    if let Some(n) = self.document.find_node_mut(&node_id) {
+                        if let NodeKind::Shape { shape: ref mut s, .. } = n.kind {
+                            *s = *shape;
+                        }
+                        n.style.fill_color = *fill;
+                        n.style.text_color = auto_contrast_text(*fill);
+                    }
+                    self.history.push(&self.document);
+                    ui.close_menu();
+                }
+            }
+        });
+
         // Highlight toggle
         if let Some(node) = self.document.find_node(&node_id) {
             let hl = node.highlight;

@@ -1989,14 +1989,15 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "Press N to pick a shape · or drag from toolbar",
+                "⌘K → Templates to load a ready-made diagram",
                 "Build a flow, architecture, mind map, or hypothesis",
-                "Try: ## Hypotheses then - My Idea {hypothesis}",
-                "Use {cause} {effect} {evidence} for design thinking",
+                "Try {hypothesis} {assumption} {evidence} {conclusion}",
+                "Use {cause} {effect} {question} for design thinking",
                 "SWOT: ## Strengths / ## Weaknesses / ## Opportunities",
-                "Roadmap: timeline = true · ## Period 1: Q1",
+                "Roadmap: timeline = true · ## Period 1: Q1 · {lane:Eng}",
+                "Lean Canvas · Force Field · OKR Tree — all in ⌘K",
                 "SPEC → Import to load a diagram instantly",
-                "Every great diagram starts with a single node",
+                "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
             ],
         };
@@ -2019,15 +2020,16 @@ impl FlowchartApp {
         );
 
         // Quick-start shortcut row
-        let hints = [("N", "shape"), ("E", "connect"), ("?", "help"), ("⌘Z", "undo")];
+        let hints = [("N", "shape"), ("E", "connect"), ("⌘K", "commands"), ("?", "help")];
         let row_y = center.y + btn_r + 40.0;
-        let start_x = center.x - 70.0;
+        let total_w = hints.len() as f32 * 50.0;
+        let start_x = center.x - total_w / 2.0 + 4.0;
         for (i, (key, desc)) in hints.iter().enumerate() {
-            let x = start_x + i as f32 * 37.0;
+            let x = start_x + i as f32 * 50.0;
             painter.text(Pos2::new(x, row_y), Align2::LEFT_CENTER,
-                *key, FontId::proportional(10.0), self.theme.accent.gamma_multiply(0.6));
-            painter.text(Pos2::new(x + 10.0, row_y + 11.0), Align2::LEFT_CENTER,
-                *desc, FontId::proportional(8.5), self.theme.text_dim.gamma_multiply(0.45));
+                *key, FontId::proportional(10.0), self.theme.accent.gamma_multiply(0.7));
+            painter.text(Pos2::new(x, row_y + 12.0), Align2::LEFT_CENTER,
+                *desc, FontId::proportional(8.5), self.theme.text_dim.gamma_multiply(0.5));
         }
 
         painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
