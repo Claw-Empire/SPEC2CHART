@@ -49,6 +49,9 @@ enum PaletteAction {
     LoadHypothesisTemplate,
     LoadSwotTemplate,
     LoadRoadmapTemplate,
+    LoadForceFieldTemplate,
+    LoadLeanCanvasTemplate,
+    LoadOkrTreeTemplate,
 }
 
 impl FlowchartApp {
@@ -395,6 +398,51 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadForceFieldTemplate => {
+                let spec = include_str!("../../assets/examples/force_field.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Force field loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadLeanCanvasTemplate => {
+                let spec = include_str!("../../assets/examples/lean_canvas.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Lean canvas loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadOkrTreeTemplate => {
+                let spec = include_str!("../../assets/examples/okr_tree.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("OKR tree loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -435,9 +483,12 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "◫", label: "Switch to ER mode",         category: "Diagram", action: PaletteAction::SwitchToER },
         PaletteEntry { icon: "★", label: "Switch to FigJam mode",     category: "Diagram", action: PaletteAction::SwitchToFigJam },
         PaletteEntry { icon: "⊟", label: "Toggle timeline mode",      category: "Diagram", action: PaletteAction::ToggleTimelineMode },
-        PaletteEntry { icon: "💡", label: "Load hypothesis map template", category: "Templates", action: PaletteAction::LoadHypothesisTemplate },
-        PaletteEntry { icon: "⊞", label: "Load SWOT analysis template",  category: "Templates", action: PaletteAction::LoadSwotTemplate },
-        PaletteEntry { icon: "📅", label: "Load roadmap timeline template", category: "Templates", action: PaletteAction::LoadRoadmapTemplate },
+        PaletteEntry { icon: "💡", label: "Load hypothesis map template",    category: "Templates", action: PaletteAction::LoadHypothesisTemplate },
+        PaletteEntry { icon: "⊞", label: "Load SWOT analysis template",     category: "Templates", action: PaletteAction::LoadSwotTemplate },
+        PaletteEntry { icon: "📅", label: "Load roadmap timeline template",  category: "Templates", action: PaletteAction::LoadRoadmapTemplate },
+        PaletteEntry { icon: "⇄",  label: "Load force field analysis",       category: "Templates", action: PaletteAction::LoadForceFieldTemplate },
+        PaletteEntry { icon: "◫",  label: "Load lean canvas template",       category: "Templates", action: PaletteAction::LoadLeanCanvasTemplate },
+        PaletteEntry { icon: "⊙",  label: "Load OKR tree template",          category: "Templates", action: PaletteAction::LoadOkrTreeTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
