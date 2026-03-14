@@ -652,6 +652,11 @@ impl FlowchartApp {
                             ("Grid layout", "## Grid cols=3  (auto grid layout, 3 columns)"),
                             ("Label refs", "REST API --> Database  or  \"REST API\" --> \"Database\""),
                             ("Layout gap", "spacing = 120  (## Config, sets node gap in px)"),
+                            ("Timeline", "timeline = true  (## Config, activates roadmap mode)"),
+                            ("Timeline dir", "timeline-dir = LR  (default) or TB"),
+                            ("Timeline period", "## Period 1: Q1 — Foundation  (ordered time block)"),
+                            ("Timeline lane", "{lane:Backend}  (assign node to swim-lane)"),
+                            ("Timeline lane decl", "## Lane 1: Backend  (declare lane order)"),
                         ];
                         for (section, tags) in entries {
                             ui.add_space(2.0);

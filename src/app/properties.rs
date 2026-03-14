@@ -1030,6 +1030,62 @@ impl FlowchartApp {
             self.history.push(&self.document);
             self.status_message = Some((format!("{} style applied", style_name), std::time::Instant::now()));
         }
+
+        // Timeline section — Period/Lane dropdowns (only when timeline_mode is active)
+        if self.document.timeline_mode && !self.document.timeline_periods.is_empty() {
+            let theme = self.theme.clone();
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Timeline").size(11.0).color(theme.text_secondary).strong());
+            ui.add_space(4.0);
+
+            let periods = self.document.timeline_periods.clone();
+            let lanes = self.document.timeline_lanes.clone();
+
+            if let Some(node) = self.document.find_node_mut(&node_id) {
+                // Period dropdown
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Period").size(11.0).color(theme.text_dim));
+                    let current = node.timeline_period.clone().unwrap_or_else(|| "(none)".to_string());
+                    egui::ComboBox::from_id_salt("timeline_period_combo")
+                        .selected_text(&current)
+                        .width(160.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(node.timeline_period.is_none(), "(none)").clicked() {
+                                node.timeline_period = None;
+                            }
+                            for p in &periods {
+                                if ui.selectable_label(node.timeline_period.as_deref() == Some(p.as_str()), p).clicked() {
+                                    node.timeline_period = Some(p.clone());
+                                }
+                            }
+                        });
+                });
+                ui.add_space(4.0);
+
+                // Lane dropdown (only if lanes exist)
+                if !lanes.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Lane").size(11.0).color(theme.text_dim));
+                        let current = node.timeline_lane.clone().unwrap_or_else(|| "(unlaned)".to_string());
+                        egui::ComboBox::from_id_salt("timeline_lane_combo")
+                            .selected_text(&current)
+                            .width(160.0)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(node.timeline_lane.is_none(), "(unlaned)").clicked() {
+                                    node.timeline_lane = None;
+                                }
+                                for l in &lanes {
+                                    if ui.selectable_label(node.timeline_lane.as_deref() == Some(l.as_str()), l).clicked() {
+                                        node.timeline_lane = Some(l.clone());
+                                    }
+                                }
+                            });
+                    });
+                }
+            }
+        }
     }
 
     fn draw_edge_properties(&mut self, ui: &mut egui::Ui) {
