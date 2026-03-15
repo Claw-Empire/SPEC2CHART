@@ -2135,8 +2135,8 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (25 design thinking diagrams ready to load)",
-                "ICE Scoring · Jobs To Be Done · Causal Loop — new in ⌘K",
+                "⌘K → Templates  (30 design thinking diagrams ready to load)",
+                "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",
                 "## Hypotheses / ## Evidence sections get colored backgrounds",
@@ -2147,6 +2147,7 @@ impl FlowchartApp {
                 "ICE Score = Impact × Confidence × Ease → run highest first",
                 "Double Diamond · Hypothesis Canvas · Assumption Map — ⌘K",
                 "⌘⇧E = insert Experiment Card (Hypothesis → Test → Result → Learning)",
+                "⌘F search: try status:done · section:Hypotheses · orphan · linked",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
