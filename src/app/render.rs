@@ -1888,10 +1888,13 @@ impl FlowchartApp {
     /// Drawn before edges and nodes so backgrounds appear underneath everything.
     pub(crate) fn draw_section_backgrounds(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
         use std::collections::HashMap;
-        use egui::Rect;
+        use egui::{Pos2, Rect};
 
+        // Per section: (bounds, done_count, wip_count, tagged_count, total_count)
         let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
+        let mut section_counts: HashMap<&str, (u32, u32, u32, u32)> = HashMap::new();
         let mut section_order: Vec<&str> = Vec::new();
+
         for node in &self.document.nodes {
             if node.section_name.is_empty() { continue; }
             let sr = Rect::from_min_size(
@@ -1899,22 +1902,32 @@ impl FlowchartApp {
                 node.size_vec() * self.viewport.zoom,
             );
             if !sr.expand(300.0).intersects(canvas_rect) { continue; }
-            if !section_bounds.contains_key(node.section_name.as_str()) {
-                section_order.push(node.section_name.as_str());
+            let key = node.section_name.as_str();
+            if !section_bounds.contains_key(key) {
+                section_order.push(key);
             }
-            let entry = section_bounds.entry(node.section_name.as_str()).or_insert(sr);
+            let entry = section_bounds.entry(key).or_insert(sr);
             *entry = entry.union(sr);
+            let (done, wip, tagged, total) = section_counts.entry(key).or_insert((0, 0, 0, 0));
+            *total += 1;
+            match node.tag {
+                Some(crate::model::NodeTag::Ok) => { *done += 1; *tagged += 1; }
+                Some(crate::model::NodeTag::Info) => { *wip += 1; *tagged += 1; }
+                Some(crate::model::NodeTag::Warning) if node.progress >= 0.5 => { *wip += 1; *tagged += 1; } // review counts as wip for progress
+                Some(crate::model::NodeTag::Warning) => { *tagged += 1; } // todo
+                Some(crate::model::NodeTag::Critical) => { *tagged += 1; } // blocked
+                None => {}
+            }
         }
         if section_bounds.is_empty() { return; }
 
         let pad = (24.0 * self.viewport.zoom).clamp(12.0, 36.0);
+        let bar_h = (3.0 * self.viewport.zoom).clamp(2.0, 5.0);
+
         for section_name in section_order {
             let Some(bounds) = section_bounds.get(section_name) else { continue };
             let bg = Self::section_bg_color(section_name);
-            // Border: same hue but more opaque
-            let border = egui::Color32::from_rgba_unmultiplied(
-                bg.r(), bg.g(), bg.b(), 55
-            );
+            let border = egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 55);
             let padded = bounds.expand(pad);
             painter.rect(
                 padded,
@@ -1923,6 +1936,46 @@ impl FlowchartApp {
                 egui::Stroke::new(1.0, border),
                 egui::StrokeKind::Inside,
             );
+
+            // Progress bar at bottom of section background
+            if let Some(&(done, wip, tagged, total)) = section_counts.get(section_name) {
+                if tagged > 0 && total > 0 {
+                    let bar_y = padded.max.y - bar_h - 4.0;
+                    let bar_x0 = padded.min.x + 8.0;
+                    let bar_x1 = padded.max.x - 8.0;
+                    let bar_w = bar_x1 - bar_x0;
+
+                    // Track background
+                    let track_rect = Rect::from_min_max(
+                        Pos2::new(bar_x0, bar_y),
+                        Pos2::new(bar_x1, bar_y + bar_h),
+                    );
+                    painter.rect_filled(track_rect, egui::CornerRadius::same(bar_h as u8 / 2),
+                        egui::Color32::from_rgba_unmultiplied(40, 40, 60, 80));
+
+                    // WIP fill (blue, done+wip fraction)
+                    let wip_frac = ((done + wip) as f32 / total as f32).clamp(0.0, 1.0);
+                    if wip_frac > 0.0 {
+                        let wip_rect = Rect::from_min_max(
+                            Pos2::new(bar_x0, bar_y),
+                            Pos2::new(bar_x0 + bar_w * wip_frac, bar_y + bar_h),
+                        );
+                        painter.rect_filled(wip_rect, egui::CornerRadius::same(bar_h as u8 / 2),
+                            egui::Color32::from_rgba_unmultiplied(137, 180, 250, 160));
+                    }
+
+                    // Done fill (green, done fraction — drawn on top)
+                    let done_frac = (done as f32 / total as f32).clamp(0.0, 1.0);
+                    if done_frac > 0.0 {
+                        let done_rect = Rect::from_min_max(
+                            Pos2::new(bar_x0, bar_y),
+                            Pos2::new(bar_x0 + bar_w * done_frac, bar_y + bar_h),
+                        );
+                        painter.rect_filled(done_rect, egui::CornerRadius::same(bar_h as u8 / 2),
+                            egui::Color32::from_rgba_unmultiplied(166, 227, 161, 180));
+                    }
+                }
+            }
         }
     }
 
