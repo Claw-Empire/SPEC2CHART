@@ -734,6 +734,7 @@ impl FlowchartApp {
                             ("O", "Bird's-eye overview"),
                             ("Alt+hover", "Show distance rulers"),
                             ("Alt+1..9", "Apply color preset (blue/green/red/yellow/purple/teal/orange/pink/white)"),
+                            ("Shift+1..5", "Set status directly: 1=Todo 2=WIP 3=Review 4=Done 5=Blocked  (Shift+0 = Clear)"),
                         ],
                     ),
                     (

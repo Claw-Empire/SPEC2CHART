@@ -1110,6 +1110,40 @@ impl FlowchartApp {
             }
         }
 
+        // Shift+1..5 = directly set status on all selected nodes (faster than cycling with S)
+        // 1=Todo  2=WIP  3=Review  4=Done  5=Blocked  0=Clear
+        if !any_text_focused && !self.selection.node_ids.is_empty() {
+            let shift_only = egui::Modifiers { shift: true, ..egui::Modifiers::NONE };
+            let status_keys: [(Key, Option<crate::model::NodeTag>, f32, &str); 6] = [
+                (Key::Num0, None,                                    0.0,  "Cleared"),
+                (Key::Num1, Some(crate::model::NodeTag::Warning),    0.0,  "Todo"),
+                (Key::Num2, Some(crate::model::NodeTag::Info),       0.5,  "WIP"),
+                (Key::Num3, Some(crate::model::NodeTag::Warning),    0.75, "Review"),
+                (Key::Num4, Some(crate::model::NodeTag::Ok),         1.0,  "Done"),
+                (Key::Num5, Some(crate::model::NodeTag::Critical),   0.0,  "Blocked"),
+            ];
+            for (key, new_tag, new_progress, status_name) in &status_keys {
+                if ctx.input(|i| i.key_pressed(*key) && i.modifiers.matches_exact(shift_only)) {
+                    let node_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                    let count = node_ids.len();
+                    for id in &node_ids {
+                        if let Some(node) = self.document.find_node_mut(id) {
+                            node.tag = *new_tag;
+                            node.progress = *new_progress;
+                        }
+                    }
+                    self.history.push(&self.document);
+                    let msg = if count == 1 {
+                        format!("Status: {status_name}")
+                    } else {
+                        format!("Status: {status_name} ({count} nodes)")
+                    };
+                    self.status_message = Some((msg, std::time::Instant::now()));
+                    break;
+                }
+            }
+        }
+
         // Arrow keys on selected node = navigate to adjacent node by spatial direction
         if !any_text_focused && self.selection.node_ids.len() == 1 && self.selection.edge_ids.is_empty() {
             let sel_id = *self.selection.node_ids.iter().next().unwrap();
