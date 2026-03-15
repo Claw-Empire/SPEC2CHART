@@ -2426,16 +2426,44 @@ impl FlowchartApp {
         let color_blocked = egui::Color32::from_rgb(243, 139, 168);
         let color_text    = egui::Color32::from_rgba_unmultiplied(210, 210, 230, 200);
 
+        // Hover detection for row highlight
+        let hover_pos = painter.ctx().input(|i| i.pointer.hover_pos());
+
         for (i, (sec_name, counts)) in sorted_sections.iter().enumerate() {
             let ry = panel_y + pad_y + 14.0 + row_h * i as f32;
-            // Truncate section name to fit
-            let display = if sec_name.len() > 14 { format!("{}…", &sec_name[..13]) } else { sec_name.clone() };
+            let row_rect = Rect::from_min_size(
+                Pos2::new(panel_x + 2.0, ry - 1.0),
+                egui::Vec2::new(panel_w - 4.0, row_h),
+            );
 
+            // Hover highlight
+            if let Some(hp) = hover_pos {
+                if row_rect.contains(hp) {
+                    painter.rect_filled(row_rect, egui::CornerRadius::same(3),
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 12));
+                }
+            }
+
+            let [done, wip, _review, blocked, total] = *counts;
+
+            // Completion indicator: ✅ prefix when all tagged nodes are done
+            let tagged = done + wip + blocked;
+            let all_done = tagged > 0 && tagged == done;
+            let name_prefix = if all_done { "✅ " } else { "" };
+
+            // Truncate section name to fit (accounting for prefix)
+            let max_chars = if all_done { 11 } else { 14 };
+            let display = if sec_name.chars().count() > max_chars {
+                format!("{name_prefix}{}…", sec_name.chars().take(max_chars - 1).collect::<String>())
+            } else {
+                format!("{name_prefix}{sec_name}")
+            };
+
+            let name_col = if all_done { color_done } else { color_text };
             painter.text(Pos2::new(panel_x + pad_x, ry), egui::Align2::LEFT_TOP,
-                &display, font.clone(), color_text);
+                &display, font.clone(), name_col);
 
             // Count columns (aligned right)
-            let [done, wip, _review, blocked, _total] = *counts;
             let rx = panel_x + panel_w - pad_x;
 
             painter.text(Pos2::new(rx - 0.0, ry), egui::Align2::RIGHT_TOP,
