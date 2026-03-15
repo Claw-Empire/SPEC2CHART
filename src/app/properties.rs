@@ -383,6 +383,16 @@ impl FlowchartApp {
                             .hint_text("e.g. v2.1 · running")
                             .font(FontId::proportional(11.5)),
                     );
+                    // Section (groups node with colored background on canvas)
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Section").size(11.0).color(theme.text_dim));
+                    ui.add_space(2.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut node.section_name)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("e.g. Hypotheses · Evidence · Assumptions")
+                            .font(FontId::proportional(11.5)),
+                    );
                     // Quick status buttons
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Status").size(11.0).color(theme.text_dim));

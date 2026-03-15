@@ -224,6 +224,38 @@ impl FlowchartApp {
 
         self.tag_submenu(ui, "🏷 Tag…", Some(node_id));
 
+        // Section assignment submenu
+        ui.menu_button("📂 Move to Section…", |ui| {
+            let sections = [
+                "Hypotheses", "Assumptions", "Evidence", "Conclusions",
+                "Questions", "Experiments", "Options", "Risks",
+                "Roses", "Buds", "Thorns", "Actions",
+                "Strengths", "Weaknesses", "Opportunities", "Threats",
+            ];
+            for section in sections {
+                let current_section = self.document.find_node(&node_id)
+                    .map(|n| n.section_name.as_str())
+                    .unwrap_or("");
+                let is_current = current_section == section;
+                let label = if is_current { format!("✓ {section}") } else { section.to_string() };
+                if ui.button(label).clicked() {
+                    if let Some(n) = self.document.find_node_mut(&node_id) {
+                        n.section_name = if is_current { String::new() } else { section.to_string() };
+                    }
+                    self.history.push(&self.document);
+                    ui.close_menu();
+                }
+            }
+            ui.separator();
+            if ui.button("✕ Clear section").clicked() {
+                if let Some(n) = self.document.find_node_mut(&node_id) {
+                    n.section_name.clear();
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+        });
+
         // Design Thinking type picker
         ui.menu_button("💡 Design Type…", |ui| {
             // (shape, fill_color, label)
