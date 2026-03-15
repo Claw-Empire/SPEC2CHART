@@ -1017,7 +1017,7 @@ impl FlowchartApp {
             let bar_y = canvas_rect.max.y - bar_h - 6.0;
 
             // Measure total width to center the pill
-            let galley_cache: Vec<(egui::Arc<egui::text::Galley>, egui::Arc<egui::text::Galley>)> = hints.iter().map(|(key, action)| {
+            let galley_cache: Vec<(std::sync::Arc<egui::text::Galley>, std::sync::Arc<egui::text::Galley>)> = hints.iter().map(|(key, action)| {
                 let kg = ui.ctx().fonts(|f| f.layout_no_wrap(key.to_string(), font_key.clone(), key_color));
                 let ag = ui.ctx().fonts(|f| f.layout_no_wrap(action.to_string(), font_action.clone(), action_color));
                 (kg, ag)

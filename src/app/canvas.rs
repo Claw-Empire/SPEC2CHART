@@ -2040,7 +2040,7 @@ impl FlowchartApp {
             if let Some(hint) = spec_hint {
                 rows.push((hint, self.theme.text_dim.gamma_multiply(0.6)));
             }
-            if has_url  { rows.push(("🔗 URL attached".to_string(), self.theme.text_dim)); }
+            if has_url  { rows.push(("🔗 ⌘+click to open URL".to_string(), self.theme.text_dim)); }
             if has_comment {
                 let preview = if node.comment.len() > 60 {
                     format!("💬 {}…", &node.comment[..60])
@@ -2151,7 +2151,7 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (30 design thinking diagrams ready to load)",
+                "⌘K → Templates  (33 diagrams: arch · design thinking · support ops)",
                 "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",
