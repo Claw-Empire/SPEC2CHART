@@ -6,6 +6,38 @@ use super::{FlowchartApp, DragState, Tool, ResizeHandle};
 use super::interaction::{control_points_for_side, cubic_bezier_point};
 use super::theme::{PORT_RADIUS, to_color32};
 
+/// Apply a section-appropriate default fill color (and optionally shape) to a new node.
+/// Only called for plain Shape nodes created via double-click or drag into a section area.
+fn apply_section_style(node: &mut Node, section: &str) {
+    let s = section.to_lowercase();
+    let (fill, shape): ([u8; 4], Option<NodeShape>) = if s.contains("hypothes") {
+        ([137, 180, 250, 255], Some(NodeShape::RoundedRect)) // blue
+    } else if s.contains("evidence") || s.contains("data") || s.contains("fact") {
+        ([166, 227, 161, 255], Some(NodeShape::Rectangle))   // green
+    } else if s.contains("assumption") {
+        ([249, 226, 175, 255], None)                          // yellow
+    } else if s.contains("conclusion") || s.contains("decision") || s.contains("finding") {
+        ([203, 166, 247, 255], Some(NodeShape::RoundedRect)) // purple
+    } else if s.contains("risk") || s.contains("issue") || s.contains("block") || s.contains("threat") {
+        ([243, 139, 168, 255], Some(NodeShape::Diamond))      // red/diamond
+    } else if s.contains("observation") || s.contains("insight") || s.contains("quote") {
+        ([245, 194, 231, 255], Some(NodeShape::Callout))      // pink/callout
+    } else if s.contains("strength") || s.contains("opportunit") {
+        ([166, 227, 161, 255], None)                          // green
+    } else if s.contains("weakness") {
+        ([249, 226, 175, 255], None)                          // yellow
+    } else {
+        return; // no override for unknown sections
+    };
+    node.style.fill_color = fill;
+    node.style.text_color = crate::app::theme::auto_contrast_text(fill);
+    if let Some(sh) = shape {
+        if let NodeKind::Shape { ref mut shape, .. } = node.kind {
+            *shape = sh;
+        }
+    }
+}
+
 impl FlowchartApp {
     pub(crate) fn draw_canvas(&mut self, ui: &mut egui::Ui) {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::all());
@@ -331,8 +363,9 @@ impl FlowchartApp {
                     let w = node.size[0];
                     let h = node.size[1];
                     node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
-                    // Auto-assign section if dropped inside a section background
+                    // Auto-assign section and style if dropped inside a section background
                     if let Some(sec) = self.section_at_canvas_pos(canvas_pos) {
+                        apply_section_style(&mut node, &sec);
                         node.section_name = sec;
                     }
                     let id = node.id;
@@ -1232,8 +1265,12 @@ impl FlowchartApp {
                             NodeKind::Entity { .. } => Node::new_entity(canvas_pos),
                             NodeKind::Text { .. } => Node::new_text(canvas_pos),
                         };
-                        // Auto-assign section if dropped inside a section background
+                        // Auto-assign section and style if dropped inside a section background
                         if let Some(sec) = self.section_at_canvas_pos(canvas_pos) {
+                            // Only apply section style for plain Shape nodes (not stickies, entities, text)
+                            if matches!(node.kind, NodeKind::Shape { .. }) {
+                                apply_section_style(&mut node, &sec);
+                            }
                             node.section_name = sec;
                         }
                         self.selection.clear();
