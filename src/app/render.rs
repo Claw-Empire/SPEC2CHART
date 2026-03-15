@@ -2000,23 +2000,41 @@ impl FlowchartApp {
         }
         if section_bounds.is_empty() { return; }
 
-        let font_size = (11.0 * self.viewport.zoom.sqrt()).clamp(9.0, 15.0);
-        let label_color = self.theme.text_dim.gamma_multiply(0.65);
+        let font_size = (12.0 * self.viewport.zoom.sqrt()).clamp(9.5, 16.0);
 
         for (section_name, bounds) in &section_bounds {
             let pad = (24.0 * self.viewport.zoom).clamp(12.0, 36.0);
-            // Position label inside the top-left of the background rect
-            let label_x = bounds.min.x - pad + 6.0;
+            let label_x = bounds.min.x - pad + 8.0;
             let label_y = bounds.min.y - pad + font_size + 4.0;
             let label_pos = egui::Pos2::new(label_x, label_y);
-            // Don't draw labels off-screen
             if !canvas_rect.expand(50.0).contains(label_pos) { continue; }
+
+            // Pick section-type icon and use section bg color (more opaque) for text
+            let bg_col = Self::section_bg_color(section_name);
+            let text_col = egui::Color32::from_rgba_unmultiplied(
+                bg_col.r().saturating_add(40),
+                bg_col.g().saturating_add(40),
+                bg_col.b().saturating_add(40),
+                210,
+            );
+            let s = section_name.to_lowercase();
+            let icon = if s.contains("hypothes") { "💡 " }
+                else if s.contains("evidence") || s.contains("data") { "📊 " }
+                else if s.contains("assumption") { "💭 " }
+                else if s.contains("conclusion") || s.contains("decision") { "✅ " }
+                else if s.contains("risk") || s.contains("issue") || s.contains("block") { "⚠️ " }
+                else if s.contains("observation") || s.contains("insight") { "👁 " }
+                else if s.contains("strength") || s.contains("opportunit") { "🌱 " }
+                else if s.contains("weakness") || s.contains("threat") { "⚡ " }
+                else { "" };
+
+            let display = format!("{icon}{section_name}");
             painter.text(
                 label_pos,
                 Align2::LEFT_TOP,
-                *section_name,
+                &display,
                 FontId::new(font_size, egui::FontFamily::Proportional),
-                label_color,
+                text_col,
             );
         }
     }
