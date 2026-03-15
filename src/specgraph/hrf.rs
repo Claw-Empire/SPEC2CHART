@@ -547,6 +547,15 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "consequences" | "consequence" | "tradeoffs" | "trade-offs"
                 | "constraints" | "constraint"
                 | "stakeholders" | "stakeholder" | "personas" | "persona"
+                // Empathy map section aliases
+                | "says" | "thinks" | "does" | "feels"
+                | "pains" | "pain" | "gains" | "gain"
+                | "user" | "users" | "customers" | "customer"
+                // Value proposition / jobs-to-be-done section aliases
+                | "jobs" | "jobs to be done" | "jtbd"
+                | "features" | "feature"
+                | "pain relievers" | "gain creators"
+                | "product" | "products"
                 // Strategic / OKR section aliases
                 | "initiatives" | "initiative"
                 | "countermeasures" | "countermeasure" | "mitigations" | "mitigation"
@@ -3097,7 +3106,7 @@ fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
                     => Some((NodeShape::Circle,      [245, 194, 231, 255])), // pink
         "risk"      | "threat" | "issue" | "blocker" | "concern"
                     => Some((NodeShape::Diamond,     [250, 179, 135, 255])), // orange
-        "goal"      | "objective" | "target" | "aim" | "outcome"
+        "goal"      | "objective" | "target" | "aim"
                     => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green
         "strength"  => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green SWOT
         "weakness"  => Some((NodeShape::RoundedRect, [243, 139, 168, 255])), // red SWOT

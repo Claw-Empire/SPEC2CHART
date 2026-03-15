@@ -56,6 +56,8 @@ enum PaletteAction {
     LoadImpactEffortTemplate,
     LoadCustomerJourneyTemplate,
     LoadDecisionRecordTemplate,
+    LoadEmpathyMapTemplate,
+    LoadValuePropositionTemplate,
 }
 
 impl FlowchartApp {
@@ -507,6 +509,36 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadEmpathyMapTemplate => {
+                let spec = include_str!("../../assets/examples/empathy_map.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Empathy map loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadValuePropositionTemplate => {
+                let spec = include_str!("../../assets/examples/value_proposition.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Value proposition canvas loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -557,6 +589,8 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⊞",  label: "Load Impact/Effort matrix",        category: "Templates", action: PaletteAction::LoadImpactEffortTemplate },
         PaletteEntry { icon: "🗺",  label: "Load customer journey map",        category: "Templates", action: PaletteAction::LoadCustomerJourneyTemplate },
         PaletteEntry { icon: "📋",  label: "Load decision record log (ADR)",   category: "Templates", action: PaletteAction::LoadDecisionRecordTemplate },
+        PaletteEntry { icon: "🧠",  label: "Load empathy map template",        category: "Templates", action: PaletteAction::LoadEmpathyMapTemplate },
+        PaletteEntry { icon: "💎",  label: "Load value proposition canvas",    category: "Templates", action: PaletteAction::LoadValuePropositionTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },

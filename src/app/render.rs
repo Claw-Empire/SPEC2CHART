@@ -1822,6 +1822,93 @@ impl FlowchartApp {
         }
     }
 
+    /// Return a soft background color for a section name.
+    /// Well-known design-thinking names get fixed hues; others use a hash.
+    fn section_bg_color(name: &str) -> egui::Color32 {
+        let name_lower = name.to_lowercase();
+        // Well-known section names → preset pastel fills
+        let rgb: [u8; 3] = if name_lower.contains("hypothes") {
+            [250, 179, 135] // peach
+        } else if name_lower.contains("evidence") || name_lower.contains("data") {
+            [166, 227, 161] // green
+        } else if name_lower.contains("assumption") {
+            [137, 180, 250] // blue
+        } else if name_lower.contains("conclusion") || name_lower.contains("decision") {
+            [203, 166, 247] // mauve
+        } else if name_lower.contains("option") || name_lower.contains("alternative") {
+            [249, 226, 175] // yellow
+        } else if name_lower.contains("risk") || name_lower.contains("consequence") || name_lower.contains("issue") {
+            [243, 139, 168] // red/pink
+        } else if name_lower.contains("context") || name_lower.contains("background") {
+            [148, 226, 213] // teal
+        } else if name_lower.contains("note") || name_lower.contains("summary") || name_lower.contains("about") {
+            [180, 190, 254] // lavender
+        } else if name_lower.contains("strength") || name_lower.contains("opportunity") {
+            [166, 227, 161] // green
+        } else if name_lower.contains("weakness") || name_lower.contains("threat") {
+            [243, 139, 168] // red
+        } else if name_lower.contains("objective") || name_lower.contains("goal") {
+            [249, 226, 175] // yellow
+        } else if name_lower.contains("initiative") || name_lower.contains("action") {
+            [137, 180, 250] // blue
+        } else {
+            // Hash-based color from a curated palette
+            let pallete: &[[u8; 3]] = &[
+                [250, 179, 135], [137, 180, 250], [166, 227, 161],
+                [203, 166, 247], [249, 226, 175], [148, 226, 213],
+                [180, 190, 254], [243, 139, 168],
+            ];
+            let mut h: u32 = 5381;
+            for b in name.bytes() {
+                h = h.wrapping_mul(33).wrapping_add(b as u32);
+            }
+            pallete[(h as usize) % pallete.len()]
+        };
+        egui::Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], 28)
+    }
+
+    /// Draw soft colored backgrounds behind each group of nodes sharing a `section_name`.
+    /// Drawn before edges and nodes so backgrounds appear underneath everything.
+    pub(crate) fn draw_section_backgrounds(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
+        use std::collections::HashMap;
+        use egui::Rect;
+
+        let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
+        let mut section_order: Vec<&str> = Vec::new();
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() { continue; }
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(node.pos()),
+                node.size_vec() * self.viewport.zoom,
+            );
+            if !sr.expand(300.0).intersects(canvas_rect) { continue; }
+            if !section_bounds.contains_key(node.section_name.as_str()) {
+                section_order.push(node.section_name.as_str());
+            }
+            let entry = section_bounds.entry(node.section_name.as_str()).or_insert(sr);
+            *entry = entry.union(sr);
+        }
+        if section_bounds.is_empty() { return; }
+
+        let pad = (24.0 * self.viewport.zoom).clamp(12.0, 36.0);
+        for section_name in section_order {
+            let Some(bounds) = section_bounds.get(section_name) else { continue };
+            let bg = Self::section_bg_color(section_name);
+            // Border: same hue but more opaque
+            let border = egui::Color32::from_rgba_unmultiplied(
+                bg.r(), bg.g(), bg.b(), 55
+            );
+            let padded = bounds.expand(pad);
+            painter.rect(
+                padded,
+                egui::CornerRadius::same(10),
+                bg,
+                egui::Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+
     /// Draw faint section labels above each cluster of nodes that share the same `section_name`.
     /// Only shown in 2D non-timeline mode when zoomed in enough.
     pub(crate) fn draw_section_labels(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
@@ -1843,18 +1930,22 @@ impl FlowchartApp {
         }
         if section_bounds.is_empty() { return; }
 
-        let font_size = (10.0 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);
-        let label_color = self.theme.text_dim.gamma_multiply(0.45);
+        let font_size = (11.0 * self.viewport.zoom.sqrt()).clamp(9.0, 15.0);
+        let label_color = self.theme.text_dim.gamma_multiply(0.65);
 
         for (section_name, bounds) in &section_bounds {
-            let label_pos = egui::Pos2::new(bounds.min.x, bounds.min.y - font_size - 4.0);
+            let pad = (24.0 * self.viewport.zoom).clamp(12.0, 36.0);
+            // Position label inside the top-left of the background rect
+            let label_x = bounds.min.x - pad + 6.0;
+            let label_y = bounds.min.y - pad + font_size + 4.0;
+            let label_pos = egui::Pos2::new(label_x, label_y);
             // Don't draw labels off-screen
             if !canvas_rect.expand(50.0).contains(label_pos) { continue; }
             painter.text(
                 label_pos,
-                Align2::LEFT_BOTTOM,
+                Align2::LEFT_TOP,
                 *section_name,
-                FontId::proportional(font_size),
+                FontId::new(font_size, egui::FontFamily::Proportional),
                 label_color,
             );
         }

@@ -568,6 +568,8 @@ impl FlowchartApp {
                     ("Impact/Effort", include_str!("../../assets/examples/impact_effort.spec")),
                     ("Journey Map", include_str!("../../assets/examples/customer_journey.spec")),
                     ("Decision Log", include_str!("../../assets/examples/decision_record.spec")),
+                    ("Empathy Map", include_str!("../../assets/examples/empathy_map.spec")),
+                    ("Value Prop", include_str!("../../assets/examples/value_proposition.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);
