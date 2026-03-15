@@ -3727,15 +3727,19 @@ impl FlowchartApp {
             return;
         }
 
-        // Jump to result on Enter
+        // Jump to result on Enter; Shift+Enter = select ALL matches
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Some(&(nid, _)) = results.get(self.search_cursor).or_else(|| results.first()) {
-                self.selection.select_node(nid);
-                self.zoom_to_selection();
-            } else if !results.is_empty() {
-                // Select all matches
+            let shift = ctx.input(|i| i.modifiers.shift);
+            if shift || results.len() == 1 {
+                // Select all matching nodes and zoom to fit
                 self.selection.clear();
                 for (nid, _) in &results { self.selection.node_ids.insert(*nid); }
+                if !results.is_empty() { self.zoom_to_selection(); }
+                if results.len() > 1 {
+                    self.status_message = Some((format!("Selected {} nodes", results.len()), std::time::Instant::now()));
+                }
+            } else if let Some(&(nid, _)) = results.get(self.search_cursor).or_else(|| results.first()) {
+                self.selection.select_node(nid);
                 self.zoom_to_selection();
             }
             self.show_search = false;
