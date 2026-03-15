@@ -68,6 +68,9 @@ enum PaletteAction {
     LoadBusinessModelCanvasTemplate,
     LoadHypothesisCanvasTemplate,
     LoadStoryMapTemplate,
+    LoadIceScoringTemplate,
+    LoadJobsToBeDoneTemplate,
+    LoadCausalLoopTemplate,
 }
 
 impl FlowchartApp {
@@ -699,6 +702,51 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadIceScoringTemplate => {
+                let spec = include_str!("../../assets/examples/ice_scoring.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("ICE Scoring Matrix loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadJobsToBeDoneTemplate => {
+                let spec = include_str!("../../assets/examples/jobs_to_be_done.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Jobs To Be Done Canvas loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadCausalLoopTemplate => {
+                let spec = include_str!("../../assets/examples/causal_loop.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Causal Loop Diagram loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -761,6 +809,9 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "🏢",  label: "Load Business Model Canvas (9-block)", category: "Templates", action: PaletteAction::LoadBusinessModelCanvasTemplate },
         PaletteEntry { icon: "🧬",  label: "Load Hypothesis Validation Canvas",    category: "Templates", action: PaletteAction::LoadHypothesisCanvasTemplate },
         PaletteEntry { icon: "🗺",  label: "Load User Story Map template",         category: "Templates", action: PaletteAction::LoadStoryMapTemplate },
+        PaletteEntry { icon: "🧊",  label: "Load ICE Scoring Matrix (prioritize experiments)", category: "Templates", action: PaletteAction::LoadIceScoringTemplate },
+        PaletteEntry { icon: "💼",  label: "Load Jobs To Be Done canvas",          category: "Templates", action: PaletteAction::LoadJobsToBeDoneTemplate },
+        PaletteEntry { icon: "🔁",  label: "Load Causal Loop Diagram (feedback loops)", category: "Templates", action: PaletteAction::LoadCausalLoopTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },

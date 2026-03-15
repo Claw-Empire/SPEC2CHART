@@ -580,6 +580,9 @@ impl FlowchartApp {
                     ("Biz Model Canvas", include_str!("../../assets/examples/business_model_canvas.spec")),
                     ("Hypothesis Canvas", include_str!("../../assets/examples/hypothesis_canvas.spec")),
                     ("Story Map", include_str!("../../assets/examples/story_map.spec")),
+                    ("ICE Scoring", include_str!("../../assets/examples/ice_scoring.spec")),
+                    ("Jobs To Be Done", include_str!("../../assets/examples/jobs_to_be_done.spec")),
+                    ("Causal Loop", include_str!("../../assets/examples/causal_loop.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);
