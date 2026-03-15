@@ -1354,8 +1354,23 @@ impl FlowchartApp {
                             egui::CursorIcon::Grab
                         } else if self.hit_test_edge(canvas_pos).is_some() {
                             egui::CursorIcon::PointingHand
+                        } else if self.section_label_hit(hover).is_some() {
+                            // Section labels are double-clickable for rename
+                            egui::CursorIcon::Text
                         } else {
-                            egui::CursorIcon::Default
+                            // Check if over section progress summary panel
+                            let panel_w = 170.0_f32;
+                            let panel_x = self.canvas_rect.max.x - panel_w - 12.0;
+                            let panel_y = self.canvas_rect.min.y + 12.0;
+                            let summary_panel = Rect::from_min_size(
+                                Pos2::new(panel_x, panel_y),
+                                egui::Vec2::new(panel_w, 150.0), // conservative height
+                            );
+                            if summary_panel.contains(hover) {
+                                egui::CursorIcon::PointingHand
+                            } else {
+                                egui::CursorIcon::Default
+                            }
                         }
                     }
                 } else {
