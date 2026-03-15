@@ -729,7 +729,7 @@ impl FlowchartApp {
                             ("G", "Toggle grid"),
                             (
                                 "S",
-                                "Toggle snap · S with edge selected = cycle edge style",
+                                "Node: cycle status (Todo→WIP→Review→Done→Blocked) · Edge: cycle style · Empty: snap",
                             ),
                             ("O", "Bird's-eye overview"),
                             ("Alt+hover", "Show distance rulers"),

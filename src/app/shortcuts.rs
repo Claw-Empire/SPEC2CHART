@@ -953,6 +953,35 @@ impl FlowchartApp {
                 }
                 self.status_message = Some((format!("Edge style: {}", style_label), std::time::Instant::now()));
                 self.history.push(&self.document);
+            } else if !self.selection.node_ids.is_empty() {
+                // S + nodes selected → cycle node status: None→Todo→WIP→Review→Done→Blocked→None
+                let node_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                let mut label = "None";
+                for id in &node_ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        let (new_tag, new_progress, lbl) = match node.tag {
+                            None => (Some(crate::model::NodeTag::Warning), 0.0, "Todo"),
+                            Some(crate::model::NodeTag::Warning) if node.progress < 0.5 => {
+                                (Some(crate::model::NodeTag::Info), 0.5, "WIP")
+                            }
+                            Some(crate::model::NodeTag::Info) => {
+                                (Some(crate::model::NodeTag::Warning), 0.75, "Review")
+                            }
+                            Some(crate::model::NodeTag::Warning) => {
+                                (Some(crate::model::NodeTag::Ok), 1.0, "Done")
+                            }
+                            Some(crate::model::NodeTag::Ok) => {
+                                (Some(crate::model::NodeTag::Critical), 0.0, "Blocked")
+                            }
+                            Some(crate::model::NodeTag::Critical) => (None, 0.0, "None"),
+                        };
+                        node.tag = new_tag;
+                        node.progress = new_progress;
+                        label = lbl;
+                    }
+                }
+                self.status_message = Some((format!("Status: {label}"), std::time::Instant::now()));
+                self.history.push(&self.document);
             } else {
                 self.snap_to_grid = !self.snap_to_grid;
                 let msg = if self.snap_to_grid { "Snap On" } else { "Snap Off" };
