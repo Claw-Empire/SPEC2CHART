@@ -861,6 +861,7 @@ impl FlowchartApp {
         self.draw_edge_tooltip(&painter, hover_pos, canvas_rect, &node_idx);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect, pointer_pos);
+        self.handle_section_summary_click(ui, canvas_rect);
         self.draw_section_progress_summary(&painter, canvas_rect);
         self.draw_canvas_vignette(&painter, canvas_rect);
 
@@ -2269,6 +2270,73 @@ impl FlowchartApp {
 
     /// Top-right overlay: per-section hypothesis validation progress.
     /// Shows Done/WIP/Blocked counts per section when the doc has sections with status tags.
+    /// Handle click on the section progress summary panel (top-right).
+    /// Clicking a section row selects all nodes in that section.
+    fn handle_section_summary_click(&mut self, ui: &egui::Ui, canvas_rect: Rect) {
+        use std::collections::HashMap;
+
+        let pointer = ui.ctx().input(|i| i.pointer.press_origin());
+        let Some(click_pos) = pointer else { return };
+        if !ui.ctx().input(|i| i.pointer.any_released()) { return }
+
+        // Compute section list (same logic as draw function)
+        let mut sections: HashMap<String, [u32; 5]> = HashMap::new();
+        let mut has_any_tag = false;
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() { continue; }
+            let counts = sections.entry(node.section_name.clone()).or_insert([0u32; 5]);
+            counts[4] += 1;
+            match node.tag {
+                Some(crate::model::NodeTag::Ok)       => { counts[0] += 1; has_any_tag = true; }
+                Some(crate::model::NodeTag::Info)     => { counts[1] += 1; has_any_tag = true; }
+                Some(crate::model::NodeTag::Warning) if node.progress >= 0.5 => { counts[2] += 1; has_any_tag = true; }
+                Some(crate::model::NodeTag::Critical) => { counts[3] += 1; has_any_tag = true; }
+                _ => {}
+            }
+        }
+        if sections.is_empty() || !has_any_tag { return; }
+
+        let mut sorted: Vec<String> = sections.keys().cloned().collect();
+        sorted.sort();
+
+        let panel_w = 170.0_f32;
+        let panel_x = canvas_rect.max.x - panel_w - 12.0;
+        let panel_y = canvas_rect.min.y + 12.0;
+        let pad_y   = 8.0;
+        let row_h   = 15.0;
+        let header_h = 14.0;
+        let rows_start_y = panel_y + pad_y + header_h;
+
+        // Check if click is on any section row
+        for (i, section_name) in sorted.iter().enumerate() {
+            let row_y = rows_start_y + i as f32 * row_h;
+            let row_rect = Rect::from_min_size(
+                Pos2::new(panel_x, row_y),
+                egui::Vec2::new(panel_w, row_h),
+            );
+            if row_rect.contains(click_pos) {
+                // Select all nodes in this section
+                self.selection.clear();
+                let count = self.document.nodes.iter()
+                    .filter(|n| &n.section_name == section_name)
+                    .count();
+                for node in &self.document.nodes {
+                    if &node.section_name == section_name {
+                        self.selection.node_ids.insert(node.id);
+                    }
+                }
+                if count > 0 {
+                    self.zoom_to_selection();
+                    self.status_message = Some((
+                        format!("Selected {} nodes in \"{}\"", count, section_name),
+                        std::time::Instant::now(),
+                    ));
+                }
+                break;
+            }
+        }
+    }
+
     fn draw_section_progress_summary(&self, painter: &egui::Painter, canvas_rect: Rect) {
         use std::collections::HashMap;
 
