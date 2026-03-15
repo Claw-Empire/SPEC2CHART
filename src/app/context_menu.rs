@@ -226,17 +226,45 @@ impl FlowchartApp {
 
         // Section assignment submenu
         ui.menu_button("📂 Move to Section…", |ui| {
-            let sections = [
+            let current_section = self.document.find_node(&node_id)
+                .map(|n| n.section_name.clone())
+                .unwrap_or_default();
+
+            // Collect unique sections currently used in the document (sorted, excluding blank)
+            let mut doc_sections: Vec<String> = {
+                let mut seen = std::collections::BTreeSet::new();
+                for n in &self.document.nodes {
+                    if !n.section_name.is_empty() { seen.insert(n.section_name.clone()); }
+                }
+                seen.into_iter().collect()
+            };
+
+            if !doc_sections.is_empty() {
+                ui.label(egui::RichText::new("In this document").size(10.0).weak());
+                for section in &doc_sections {
+                    let is_current = current_section.as_str() == section.as_str();
+                    let label = if is_current { format!("✓ {section}") } else { section.clone() };
+                    if ui.button(label).clicked() {
+                        if let Some(n) = self.document.find_node_mut(&node_id) {
+                            n.section_name = if is_current { String::new() } else { section.clone() };
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+                ui.label(egui::RichText::new("Common sections").size(10.0).weak());
+            }
+
+            let presets = [
                 "Hypotheses", "Assumptions", "Evidence", "Conclusions",
                 "Questions", "Experiments", "Options", "Risks",
                 "Roses", "Buds", "Thorns", "Actions",
                 "Strengths", "Weaknesses", "Opportunities", "Threats",
             ];
-            for section in sections {
-                let current_section = self.document.find_node(&node_id)
-                    .map(|n| n.section_name.as_str())
-                    .unwrap_or("");
-                let is_current = current_section == section;
+            for &section in &presets {
+                if doc_sections.iter().any(|s| s.as_str() == section) { continue; } // skip dupes
+                let is_current = current_section.as_str() == section;
                 let label = if is_current { format!("✓ {section}") } else { section.to_string() };
                 if ui.button(label).clicked() {
                     if let Some(n) = self.document.find_node_mut(&node_id) {
