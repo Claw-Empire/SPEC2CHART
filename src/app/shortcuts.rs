@@ -636,6 +636,62 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+Shift+E = insert Quick Experiment Card (Hypothesis → Test → Result → Learning)
+        {
+            let cmd_shift_e = egui::Modifiers { command: true, shift: true, ..Default::default() };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.matches_exact(cmd_shift_e)) {
+                let center = ctx.input(|i| i.pointer.hover_pos())
+                    .map(|s| self.viewport.screen_to_canvas(s))
+                    .unwrap_or_else(|| {
+                        let c = self.canvas_rect.center();
+                        self.viewport.screen_to_canvas(c)
+                    });
+                // Create 4 nodes spaced 160px apart, left-aligned around center
+                let spacing = 160.0_f32;
+                let total_w = spacing * 3.0;
+                let start_x = center.x - total_w / 2.0;
+                let y = center.y - 30.0;
+
+                let labels = ["Hypothesis", "Test Method", "Result", "Learning"];
+                let fills: [[u8; 4]; 4] = [
+                    [137, 180, 250, 255],  // blue
+                    [203, 166, 247, 255],  // purple
+                    [166, 227, 161, 255],  // green
+                    [249, 226, 175, 255],  // yellow
+                ];
+                let section = "Experiments";
+                let mut ids = Vec::new();
+                for (k, (&lbl, &fill)) in labels.iter().zip(fills.iter()).enumerate() {
+                    let pos = egui::Pos2::new(start_x + k as f32 * spacing, y);
+                    let mut node = crate::model::Node::new(crate::model::NodeShape::RoundedRect, pos);
+                    node.size = [130.0, 50.0];
+                    if let crate::model::NodeKind::Shape { ref mut label, .. } = node.kind {
+                        *label = lbl.to_string();
+                    }
+                    node.style.fill_color = fill;
+                    node.style.text_color = crate::app::theme::auto_contrast_text(fill);
+                    node.section_name = section.to_string();
+                    ids.push(node.id);
+                    self.document.nodes.push(node);
+                    self.node_birth_times.insert(*ids.last().unwrap(), ctx.input(|i| i.time));
+                }
+                // Connect the 4 nodes in a chain
+                for w in ids.windows(2) {
+                    let edge = crate::model::Edge::new(
+                        crate::model::Port { node_id: w[0], side: crate::model::PortSide::Right },
+                        crate::model::Port { node_id: w[1], side: crate::model::PortSide::Left  },
+                    );
+                    self.document.edges.push(edge);
+                }
+                // Select and start editing the first node
+                self.selection.clear();
+                self.selection.select_node(ids[0]);
+                self.inline_node_edit = Some((ids[0], "Hypothesis".to_string()));
+                self.history.push(&self.document);
+                self.status_message = Some(("Experiment card created — edit label to begin".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+Shift+F = zoom to fit selected nodes (or all if nothing selected)
         let cmd_shift = egui::Modifiers { command: true, shift: true, ..Default::default() };
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd_shift)) {

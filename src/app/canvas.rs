@@ -2112,6 +2112,7 @@ impl FlowchartApp {
                 "Lean Canvas · Fishbone · PESTLE · Empathy Map · Premortem — ⌘K",
                 "ICE Score = Impact × Confidence × Ease → run highest first",
                 "Double Diamond · Hypothesis Canvas · Assumption Map — ⌘K",
+                "⌘⇧E = insert Experiment Card (Hypothesis → Test → Result → Learning)",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",

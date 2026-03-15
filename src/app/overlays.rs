@@ -717,6 +717,7 @@ impl FlowchartApp {
                             ("Section headers", "## Hypotheses / ## Evidence / ## Assumptions group nodes with colored backgrounds"),
                             ("Rename section", "Double-click the section label on canvas to rename it in-place"),
                             ("Shift+1..5", "Set status directly: 1=Todo 2=WIP 3=Review 4=Done 5=Blocked  (Shift+0 = Clear)"),
+                            ("⌘⇧E", "Insert Quick Experiment Card (Hypothesis → Test → Result → Learning)"),
                         ],
                     ),
                     (
