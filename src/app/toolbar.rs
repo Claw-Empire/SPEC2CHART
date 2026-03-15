@@ -589,6 +589,7 @@ impl FlowchartApp {
                     ("What?SoWhat?NowWhat?", include_str!("../../assets/examples/what_so_what.spec")),
                     ("2×2 Matrix", include_str!("../../assets/examples/two_by_two_matrix.spec")),
                     ("Design Sprint", include_str!("../../assets/examples/design_sprint.spec")),
+                    ("Problem/Solution Fit", include_str!("../../assets/examples/problem_solution_fit.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);
