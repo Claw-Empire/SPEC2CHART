@@ -115,6 +115,11 @@ impl FlowchartApp {
                                     ui.add_space(4.0);
                                     label(ui, &format!("z:{}", node.z_offset.round() as i32), accent.gamma_multiply(0.7));
                                 }
+                                // Section info
+                                if !node.section_name.is_empty() {
+                                    ui.add_space(6.0);
+                                    label(ui, &format!("§ {}", node.section_name), accent.gamma_multiply(0.6));
+                                }
                                 // Progress info
                                 if node.progress > 0.0 {
                                     ui.add_space(4.0);
