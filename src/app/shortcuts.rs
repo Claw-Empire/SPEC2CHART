@@ -200,6 +200,41 @@ impl FlowchartApp {
             self.status_message = Some((msg, std::time::Instant::now()));
         }
 
+        // Cmd+V with empty node clipboard + text in system clipboard → create node from text
+        let paste_text: Option<String> = ctx.input(|i| {
+            for event in &i.events {
+                if let egui::Event::Paste(text) = event {
+                    if !text.trim().is_empty() {
+                        return Some(text.clone());
+                    }
+                }
+            }
+            None
+        });
+        if let Some(pasted_text) = paste_text {
+            if self.clipboard.is_empty() && !any_text_focused {
+                // Create a sticky note at the viewport center
+                let center = self.canvas_rect.center();
+                let world_center = self.viewport.screen_to_canvas(center);
+                let mut node = Node::new_sticky(
+                    crate::model::StickyColor::Yellow,
+                    egui::Pos2::new(world_center.x - 90.0, world_center.y - 60.0),
+                );
+                if let crate::model::NodeKind::StickyNote { ref mut text, .. } = node.kind {
+                    *text = pasted_text.chars().take(300).collect();
+                }
+                // Auto-assign section if in a section area
+                if let Some(sec) = self.section_at_canvas_pos(world_center) {
+                    node.section_name = sec;
+                }
+                let id = node.id;
+                self.document.nodes.push(node);
+                self.selection.select_node(id);
+                self.history.push(&self.document);
+                self.status_message = Some(("Text pasted as sticky note".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+V = paste nodes + their internal edges (progressive offset)
         if ctx.input(|i| i.key_pressed(Key::V) && i.modifiers.matches_exact(cmd))
             && !self.clipboard.is_empty()
