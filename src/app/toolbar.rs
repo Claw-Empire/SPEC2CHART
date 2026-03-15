@@ -586,6 +586,8 @@ impl FlowchartApp {
                     ("Experiment Board", include_str!("../../assets/examples/experiment_board.spec")),
                     ("Theory of Change", include_str!("../../assets/examples/theory_of_change.spec")),
                     ("Competitive Analysis", include_str!("../../assets/examples/competitive_analysis.spec")),
+                    ("What?SoWhat?NowWhat?", include_str!("../../assets/examples/what_so_what.spec")),
+                    ("2×2 Matrix", include_str!("../../assets/examples/two_by_two_matrix.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);
