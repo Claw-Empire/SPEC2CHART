@@ -583,6 +583,8 @@ impl FlowchartApp {
                     ("ICE Scoring", include_str!("../../assets/examples/ice_scoring.spec")),
                     ("Jobs To Be Done", include_str!("../../assets/examples/jobs_to_be_done.spec")),
                     ("Causal Loop", include_str!("../../assets/examples/causal_loop.spec")),
+                    ("Experiment Board", include_str!("../../assets/examples/experiment_board.spec")),
+                    ("Theory of Change", include_str!("../../assets/examples/theory_of_change.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);

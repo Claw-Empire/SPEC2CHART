@@ -71,6 +71,8 @@ enum PaletteAction {
     LoadIceScoringTemplate,
     LoadJobsToBeDoneTemplate,
     LoadCausalLoopTemplate,
+    LoadExperimentBoardTemplate,
+    LoadTheoryOfChangeTemplate,
 }
 
 impl FlowchartApp {
@@ -747,6 +749,36 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadExperimentBoardTemplate => {
+                let spec = include_str!("../../assets/examples/experiment_board.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Experiment Board loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadTheoryOfChangeTemplate => {
+                let spec = include_str!("../../assets/examples/theory_of_change.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Theory of Change loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -812,6 +844,8 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "🧊",  label: "Load ICE Scoring Matrix (prioritize experiments)", category: "Templates", action: PaletteAction::LoadIceScoringTemplate },
         PaletteEntry { icon: "💼",  label: "Load Jobs To Be Done canvas",          category: "Templates", action: PaletteAction::LoadJobsToBeDoneTemplate },
         PaletteEntry { icon: "🔁",  label: "Load Causal Loop Diagram (feedback loops)", category: "Templates", action: PaletteAction::LoadCausalLoopTemplate },
+        PaletteEntry { icon: "🗃",  label: "Load Experiment Board (backlog → running → validated)", category: "Templates", action: PaletteAction::LoadExperimentBoardTemplate },
+        PaletteEntry { icon: "🌱",  label: "Load Theory of Change (inputs → activities → impact)", category: "Templates", action: PaletteAction::LoadTheoryOfChangeTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
