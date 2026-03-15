@@ -765,6 +765,7 @@ impl FlowchartApp {
         self.draw_edge_tooltip(&painter, hover_pos, canvas_rect, &node_idx);
         self.draw_status_toast(&painter, canvas_rect, ui.ctx());
         self.draw_canvas_hud(&painter, canvas_rect, pointer_pos);
+        self.draw_section_progress_summary(&painter, canvas_rect);
         self.draw_canvas_vignette(&painter, canvas_rect);
 
         self.draw_back_to_content(&painter, canvas_rect, ui);
@@ -2123,6 +2124,103 @@ impl FlowchartApp {
             painter.text(Pos2::new(x, next_y), egui::Align2::LEFT_TOP, cl,
                 egui::FontId::proportional(9.5),
                 self.theme.accent.gamma_multiply(0.7)); // theme accent tint
+        }
+    }
+
+    /// Top-right overlay: per-section hypothesis validation progress.
+    /// Shows Done/WIP/Blocked counts per section when the doc has sections with status tags.
+    fn draw_section_progress_summary(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        use std::collections::HashMap;
+
+        // Collect per-section status counts
+        let mut sections: HashMap<String, [u32; 5]> = HashMap::new(); // [done, wip, review, blocked, total]
+        let mut has_any_tag = false;
+
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() { continue; }
+            let counts = sections.entry(node.section_name.clone()).or_insert([0u32; 5]);
+            counts[4] += 1; // total
+            match node.tag {
+                Some(crate::model::NodeTag::Ok) => { counts[0] += 1; has_any_tag = true; }
+                Some(crate::model::NodeTag::Info) => { counts[1] += 1; has_any_tag = true; }
+                Some(crate::model::NodeTag::Warning) if node.progress >= 0.5 => { counts[2] += 1; has_any_tag = true; }
+                Some(crate::model::NodeTag::Critical) => { counts[3] += 1; has_any_tag = true; }
+                _ => {}
+            }
+        }
+
+        if sections.is_empty() || !has_any_tag { return; }
+
+        // Sort sections by name for stable ordering
+        let mut sorted_sections: Vec<(String, [u32; 5])> = sections.into_iter().collect();
+        sorted_sections.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let font = egui::FontId::proportional(10.5);
+        let font_hd = egui::FontId::proportional(9.5);
+        let row_h = 15.0;
+        let pad_x = 10.0;
+        let pad_y = 8.0;
+        let panel_w = 170.0_f32;
+        let panel_h = pad_y * 2.0 + 14.0 + row_h * sorted_sections.len() as f32;
+
+        let panel_x = canvas_rect.max.x - panel_w - 12.0;
+        let panel_y = canvas_rect.min.y + 12.0;
+        let panel_rect = Rect::from_min_size(
+            Pos2::new(panel_x, panel_y),
+            egui::Vec2::new(panel_w, panel_h),
+        );
+
+        // Panel background
+        let bg = egui::Color32::from_rgba_unmultiplied(18, 18, 28, 210);
+        let border = egui::Color32::from_rgba_unmultiplied(120, 120, 150, 60);
+        painter.rect(panel_rect, egui::CornerRadius::same(8),
+            bg, egui::Stroke::new(1.0, border), egui::StrokeKind::Inside);
+
+        // Header
+        let header_color = egui::Color32::from_rgba_unmultiplied(180, 180, 220, 170);
+        painter.text(
+            Pos2::new(panel_x + pad_x, panel_y + pad_y),
+            egui::Align2::LEFT_TOP,
+            "Section Progress",
+            font_hd.clone(),
+            header_color,
+        );
+
+        // Legend dots (right-aligned header row)
+        let legend_x = panel_x + panel_w - pad_x;
+        let legend_y = panel_y + pad_y + 1.0;
+        for (i, (sym, col)) in [("✅", egui::Color32::from_rgb(166, 227, 161)),
+                                  ("🔄", egui::Color32::from_rgb(137, 180, 250)),
+                                  ("⛔", egui::Color32::from_rgb(243, 139, 168))].iter().enumerate().rev() {
+            let lx = legend_x - i as f32 * 22.0;
+            painter.text(Pos2::new(lx, legend_y), egui::Align2::RIGHT_TOP,
+                sym, egui::FontId::proportional(9.0), *col);
+        }
+
+        // Section rows
+        let color_done    = egui::Color32::from_rgb(166, 227, 161);
+        let color_wip     = egui::Color32::from_rgb(137, 180, 250);
+        let color_blocked = egui::Color32::from_rgb(243, 139, 168);
+        let color_text    = egui::Color32::from_rgba_unmultiplied(210, 210, 230, 200);
+
+        for (i, (sec_name, counts)) in sorted_sections.iter().enumerate() {
+            let ry = panel_y + pad_y + 14.0 + row_h * i as f32;
+            // Truncate section name to fit
+            let display = if sec_name.len() > 14 { format!("{}…", &sec_name[..13]) } else { sec_name.clone() };
+
+            painter.text(Pos2::new(panel_x + pad_x, ry), egui::Align2::LEFT_TOP,
+                &display, font.clone(), color_text);
+
+            // Count columns (aligned right)
+            let [done, wip, _review, blocked, _total] = *counts;
+            let rx = panel_x + panel_w - pad_x;
+
+            painter.text(Pos2::new(rx - 0.0, ry), egui::Align2::RIGHT_TOP,
+                &format!("{blocked}"), font.clone(), if blocked > 0 { color_blocked } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
+            painter.text(Pos2::new(rx - 22.0, ry), egui::Align2::RIGHT_TOP,
+                &format!("{wip}"), font.clone(), if wip > 0 { color_wip } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
+            painter.text(Pos2::new(rx - 44.0, ry), egui::Align2::RIGHT_TOP,
+                &format!("{done}"), font.clone(), if done > 0 { color_done } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
         }
     }
 
