@@ -511,6 +511,26 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                             points_str, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
                         ));
                     }
+                    NodeShape::Callout => {
+                        // Body: rounded rect
+                        let body_h = nh * 0.75;
+                        let tail_w = nw * 0.15;
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="6" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny, nw, body_h, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                        // Tail
+                        let tail_pts = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            nx + 3.0, ny + body_h,
+                            nx + tail_w, ny + body_h,
+                            nx - 2.0, ny + nh,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            tail_pts, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
                 }
                 svg.push('\n');
 
@@ -902,6 +922,13 @@ fn draw_pdf_node(
                     winding_order: printpdf::path::WindingOrder::NonZero,
                 };
                 layer.add_polygon(polygon);
+            }
+            NodeShape::Callout => {
+                // Draw body as a rectangle (PDF export approximation)
+                let rect = printpdf::Rect::new(
+                    Mm(nx), Mm(bottom_y + nh * 0.25), Mm(nx + nw), Mm(top_y)
+                ).with_mode(PaintMode::FillStroke);
+                layer.add_rect(rect);
             }
         },
         NodeKind::StickyNote { .. } | NodeKind::Entity { .. } => {

@@ -284,6 +284,7 @@ impl FlowchartApp {
                     NodeShape::Hexagon => "Hexagon",
                     NodeShape::Connector => "Connector",
                     NodeShape::Triangle => "Triangle",
+                    NodeShape::Callout => "Callout",
                 },
                 NodeKind::StickyNote { .. } => "Sticky Note",
                 NodeKind::Entity { .. } => "Entity",

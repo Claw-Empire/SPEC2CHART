@@ -632,7 +632,7 @@ impl FlowchartApp {
                             ("3D layers", "## Layer 0: Database / ## Layer 1: Backend"),
                             ("3D layers", "{z:N} (px) / {layer:N} (N×120px) / {3d-depth:80}"),
                             ("Comments", "// this line is ignored"),
-                            ("Shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector} {triangle}"),
+                            ("Shapes", "{diamond} {circle} {parallelogram} {hexagon} {connector} {triangle} {callout}"),
                             ("Semantic presets", "{server} {database} {cloud} {user} {service}"),
                             ("Semantic presets", "{queue} {cache} {internet} {decision} {start} {end}"),
                             ("Design thinking", "{hypothesis} {assumption} {evidence} {conclusion}"),
@@ -1047,6 +1047,7 @@ impl FlowchartApp {
             (NodeShape::Parallelogram, "Parallel"),
             (NodeShape::Hexagon, "Hexagon"),
             (NodeShape::Connector, "Connector"),
+            (NodeShape::Callout, "Callout"),
         ];
 
         let available_width = ui.available_width();
@@ -1308,6 +1309,16 @@ impl FlowchartApp {
                     Pos2::new(preview_center.x - hw,  preview_center.y + hh),
                 ];
                 painter.add(egui::Shape::convex_polygon(pts, shape_fill, shape_stroke));
+            }
+            NodeShape::Callout => {
+                let r = egui::Rect::from_center_size(preview_center, egui::Vec2::new(pw, ph * 0.75));
+                painter.rect(r, egui::CornerRadius::same(4), shape_fill, shape_stroke, egui::StrokeKind::Middle);
+                let tail = vec![
+                    Pos2::new(r.min.x + 2.0, r.max.y),
+                    Pos2::new(r.min.x + pw * 0.35, r.max.y),
+                    Pos2::new(r.min.x - pw * 0.05, r.max.y + ph * 0.3),
+                ];
+                painter.add(egui::Shape::convex_polygon(tail, shape_fill, shape_stroke));
             }
         }
 

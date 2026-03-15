@@ -240,6 +240,9 @@ impl FlowchartApp {
                 (NodeShape::RoundedRect, [243, 139, 168, 255], "⚠️ Weakness"),
                 (NodeShape::RoundedRect, [137, 180, 250, 255], "🌱 Opportunity"),
                 (NodeShape::RoundedRect, [249, 226, 175, 255], "🚨 Threat"),
+                (NodeShape::Callout,     [245, 194, 231, 255], "💬 Quote / Observation"),
+                (NodeShape::Diamond,     [243, 139, 168, 255], "😣 Pain Point"),
+                (NodeShape::RoundedRect, [166, 227, 161, 255], "🌟 Gain / Delight"),
             ];
             for (shape, fill, label) in presets {
                 if ui.button(*label).clicked() {

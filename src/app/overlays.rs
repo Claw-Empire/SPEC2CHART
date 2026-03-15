@@ -711,8 +711,10 @@ impl FlowchartApp {
                             ("Y", "Quick-create Assumption node (parallelogram, blue)"),
                             ("W", "Quick-create Evidence node (rectangle, green)"),
                             ("Right-click → Design Type…", "Apply design thinking type to any node"),
-                            ("⌘K → Templates", "Load Hypothesis Map, SWOT, Lean Canvas, OKR, 5 Whys…"),
+                            ("⌘K → Templates", "Load Hypothesis Map, SWOT, Lean Canvas, OKR, 5 Whys, Fishbone, Empathy Map, PESTLE…"),
+                            ("Floating bar → status badge", "Click ○/📋/🔄/✅/⛔ above selected node to cycle status"),
                             ("Properties → Status", "Set Done / WIP / Review / Blocked / Todo in one click"),
+                            ("Section headers", "## Hypotheses / ## Evidence / ## Assumptions group nodes with colored backgrounds"),
                         ],
                     ),
                     (

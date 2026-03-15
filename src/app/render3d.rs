@@ -1720,6 +1720,11 @@ impl FlowchartApp {
                     // Front face
                     painter.add(egui::Shape::convex_polygon(tri_pts(0.0, 0.0), fill, stroke));
                 }
+                NodeShape::Callout => {
+                    // 3D Callout — extruded rounded rect body
+                    Self::draw_depth_faces(painter, screen_rect, extrude, shade_color(fill, 0.8), 0.5, shade_color(fill, 0.55));
+                    painter.rect(screen_rect, CornerRadius::same(8), fill, stroke, egui::StrokeKind::Middle);
+                }
             },
             NodeKind::StickyNote { .. } => {
                 // --- 3D STICKY NOTE ---

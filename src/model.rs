@@ -32,6 +32,9 @@ pub enum NodeShape {
     Connector,
     Hexagon,
     Triangle,
+    /// Speech bubble callout — rounded rect with a small triangular tail at the bottom-left.
+    /// Used for user quotes, observations, and verbatim remarks in empathy maps.
+    Callout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +351,7 @@ impl Node {
             NodeShape::Circle => [80.0, 80.0],
             NodeShape::Diamond => [120.0, 100.0],
             NodeShape::Connector => [110.0, 34.0],
+            NodeShape::Callout => [160.0, 70.0],
             _ => [140.0, 60.0],
         };
         Self {

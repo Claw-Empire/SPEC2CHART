@@ -852,6 +852,23 @@ impl FlowchartApp {
                 let points = vec![apex, br, bl];
                 painter.add(egui::Shape::convex_polygon(points.clone(), fill, stroke));
             }
+            NodeShape::Callout => {
+                // Speech bubble: rounded rect body + small triangular tail at bottom-left
+                let cr = egui::CornerRadius::same(8);
+                painter.rect(screen_rect, cr, fill, stroke, egui::StrokeKind::Middle);
+                // Tail: small triangle pointing down-left from bottom-left corner
+                let tail_w = (screen_rect.width() * 0.15).max(12.0);
+                let tail_h = (screen_rect.height() * 0.28).max(10.0);
+                let tail_base_x = screen_rect.min.x + tail_w * 0.6;
+                let tail_tip_x  = screen_rect.min.x - tail_w * 0.1;
+                let tail_y      = screen_rect.max.y;
+                let tail_pts = vec![
+                    Pos2::new(screen_rect.min.x + 4.0, tail_y),        // left attach
+                    Pos2::new(tail_base_x,             tail_y),        // right attach
+                    Pos2::new(tail_tip_x,  tail_y + tail_h),           // tip
+                ];
+                painter.add(egui::Shape::convex_polygon(tail_pts, fill, stroke));
+            }
         }
 
         // Semantic watermark icon — drawn behind label text at low opacity

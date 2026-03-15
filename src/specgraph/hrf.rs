@@ -3049,6 +3049,8 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "connector" | "api" | "interface" | "protocol" | "gateway" | "port" | "endpoint" => NodeShape::Connector,
         // Triangle / pyramid
         "triangle" | "pyramid" | "hierarchy" | "peak" | "apex" => NodeShape::Triangle,
+        // Callout / speech bubble
+        "callout" | "speech" | "speech-bubble" | "bubble" | "balloon" => NodeShape::Callout,
         // Default
         _ => NodeShape::RoundedRect,
     }
@@ -3129,7 +3131,7 @@ fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
                     => Some((NodeShape::Rectangle,   [148, 226, 213, 255])), // teal
         // Empathy map presets
         "quote"     | "verbatim" | "observation"
-                    => Some((NodeShape::RoundedRect, [245, 194, 231, 255])), // pink
+                    => Some((NodeShape::Callout, [245, 194, 231, 255])), // callout, pink
         "pain"      | "frustration" | "blocker-ux"
                     => Some((NodeShape::Diamond,     [243, 139, 168, 255])), // red/pink
         "gain"      | "delight" | "win"
@@ -3166,6 +3168,7 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     NodeShape::Hexagon => " {hexagon}",
                     NodeShape::Connector => " {connector}",
                     NodeShape::Triangle => " {triangle}",
+                    NodeShape::Callout => " {callout}",
                 }
             };
             let tag_tag = match node.tag {

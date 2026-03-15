@@ -2005,7 +2005,7 @@ impl FlowchartApp {
                 "Use {cause} {effect} {question} for design thinking",
                 "SWOT: ## Strengths / ## Weaknesses / ## Opportunities",
                 "Roadmap: timeline = true · ## Period 1: Q1 · {lane:Eng}",
-                "Lean Canvas · Force Field · OKR Tree — all in ⌘K",
+                "Lean Canvas · Fishbone · PESTLE · Empathy Map — all in ⌘K",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
