@@ -766,23 +766,49 @@ impl FlowchartApp {
             let n = self.document.nodes.len();
             if n > 0 {
                 let shift = ctx.input(|i| i.modifiers.shift);
-                let current = self.selection.node_ids.iter().next().copied()
-                    .and_then(|id| self.document.nodes.iter().position(|n| n.id == id));
-                let next_idx = match current {
-                    None => 0,
-                    Some(i) if shift => (i + n - 1) % n,
-                    Some(i) => (i + 1) % n,
-                };
-                let next_id = self.document.nodes[next_idx].id;
-                self.selection.select_node(next_id);
-                // Smoothly pan to show selected node via animated pan_target
-                let node_rect = self.document.nodes[next_idx].rect();
-                let node_center = node_rect.center();
-                let c = self.canvas_rect.center();
-                self.pan_target = Some([
-                    c.x - node_center.x * self.viewport.zoom,
-                    c.y - node_center.y * self.viewport.zoom,
-                ]);
+                let current_id = self.selection.node_ids.iter().next().copied();
+                let current_section = current_id
+                    .and_then(|id| self.document.find_node(&id))
+                    .map(|n| n.section_name.clone())
+                    .unwrap_or_default();
+
+                // Build spatially sorted candidate list (same section if in a section, otherwise all)
+                let mut candidates: Vec<(crate::model::NodeId, [f32; 2])> = self.document.nodes.iter()
+                    .filter(|node| {
+                        if !current_section.is_empty() {
+                            node.section_name == current_section
+                        } else {
+                            true // all nodes when no section
+                        }
+                    })
+                    .map(|node| {
+                        let c = node.rect().center();
+                        (node.id, [c.y, c.x]) // sort: top-to-bottom, then left-to-right
+                    })
+                    .collect();
+                candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                if !candidates.is_empty() {
+                    let nc = candidates.len();
+                    let current_pos = current_id
+                        .and_then(|id| candidates.iter().position(|(cid, _)| *cid == id));
+                    let next_idx = match current_pos {
+                        None => 0,
+                        Some(i) if shift => (i + nc - 1) % nc,
+                        Some(i) => (i + 1) % nc,
+                    };
+                    let next_id = candidates[next_idx].0;
+                    self.selection.select_node(next_id);
+                    // Smoothly pan to the selected node
+                    if let Some(node) = self.document.find_node(&next_id) {
+                        let node_center = node.rect().center();
+                        let c = self.canvas_rect.center();
+                        self.pan_target = Some([
+                            c.x - node_center.x * self.viewport.zoom,
+                            c.y - node_center.y * self.viewport.zoom,
+                        ]);
+                    }
+                }
             }
         }
 
