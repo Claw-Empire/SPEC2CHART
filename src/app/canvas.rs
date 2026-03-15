@@ -1919,8 +1919,14 @@ impl FlowchartApp {
             if conn_in > 0 || conn_out > 0 {
                 rows.push((format!("↑{} in  ↓{} out", conn_in, conn_out), self.theme.text_dim));
             }
+            if !node.section_name.is_empty() {
+                rows.push((format!("§ {}", node.section_name), self.theme.accent.gamma_multiply(0.7)));
+            }
             if let Some(tag) = tag_label {
                 rows.push((format!("Tag: {}", tag), self.theme.text_dim));
+            }
+            if !node.comment.is_empty() {
+                rows.push((format!("💬 {}", node.comment.chars().take(80).collect::<String>()), self.theme.text_dim.gamma_multiply(0.8)));
             }
             if node.z_offset != 0.0 {
                 rows.push((format!("3D layer z={:.0}", node.z_offset), self.theme.accent.gamma_multiply(0.7)));
@@ -2088,14 +2094,17 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (17 design thinking diagrams ready to load)",
-                "Build a flow, architecture, mind map, or hypothesis map",
+                "⌘K → Templates  (25 design thinking diagrams ready to load)",
+                "ICE Scoring · Jobs To Be Done · Causal Loop — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",
                 "## Hypotheses / ## Evidence sections get colored backgrounds",
+                "S key: cycle status (Todo → WIP → Review → Done → Blocked)",
                 "Right-click a node → Move to Section… to organize ideas",
                 "SWOT: ## Strengths / ## Weaknesses / ## Opportunities",
                 "Lean Canvas · Fishbone · PESTLE · Empathy Map · Premortem — ⌘K",
+                "ICE Score = Impact × Confidence × Ease → run highest first",
+                "Double Diamond · Hypothesis Canvas · Assumption Map — ⌘K",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
