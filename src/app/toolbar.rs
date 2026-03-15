@@ -575,6 +575,9 @@ impl FlowchartApp {
                     ("Mind Map", include_str!("../../assets/examples/mind_map.spec")),
                     ("Premortem", include_str!("../../assets/examples/premortem.spec")),
                     ("Rose·Bud·Thorn", include_str!("../../assets/examples/rose_bud_thorn.spec")),
+                    ("Double Diamond", include_str!("../../assets/examples/double_diamond.spec")),
+                    ("Assumption Map", include_str!("../../assets/examples/assumption_map.spec")),
+                    ("Biz Model Canvas", include_str!("../../assets/examples/business_model_canvas.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);

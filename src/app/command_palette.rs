@@ -63,6 +63,9 @@ enum PaletteAction {
     LoadMindMapTemplate,
     LoadPremorttemTemplate,
     LoadRoseBudThornTemplate,
+    LoadDoubleDiamondTemplate,
+    LoadAssumptionMapTemplate,
+    LoadBusinessModelCanvasTemplate,
 }
 
 impl FlowchartApp {
@@ -619,6 +622,51 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadDoubleDiamondTemplate => {
+                let spec = include_str!("../../assets/examples/double_diamond.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Double Diamond loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadAssumptionMapTemplate => {
+                let spec = include_str!("../../assets/examples/assumption_map.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Assumption Map loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::LoadBusinessModelCanvasTemplate => {
+                let spec = include_str!("../../assets/examples/business_model_canvas.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Business Model Canvas loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -676,6 +724,9 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "🧠",  label: "Load mind map template",           category: "Templates", action: PaletteAction::LoadMindMapTemplate },
         PaletteEntry { icon: "💀",  label: "Load premortem analysis",          category: "Templates", action: PaletteAction::LoadPremorttemTemplate },
         PaletteEntry { icon: "🌹",  label: "Load Rose-Bud-Thorn retro",        category: "Templates", action: PaletteAction::LoadRoseBudThornTemplate },
+        PaletteEntry { icon: "◈",   label: "Load Double Diamond design process", category: "Templates", action: PaletteAction::LoadDoubleDiamondTemplate },
+        PaletteEntry { icon: "⊞",  label: "Load Assumption Map (test vs assume)", category: "Templates", action: PaletteAction::LoadAssumptionMapTemplate },
+        PaletteEntry { icon: "🏢",  label: "Load Business Model Canvas (9-block)", category: "Templates", action: PaletteAction::LoadBusinessModelCanvasTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
