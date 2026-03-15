@@ -313,6 +313,10 @@ impl FlowchartApp {
                     let w = node.size[0];
                     let h = node.size[1];
                     node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
+                    // Auto-assign section if dropped inside a section background
+                    if let Some(sec) = self.section_at_canvas_pos(canvas_pos) {
+                        node.section_name = sec;
+                    }
                     let id = node.id;
                     self.document.nodes.push(node);
                     self.selection.select_node(id);
@@ -1177,7 +1181,7 @@ impl FlowchartApp {
                         if self.snap_to_grid {
                             canvas_pos = self.snap_pos(canvas_pos);
                         }
-                        let node = match kind {
+                        let mut node = match kind {
                             NodeKind::Shape { shape, .. } => Node::new(*shape, canvas_pos),
                             NodeKind::StickyNote { color, .. } => {
                                 Node::new_sticky(*color, canvas_pos)
@@ -1185,6 +1189,10 @@ impl FlowchartApp {
                             NodeKind::Entity { .. } => Node::new_entity(canvas_pos),
                             NodeKind::Text { .. } => Node::new_text(canvas_pos),
                         };
+                        // Auto-assign section if dropped inside a section background
+                        if let Some(sec) = self.section_at_canvas_pos(canvas_pos) {
+                            node.section_name = sec;
+                        }
                         self.selection.clear();
                         self.selection.node_ids.insert(node.id);
                         self.document.nodes.push(node);
