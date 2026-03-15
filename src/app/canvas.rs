@@ -265,8 +265,26 @@ impl FlowchartApp {
                         self.selection.select_edge(edge_id);
                     }
                 } else {
-                    // Click on empty space => deselect
-                    if !cmd_held {
+                    // Click on empty space: check if inside a section background → select all in section
+                    if let Some(section_name) = self.section_at_canvas_pos(canvas_pos) {
+                        if !cmd_held {
+                            self.selection.clear();
+                        }
+                        let section_ids: Vec<_> = self.document.nodes.iter()
+                            .filter(|n| n.section_name == section_name)
+                            .map(|n| n.id)
+                            .collect();
+                        let count = section_ids.len();
+                        for id in section_ids {
+                            self.selection.node_ids.insert(id);
+                        }
+                        if count > 0 {
+                            self.status_message = Some((
+                                format!("Selected {count} nodes in \"{section_name}\""),
+                                std::time::Instant::now(),
+                            ));
+                        }
+                    } else if !cmd_held {
                         self.selection.clear();
                     }
                 }
