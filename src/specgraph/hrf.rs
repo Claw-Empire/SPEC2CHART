@@ -556,6 +556,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "features" | "feature"
                 | "pain relievers" | "gain creators"
                 | "product" | "products"
+                // Fishbone / Ishikawa section aliases
+                | "problem" | "effect" | "defect"
+                | "people" | "process" | "technology" | "environment"
+                | "materials" | "material" | "measurement" | "measurements"
+                | "machine" | "machines" | "method" | "methods"
+                | "management"
                 // Strategic / OKR section aliases
                 | "initiatives" | "initiative"
                 | "countermeasures" | "countermeasure" | "mitigations" | "mitigation"
@@ -3118,6 +3124,16 @@ fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
                     => Some((NodeShape::Hexagon,     [249, 226, 175, 255])), // yellow
         "metric"    | "kpi" | "measure"
                     => Some((NodeShape::Rectangle,   [148, 226, 213, 255])), // teal
+        // Empathy map presets
+        "quote"     | "verbatim" | "observation"
+                    => Some((NodeShape::RoundedRect, [245, 194, 231, 255])), // pink
+        "pain"      | "frustration" | "blocker-ux"
+                    => Some((NodeShape::Diamond,     [243, 139, 168, 255])), // red/pink
+        "gain"      | "delight" | "win"
+                    => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green
+        // Value proposition presets
+        "job"       | "jtbd"
+                    => Some((NodeShape::Rectangle,   [137, 180, 250, 255])), // blue
         _ => None,
     }
 }

@@ -570,6 +570,7 @@ impl FlowchartApp {
                     ("Decision Log", include_str!("../../assets/examples/decision_record.spec")),
                     ("Empathy Map", include_str!("../../assets/examples/empathy_map.spec")),
                     ("Value Prop", include_str!("../../assets/examples/value_proposition.spec")),
+                    ("Fishbone", include_str!("../../assets/examples/fishbone.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);

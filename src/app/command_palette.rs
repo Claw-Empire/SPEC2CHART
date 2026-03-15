@@ -58,6 +58,7 @@ enum PaletteAction {
     LoadDecisionRecordTemplate,
     LoadEmpathyMapTemplate,
     LoadValuePropositionTemplate,
+    LoadFishboneTemplate,
 }
 
 impl FlowchartApp {
@@ -539,6 +540,21 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadFishboneTemplate => {
+                let spec = include_str!("../../assets/examples/fishbone.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => {
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Fishbone diagram loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    }
+                }
+            }
         }
     }
 }
@@ -591,6 +607,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "📋",  label: "Load decision record log (ADR)",   category: "Templates", action: PaletteAction::LoadDecisionRecordTemplate },
         PaletteEntry { icon: "🧠",  label: "Load empathy map template",        category: "Templates", action: PaletteAction::LoadEmpathyMapTemplate },
         PaletteEntry { icon: "💎",  label: "Load value proposition canvas",    category: "Templates", action: PaletteAction::LoadValuePropositionTemplate },
+        PaletteEntry { icon: "🐟",  label: "Load fishbone (Ishikawa) diagram", category: "Templates", action: PaletteAction::LoadFishboneTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
