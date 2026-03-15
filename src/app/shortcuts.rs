@@ -213,28 +213,58 @@ impl FlowchartApp {
         });
         if let Some(pasted_text) = paste_text {
             if self.clipboard.is_empty() && !any_text_focused {
-                // Create a sticky note at the viewport center
                 let center = self.canvas_rect.center();
                 let world_center = self.viewport.screen_to_canvas(center);
-                let mut node = Node::new_sticky(
-                    crate::model::StickyColor::Yellow,
-                    egui::Pos2::new(world_center.x - 90.0, world_center.y - 60.0),
-                );
-                if let crate::model::NodeKind::StickyNote { ref mut text, .. } = node.kind {
-                    *text = pasted_text.chars().take(300).collect();
+                let section = self.section_at_canvas_pos(world_center);
+
+                // Multi-line paste (2+ non-empty lines) → one node per line
+                let lines: Vec<&str> = pasted_text.lines()
+                    .map(|l| l.trim())
+                    .filter(|l| !l.is_empty())
+                    .collect();
+
+                if lines.len() >= 2 {
+                    let row_h = 55.0_f32;
+                    let total_h = row_h * lines.len() as f32;
+                    let start_y = world_center.y - total_h / 2.0;
+                    self.selection.clear();
+                    for (i, line) in lines.iter().enumerate() {
+                        let pos = egui::Pos2::new(world_center.x - 80.0, start_y + i as f32 * row_h);
+                        let mut node = Node::new(crate::model::NodeShape::RoundedRect, pos);
+                        node.size = [160.0, 44.0];
+                        if let crate::model::NodeKind::Shape { ref mut label, .. } = node.kind {
+                            *label = (*line).to_string();
+                        }
+                        if let Some(ref sec) = section {
+                            node.section_name = sec.clone();
+                        }
+                        let id = node.id;
+                        self.node_birth_times.insert(id, ctx.input(|i| i.time));
+                        self.document.nodes.push(node);
+                        self.selection.select_node(id);
+                    }
+                    self.history.push(&self.document);
+                    self.status_message = Some((format!("Pasted {} items as nodes", lines.len()), std::time::Instant::now()));
+                } else {
+                    // Single line → sticky note (existing behavior)
+                    let mut node = Node::new_sticky(
+                        crate::model::StickyColor::Yellow,
+                        egui::Pos2::new(world_center.x - 90.0, world_center.y - 60.0),
+                    );
+                    if let crate::model::NodeKind::StickyNote { ref mut text, .. } = node.kind {
+                        *text = pasted_text.chars().take(300).collect();
+                    }
+                    if let Some(sec) = section {
+                        node.section_name = sec;
+                    }
+                    let id = node.id;
+                    let label_copy = pasted_text.chars().take(300).collect::<String>();
+                    self.document.nodes.push(node);
+                    self.selection.select_node(id);
+                    self.inline_node_edit = Some((id, label_copy));
+                    self.history.push(&self.document);
+                    self.status_message = Some(("Text pasted as sticky note — editing".to_string(), std::time::Instant::now()));
                 }
-                // Auto-assign section if in a section area
-                if let Some(sec) = self.section_at_canvas_pos(world_center) {
-                    node.section_name = sec;
-                }
-                let id = node.id;
-                let label_copy = pasted_text.chars().take(300).collect::<String>();
-                self.document.nodes.push(node);
-                self.selection.select_node(id);
-                // Open inline editor so user can immediately refine the pasted text
-                self.inline_node_edit = Some((id, label_copy));
-                self.history.push(&self.document);
-                self.status_message = Some(("Text pasted as sticky note — editing".to_string(), std::time::Instant::now()));
             }
         }
 
