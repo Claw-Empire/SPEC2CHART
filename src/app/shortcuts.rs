@@ -1354,9 +1354,10 @@ impl FlowchartApp {
 
         let mut new_node = Node::new(shape, new_pos);
         new_node.size = new_size;
-        // Inherit parent's style
+        // Inherit parent's style and section
         if let Some(parent) = self.document.find_node(&sel_id) {
             new_node.style = parent.style.clone();
+            new_node.section_name = parent.section_name.clone();
         }
         let new_id = new_node.id;
         self.document.nodes.push(new_node);
