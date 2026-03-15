@@ -569,6 +569,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "central" | "central idea" | "core" | "root"
                 | "branches" | "branch" | "subtopics" | "subtopic"
                 | "sub-themes" | "sub-theme"
+                // Retrospective / premortem section aliases
+                | "roses" | "rose" | "wins" | "what went well"
+                | "buds" | "bud"
+                | "thorns" | "thorn" | "blockers" | "what went wrong" | "problems"
+                | "action items" | "next steps" | "follow-ups" | "follow-up"
+                | "scenario" | "prevention" | "preventions"
+                | "product failures" | "team failures" | "market failures" | "customer failures"
                 // Strategic / OKR section aliases
                 | "initiatives" | "initiative"
                 | "countermeasures" | "countermeasure" | "mitigations" | "mitigation"
