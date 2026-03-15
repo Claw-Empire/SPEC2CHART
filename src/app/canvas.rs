@@ -617,9 +617,43 @@ impl FlowchartApp {
 
         // Compute search matches (for highlight overlay)
         let search_matches: std::collections::HashSet<NodeId> = if self.show_search && !self.search_query.is_empty() {
-            let q = self.search_query.to_lowercase();
+            let q = self.search_query.trim().to_lowercase();
             self.document.nodes.iter()
-                .filter(|n| n.display_label().to_lowercase().contains(&q))
+                .filter(|n| {
+                    // Smart filter prefixes
+                    if let Some(status_q) = q.strip_prefix("status:") {
+                        let tag_match = match status_q.trim() {
+                            "done"    | "✅" => matches!(n.tag, Some(crate::model::NodeTag::Ok)),
+                            "wip"     | "🔄" | "in progress" => matches!(n.tag, Some(crate::model::NodeTag::Info)),
+                            "todo"    | "📋" | "pending" => matches!(n.tag, Some(crate::model::NodeTag::Warning)) && n.progress < 0.5,
+                            "review"  | "👁"             => matches!(n.tag, Some(crate::model::NodeTag::Warning)) && n.progress >= 0.5,
+                            "blocked" | "⛔"             => matches!(n.tag, Some(crate::model::NodeTag::Critical)),
+                            "tagged"                    => n.tag.is_some(),
+                            "none" | "untagged"         => n.tag.is_none(),
+                            _                           => false,
+                        };
+                        return tag_match;
+                    }
+                    if let Some(sec_q) = q.strip_prefix("section:").or_else(|| q.strip_prefix("§")) {
+                        return n.section_name.to_lowercase().contains(sec_q.trim());
+                    }
+                    if let Some(icon_q) = q.strip_prefix("icon:") {
+                        return n.icon.to_lowercase().contains(icon_q.trim());
+                    }
+                    if q == "glow" || q == "highlighted" {
+                        return n.style.glow || n.highlight;
+                    }
+                    if q == "linked" {
+                        return self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id);
+                    }
+                    if q == "unlinked" || q == "orphan" {
+                        return !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id);
+                    }
+                    // Default: label / description / section name
+                    let label = n.display_label().to_lowercase();
+                    let desc = match &n.kind { crate::model::NodeKind::Shape { description, .. } => description.to_lowercase(), _ => String::new() };
+                    label.contains(&q) || desc.contains(&q) || n.section_name.to_lowercase().contains(&q)
+                })
                 .map(|n| n.id)
                 .collect()
         } else {
@@ -3667,7 +3701,7 @@ impl FlowchartApp {
         );
         let resp = ui2.add(
             egui::TextEdit::singleline(&mut self.search_query)
-                .hint_text("Search nodes…")
+                .hint_text("Search… or status:done / section:name / linked / orphan")
                 .desired_width(w - 60.0)
                 .font(egui::FontId::proportional(14.0))
                 .frame(false),
