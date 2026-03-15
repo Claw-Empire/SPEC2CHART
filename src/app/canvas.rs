@@ -2891,6 +2891,21 @@ impl FlowchartApp {
         let color = Color32::from_rgba_premultiplied(180, 180, 200, 100);
         let pos = Pos2::new(canvas_rect.min.x + 20.0, canvas_rect.min.y + 20.0);
         painter.text(pos, Align2::LEFT_TOP, &self.project_title, font, color);
+
+        // Status summary below title (only when tagged nodes exist)
+        let done = self.document.nodes.iter().filter(|n| matches!(n.tag, Some(crate::model::NodeTag::Ok))).count();
+        let total = self.document.nodes.iter().filter(|n| n.tag.is_some()).count();
+        if total > 0 {
+            let summary = format!("{done}/{total} done");
+            let summary_color = if done == total {
+                Color32::from_rgba_unmultiplied(166, 227, 161, 160) // green when all done
+            } else {
+                Color32::from_rgba_premultiplied(150, 150, 180, 80)
+            };
+            let summary_pos = Pos2::new(canvas_rect.min.x + 20.0, canvas_rect.min.y + 36.0);
+            painter.text(summary_pos, Align2::LEFT_TOP, &summary,
+                FontId::proportional(10.5), summary_color);
+        }
     }
 
     fn draw_quick_notes_panel(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
