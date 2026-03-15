@@ -2411,7 +2411,12 @@ impl FlowchartApp {
             ("🗑", "Delete"),
         ];
         let btn_w = 28.0;
-        let bar_w = actions.len() as f32 * btn_w + (actions.len() - 1) as f32 * 2.0 + 8.0;
+        // For single-node selection, include a status badge at the end
+        let show_status_badge = self.selection.node_ids.len() == 1;
+        let status_badge_w = if show_status_badge { 38.0 } else { 0.0 };
+        let status_sep_w   = if show_status_badge { 6.0  } else { 0.0 };
+        let bar_w = actions.len() as f32 * btn_w + (actions.len() - 1) as f32 * 2.0 + 8.0
+            + status_badge_w + status_sep_w;
         let bar_rect = Rect::from_center_size(
             egui::Pos2::new(bar_center_x, bar_y + bar_h / 2.0),
             egui::Vec2::new(bar_w, bar_h),
@@ -2436,6 +2441,41 @@ impl FlowchartApp {
             ).frame(false)).on_hover_text(*tooltip);
             if resp.clicked() { clicked_action = Some(i); }
             x += btn_w + 2.0;
+        }
+
+        // Status badge for single-node selection
+        let mut status_clicked = false;
+        if show_status_badge {
+            if let Some(&sel_id) = self.selection.node_ids.iter().next() {
+                let (badge_label, badge_color) = if let Some(node) = self.document.find_node(&sel_id) {
+                    match (node.tag, node.progress) {
+                        (Some(crate::model::NodeTag::Ok), p) if p >= 0.99 => ("✅", egui::Color32::from_rgb(166, 227, 161)),
+                        (Some(crate::model::NodeTag::Info), _)             => ("🔄", egui::Color32::from_rgb(137, 180, 250)),
+                        (Some(crate::model::NodeTag::Warning), p) if p > 0.5 => ("👁", egui::Color32::from_rgb(249, 226, 175)),
+                        (Some(crate::model::NodeTag::Critical), _)         => ("⛔", egui::Color32::from_rgb(243, 139, 168)),
+                        (Some(crate::model::NodeTag::Warning), _)          => ("📋", egui::Color32::from_rgb(203, 166, 247)),
+                        _                                                  => ("○", self.theme.text_dim.gamma_multiply(0.5)),
+                    }
+                } else { ("○", self.theme.text_dim.gamma_multiply(0.5)) };
+
+                // Separator line
+                let sep_x = x + 2.0;
+                let sep_rect = Rect::from_min_size(
+                    egui::Pos2::new(sep_x, bar_rect.min.y + 4.0),
+                    egui::Vec2::new(1.0, bar_h - 8.0),
+                );
+                ui.painter().rect_filled(sep_rect, egui::CornerRadius::ZERO, self.theme.surface1);
+                x += status_sep_w;
+
+                let badge_rect = Rect::from_min_size(
+                    egui::Pos2::new(x, bar_rect.min.y + 2.0),
+                    egui::Vec2::new(status_badge_w - 2.0, bar_h - 4.0),
+                );
+                let resp = ui.put(badge_rect, egui::Button::new(
+                    egui::RichText::new(badge_label).size(12.0).color(badge_color)
+                ).frame(false)).on_hover_text("Click to cycle status: None → Todo → WIP → Done → Blocked");
+                if resp.clicked() { status_clicked = true; }
+            }
         }
 
         // Handle clicked actions
@@ -2470,6 +2510,34 @@ impl FlowchartApp {
                     self.history.push(&self.document);
                 }
                 _ => {}
+            }
+        }
+
+        // Cycle status on status badge click
+        if status_clicked {
+            if let Some(&sel_id) = self.selection.node_ids.iter().next() {
+                if let Some(node) = self.document.find_node_mut(&sel_id) {
+                    let (new_tag, new_progress, label) = match node.tag {
+                        None => (Some(crate::model::NodeTag::Warning), 0.0, "Todo"),
+                        Some(crate::model::NodeTag::Warning) if node.progress < 0.5 => {
+                            (Some(crate::model::NodeTag::Info), 0.5, "WIP")
+                        }
+                        Some(crate::model::NodeTag::Info) => {
+                            (Some(crate::model::NodeTag::Warning), 0.75, "Review")
+                        }
+                        Some(crate::model::NodeTag::Warning) => {
+                            (Some(crate::model::NodeTag::Ok), 1.0, "Done")
+                        }
+                        Some(crate::model::NodeTag::Ok) => {
+                            (Some(crate::model::NodeTag::Critical), 0.0, "Blocked")
+                        }
+                        Some(crate::model::NodeTag::Critical) => (None, 0.0, "None"),
+                    };
+                    node.tag = new_tag;
+                    node.progress = new_progress;
+                    self.status_message = Some((format!("Status: {label}"), std::time::Instant::now()));
+                }
+                self.history.push(&self.document);
             }
         }
 

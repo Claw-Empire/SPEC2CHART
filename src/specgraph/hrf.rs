@@ -558,10 +558,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "product" | "products"
                 // Fishbone / Ishikawa section aliases
                 | "problem" | "effect" | "defect"
-                | "people" | "process" | "technology" | "environment"
+                | "people" | "technology" | "environment"
                 | "materials" | "material" | "measurement" | "measurements"
                 | "machine" | "machines" | "method" | "methods"
                 | "management"
+                // PESTLE section aliases
+                | "political" | "economic" | "social" | "technological" | "legal" | "environmental"
+                | "focus" | "strategic focus"
                 // Strategic / OKR section aliases
                 | "initiatives" | "initiative"
                 | "countermeasures" | "countermeasure" | "mitigations" | "mitigation"
