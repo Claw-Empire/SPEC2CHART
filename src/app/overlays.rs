@@ -733,6 +733,7 @@ impl FlowchartApp {
                             ),
                             ("O", "Bird's-eye overview"),
                             ("Alt+hover", "Show distance rulers"),
+                            ("Alt+1..9", "Apply color preset (blue/green/red/yellow/purple/teal/orange/pink/white)"),
                         ],
                     ),
                     (

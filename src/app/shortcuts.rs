@@ -1050,6 +1050,37 @@ impl FlowchartApp {
             }
         }
 
+        // Alt+1..9 = apply color preset to selected nodes
+        // Palette: blue, green, red, yellow, purple, teal, orange, pink, white
+        if !any_text_focused && !self.selection.node_ids.is_empty() {
+            let alt_only = egui::Modifiers { alt: true, ..egui::Modifiers::NONE };
+            let color_keys: [(Key, [u8; 4], &str); 9] = [
+                (Key::Num1, [137, 180, 250, 255], "Blue"),      // hypothesis/info
+                (Key::Num2, [166, 227, 161, 255], "Green"),     // evidence/done
+                (Key::Num3, [243, 139, 168, 255], "Red"),       // blocked/risk
+                (Key::Num4, [249, 226, 175, 255], "Yellow"),    // assumption/todo
+                (Key::Num5, [203, 166, 247, 255], "Purple"),    // conclusion
+                (Key::Num6, [148, 226, 213, 255], "Teal"),      // context
+                (Key::Num7, [250, 179, 135, 255], "Orange"),    // hypothesis alt
+                (Key::Num8, [245, 194, 231, 255], "Pink"),      // observation
+                (Key::Num9, [230, 230, 240, 255], "White"),     // default/clear
+            ];
+            for (key, color, name) in &color_keys {
+                if ctx.input(|i| i.key_pressed(*key) && i.modifiers.matches_exact(alt_only)) {
+                    let node_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                    for id in &node_ids {
+                        if let Some(node) = self.document.find_node_mut(id) {
+                            node.style.fill_color = *color;
+                            node.style.text_color = crate::app::theme::auto_contrast_text(*color);
+                        }
+                    }
+                    self.history.push(&self.document);
+                    self.status_message = Some((format!("Color: {name}"), std::time::Instant::now()));
+                    break;
+                }
+            }
+        }
+
         // Arrow keys on selected node = navigate to adjacent node by spatial direction
         if !any_text_focused && self.selection.node_ids.len() == 1 && self.selection.edge_ids.is_empty() {
             let sel_id = *self.selection.node_ids.iter().next().unwrap();
