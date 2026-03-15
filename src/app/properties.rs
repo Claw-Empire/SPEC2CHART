@@ -40,6 +40,25 @@ impl FlowchartApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                // ── Widget visuals override: ensures inputs/text are legible against dark panel bg ──
+                {
+                    let v = ui.visuals_mut();
+                    // TextEdit background (extreme_bg_color is used by TextEdit as its fill)
+                    v.extreme_bg_color = self.theme.surface0;
+                    // Button / widget backgrounds
+                    v.widgets.inactive.weak_bg_fill = self.theme.surface0;
+                    v.widgets.hovered.weak_bg_fill = self.theme.surface1;
+                    v.widgets.active.weak_bg_fill = self.theme.surface1;
+                    v.widgets.open.weak_bg_fill = self.theme.surface1;
+                    // Text color inside widgets
+                    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, self.theme.text_primary);
+                    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, self.theme.text_primary);
+                    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, self.theme.text_primary);
+                    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(0.5, self.theme.text_secondary);
+                    // Selection highlight inside TextEdit
+                    v.selection.bg_fill = self.theme.accent_select_bg;
+                    v.selection.stroke = egui::Stroke::new(1.0, self.theme.accent);
+                }
                 // Header with collapse button
                 ui.horizontal(|ui| {
                     let btn = egui::Button::new(
@@ -250,18 +269,20 @@ impl FlowchartApp {
         ];
 
         for (group_name, shortcuts) in shortcut_groups {
-            ui.label(egui::RichText::new(*group_name).size(11.5).color(self.theme.text_secondary).strong());
+            ui.label(egui::RichText::new(*group_name).size(11.5).color(self.theme.text_primary).strong());
             ui.add_space(4.0);
             for (key, action) in *shortcuts {
                 ui.horizontal(|ui| {
+                    // Key badge: solid surface1 pill so it's visible on the dark panel
                     let key_text = egui::RichText::new(*key)
                         .size(11.0)
                         .monospace()
                         .color(self.theme.accent)
-                        .background_color(self.theme.accent_faint);
+                        .background_color(self.theme.surface1);
                     ui.label(key_text);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(*action).size(11.0).color(self.theme.text_dim));
+                        // text_secondary instead of text_dim — clearly readable
+                        ui.label(egui::RichText::new(*action).size(11.0).color(self.theme.text_secondary));
                     });
                 });
             }

@@ -457,17 +457,18 @@ impl FlowchartApp {
             let factor = (-self.cam3d_zoom_vel).exp().clamp(0.75, 1.35);
             let new_distance = (self.camera3d.distance * factor).clamp(100.0, 10000.0);
 
-            // Zoom-to-cursor: keep the world point under the cursor stationary.
-            // Move target toward (inward zoom) or away from (outward zoom)
-            // the cursor's ground-plane intersection point.
-            if let Some(cursor_pos) = pointer_pos {
-                if let Some(cursor_world) = self.camera3d.unproject_to_plane(
-                    cursor_pos, screen_center, screen_size, self.camera3d.target[2],
-                ) {
-                    // approach ∈ (0,1) when zooming in; negative when zooming out.
-                    let approach = (1.0 - factor) * 0.55;
-                    self.camera3d.target[0] += approach * (cursor_world[0] - self.camera3d.target[0]);
-                    self.camera3d.target[1] += approach * (cursor_world[1] - self.camera3d.target[1]);
+            // Zoom-to-cursor: only when zooming IN (factor < 1.0).
+            // On zoom-out keep target stationary — prevents content from drifting
+            // off-screen when quickly scrolling out after a zoom-in.
+            if factor < 1.0 {
+                if let Some(cursor_pos) = pointer_pos {
+                    if let Some(cursor_world) = self.camera3d.unproject_to_plane(
+                        cursor_pos, screen_center, screen_size, self.camera3d.target[2],
+                    ) {
+                        let approach = (1.0 - factor) * 0.55;
+                        self.camera3d.target[0] += approach * (cursor_world[0] - self.camera3d.target[0]);
+                        self.camera3d.target[1] += approach * (cursor_world[1] - self.camera3d.target[1]);
+                    }
                 }
             }
 
@@ -979,24 +980,84 @@ impl FlowchartApp {
         }
 
         // Instructions
-        let instructions = match (&self.tool, &self.drag) {
-            (Tool::Connect, _) => {
-                "Click port to connect  |  Right-drag orbit  |  Scroll zoom  |  Cmd+scroll pan  |  2 for 2D"
+        // Bottom hint bar — structured as labelled key groups, clearly readable
+        {
+            let hints: &[(&str, &str)] = match (&self.tool, &self.drag) {
+                (Tool::Connect, _) => &[
+                    ("Right-drag", "Rotate"),
+                    ("Scroll", "Zoom"),
+                    ("⌘+Scroll", "Pan"),
+                    ("Click port", "Connect"),
+                    ("2", "2D mode"),
+                ],
+                _ if !self.selection.is_empty() => &[
+                    ("Right-drag", "Rotate"),
+                    ("⌘+Scroll", "Pan"),
+                    ("Drag node", "Move"),
+                    ("⇧+Drag", "Z-axis"),
+                    ("Handles", "Resize"),
+                ],
+                _ => &[
+                    ("Right-drag", "Rotate"),
+                    ("Scroll", "Zoom"),
+                    ("⌘+Scroll", "Pan"),
+                    ("Drag", "Select"),
+                    ("⇧+Drag", "Z-axis"),
+                ],
+            };
+
+            let font_key    = FontId::proportional(10.5);
+            let font_action = FontId::proportional(10.5);
+            let key_color    = Color32::from_rgba_premultiplied(190, 210, 255, 230);
+            let sep_color    = Color32::from_rgba_premultiplied(100, 105, 130, 180);
+            let action_color = Color32::from_rgba_premultiplied(190, 195, 215, 200);
+            let bg_color     = Color32::from_rgba_premultiplied(12, 13, 22, 185);
+            let padding = egui::Vec2::new(10.0, 5.0);
+            let bar_h = 24.0_f32;
+            let bar_y = canvas_rect.max.y - bar_h - 6.0;
+
+            // Measure total width to center the pill
+            let galley_cache: Vec<(egui::Arc<egui::text::Galley>, egui::Arc<egui::text::Galley>)> = hints.iter().map(|(key, action)| {
+                let kg = ui.ctx().fonts(|f| f.layout_no_wrap(key.to_string(), font_key.clone(), key_color));
+                let ag = ui.ctx().fonts(|f| f.layout_no_wrap(action.to_string(), font_action.clone(), action_color));
+                (kg, ag)
+            }).collect();
+
+            let sep_w = 8.0_f32;
+            let item_gap = 14.0_f32;
+            let mut total_w = 0.0_f32;
+            for (i, (kg, ag)) in galley_cache.iter().enumerate() {
+                total_w += sep_w + kg.size().x + 4.0 + ag.size().x;
+                if i + 1 < galley_cache.len() { total_w += item_gap; }
             }
-            _ if !self.selection.is_empty() => {
-                "Drag move  |  Shift+drag Z-axis  |  Handles resize  |  Ports connect  |  Right-drag orbit  |  Cmd+scroll pan"
+            total_w += padding.x * 2.0;
+
+            let bar_x = canvas_rect.center().x - total_w * 0.5;
+            let bar_rect = Rect::from_min_size(
+                Pos2::new(bar_x, bar_y),
+                egui::Vec2::new(total_w, bar_h),
+            );
+            painter.rect_filled(bar_rect, CornerRadius::same(6), bg_color);
+
+            let mut x = bar_x + padding.x;
+            let cy = bar_y + bar_h * 0.5;
+
+            for (i, (kg, ag)) in galley_cache.into_iter().enumerate() {
+                // Separator dot (not before first item)
+                if i > 0 {
+                    painter.circle_filled(Pos2::new(x + sep_w * 0.5 - 4.0, cy), 1.5, sep_color);
+                    x += sep_w;
+                }
+                // Key label
+                let kw = kg.size().x;
+                painter.galley(Pos2::new(x, cy - kg.size().y * 0.5), kg, key_color);
+                x += kw + 4.0;
+                // Action label (dimmer)
+                let aw = ag.size().x;
+                painter.galley(Pos2::new(x, cy - ag.size().y * 0.5), ag, action_color);
+                x += aw + item_gap;
             }
-            _ => {
-                "Click/drag select  |  Right-drag orbit  |  Scroll zoom  |  Cmd+scroll pan  |  Shift+drag Z-axis"
-            }
-        };
-        painter.text(
-            Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 20.0),
-            Align2::CENTER_CENTER,
-            instructions,
-            FontId::proportional(11.0),
-            self.theme.text_dim,
-        );
+        }
 
         // Camera preset buttons (top-right corner overlay)
         {
@@ -1010,14 +1071,54 @@ impl FlowchartApp {
                 ("Front",  0.0_f32, 0.15_f32),
                 ("Side",   1.57_f32, 0.3_f32),
             ];
-            let total_w = presets.len() as f32 * (btn_w + gap) - gap;
+            // "Fit" button sits to the LEFT of the preset buttons, separated by a gap
+            let fit_btn_w = 36.0_f32;
+            let total_presets_w = presets.len() as f32 * (btn_w + gap) - gap;
+            let total_w = fit_btn_w + gap * 2.0 + total_presets_w;
             let start_x = canvas_rect.max.x - margin - total_w;
             let y = canvas_rect.min.y + margin;
             let pointer = ui.ctx().input(|i| i.pointer.hover_pos());
             let clicked = ui.ctx().input(|i| i.pointer.primary_clicked());
+
+            // ── Fit button ──────────────────────────────────────────────────
+            let fit_rect = Rect::from_min_size(
+                Pos2::new(start_x, y),
+                Vec2::new(fit_btn_w, btn_h),
+            );
+            let fit_hovered = pointer.map_or(false, |p| fit_rect.contains(p));
+            let fit_bg = if fit_hovered {
+                Color32::from_rgba_premultiplied(137, 180, 250, 200)
+            } else {
+                Color32::from_rgba_premultiplied(20, 20, 35, 170)
+            };
+            painter.rect_filled(fit_rect, CornerRadius::same(5), fit_bg);
+            painter.rect_stroke(
+                fit_rect,
+                CornerRadius::same(5),
+                Stroke::new(1.0, Color32::from_rgba_premultiplied(100, 100, 140, 160)),
+                StrokeKind::Inside,
+            );
+            let fit_txt_color = if fit_hovered {
+                Color32::from_rgb(20, 20, 30)
+            } else {
+                Color32::from_rgba_premultiplied(200, 200, 220, 220)
+            };
+            painter.text(
+                fit_rect.center(),
+                Align2::CENTER_CENTER,
+                "⊞ Fit",
+                FontId::proportional(10.5),
+                fit_txt_color,
+            );
+            if fit_hovered && clicked {
+                self.fit_3d_to_content(ui.ctx());
+            }
+
+            // ── View preset buttons ─────────────────────────────────────────
+            let presets_start_x = start_x + fit_btn_w + gap * 2.0;
             for (k, (label, preset_yaw, preset_pitch)) in presets.iter().enumerate() {
                 let btn_rect = Rect::from_min_size(
-                    Pos2::new(start_x + k as f32 * (btn_w + gap), y),
+                    Pos2::new(presets_start_x + k as f32 * (btn_w + gap), y),
                     Vec2::new(btn_w, btn_h),
                 );
                 let target_yaw   = self.camera3d.anim_target.map(|a| a.yaw).unwrap_or(self.camera3d.yaw);

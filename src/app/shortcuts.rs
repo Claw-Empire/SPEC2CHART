@@ -1618,6 +1618,7 @@ impl FlowchartApp {
         let now = ctx.input(|i| i.time);
         self.camera3d.animate_to(-0.4, 0.6, now, 0.4);
         self.camera3d.distance = span.max(400.0).min(8000.0);
+        self.cam3d_zoom_vel = 0.0; // cancel any in-progress zoom inertia
         ctx.request_repaint();
         self.status_message = Some(("3D Fit".to_string(), std::time::Instant::now()));
     }
