@@ -572,6 +572,7 @@ impl FlowchartApp {
                     ("Value Prop", include_str!("../../assets/examples/value_proposition.spec")),
                     ("Fishbone", include_str!("../../assets/examples/fishbone.spec")),
                     ("PESTLE", include_str!("../../assets/examples/pestle.spec")),
+                    ("Mind Map", include_str!("../../assets/examples/mind_map.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);

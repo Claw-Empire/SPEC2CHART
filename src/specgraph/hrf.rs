@@ -565,6 +565,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 // PESTLE section aliases
                 | "political" | "economic" | "social" | "technological" | "legal" | "environmental"
                 | "focus" | "strategic focus"
+                // Mind map section aliases
+                | "central" | "central idea" | "core" | "root"
+                | "branches" | "branch" | "subtopics" | "subtopic"
+                | "sub-themes" | "sub-theme"
                 // Strategic / OKR section aliases
                 | "initiatives" | "initiative"
                 | "countermeasures" | "countermeasure" | "mitigations" | "mitigation"
@@ -3050,7 +3054,7 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         // Triangle / pyramid
         "triangle" | "pyramid" | "hierarchy" | "peak" | "apex" => NodeShape::Triangle,
         // Callout / speech bubble
-        "callout" | "speech" | "speech-bubble" | "bubble" | "balloon" => NodeShape::Callout,
+        "callout" | "speech" | "speech-bubble" | "balloon" => NodeShape::Callout,
         // Default
         _ => NodeShape::RoundedRect,
     }
