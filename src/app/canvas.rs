@@ -2722,8 +2722,27 @@ impl FlowchartApp {
                     };
                     node.tag = new_tag;
                     node.progress = new_progress;
-                    self.status_message = Some((format!("Status: {label}"), std::time::Instant::now()));
+                    // (label is used below for fallback status message)
+                    let _ = label; // suppress "not used" warning if no celebration
                 }
+                // Check if all nodes in node's section are now Done
+                let celebration = self.document.find_node(&sel_id)
+                    .filter(|n| !n.section_name.is_empty())
+                    .map(|n| n.section_name.clone())
+                    .and_then(|sec| {
+                        let nodes_in_sec: Vec<_> = self.document.nodes.iter()
+                            .filter(|n| n.section_name == sec)
+                            .collect();
+                        if !nodes_in_sec.is_empty()
+                            && nodes_in_sec.iter().all(|n| matches!(n.tag, Some(crate::model::NodeTag::Ok)))
+                        {
+                            Some(format!("🎉 All done in \"{sec}\"!"))
+                        } else {
+                            None
+                        }
+                    });
+                let msg = celebration.unwrap_or_else(|| "Status updated".to_string());
+                self.status_message = Some((msg, std::time::Instant::now()));
                 self.history.push(&self.document);
             }
         }

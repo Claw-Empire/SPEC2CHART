@@ -1044,7 +1044,33 @@ impl FlowchartApp {
                         label = lbl;
                     }
                 }
-                self.status_message = Some((format!("Status: {label}"), std::time::Instant::now()));
+                // Check if all nodes in the affected section are now Done → celebrate
+                let section_complete_msg: Option<String> = {
+                    let affected_sections: std::collections::HashSet<String> = node_ids.iter()
+                        .filter_map(|id| self.document.find_node(id))
+                        .filter(|n| !n.section_name.is_empty())
+                        .map(|n| n.section_name.clone())
+                        .collect();
+                    let mut msg = None;
+                    for sec in &affected_sections {
+                        let nodes_in_sec: Vec<_> = self.document.nodes.iter()
+                            .filter(|n| &n.section_name == sec)
+                            .collect();
+                        let all_done = !nodes_in_sec.is_empty()
+                            && nodes_in_sec.iter().all(|n| matches!(n.tag, Some(crate::model::NodeTag::Ok)));
+                        if all_done {
+                            msg = Some(format!("🎉 All done in \"{sec}\"!"));
+                            break;
+                        }
+                    }
+                    msg
+                };
+                let status_text = if let Some(cel) = section_complete_msg {
+                    cel
+                } else {
+                    format!("Status: {label}")
+                };
+                self.status_message = Some((status_text, std::time::Instant::now()));
                 self.history.push(&self.document);
             } else {
                 self.snap_to_grid = !self.snap_to_grid;
