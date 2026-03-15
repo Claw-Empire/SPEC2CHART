@@ -259,6 +259,43 @@ impl FlowchartApp {
         }
         None
     }
+
+    /// Returns `Some((section_name, label_screen_pos))` if `screen_pos` is within ~20px
+    /// of a section label drawn at the top-left of its background rect.
+    /// Used by double-click to trigger section rename.
+    pub(crate) fn section_label_hit(&self, screen_pos: Pos2) -> Option<(String, Pos2)> {
+        use std::collections::HashMap;
+        use egui::Rect;
+
+        let zoom = self.viewport.zoom;
+        let font_size = (12.0 * zoom.sqrt()).clamp(9.5, 16.0);
+        let pad_screen = (24.0 * zoom).clamp(12.0, 36.0);
+
+        // Build section bounding boxes in screen space
+        let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() { continue; }
+            let top_left = self.viewport.canvas_to_screen(node.pos());
+            let sr = Rect::from_min_size(top_left, node.size_vec() * zoom);
+            let entry = section_bounds.entry(node.section_name.as_str()).or_insert(sr);
+            *entry = entry.union(sr);
+        }
+
+        for (name, bounds) in &section_bounds {
+            let label_x = bounds.min.x - pad_screen + 8.0;
+            let label_y = bounds.min.y - pad_screen + font_size + 4.0;
+            let label_pos = Pos2::new(label_x, label_y);
+            // Hit zone: ~140px wide × ~20px tall around the label
+            let hit = Rect::from_min_size(
+                Pos2::new(label_x - 4.0, label_y - 2.0),
+                egui::Vec2::new(160.0, font_size + 6.0),
+            );
+            if hit.contains(screen_pos) {
+                return Some((name.to_string(), label_pos));
+            }
+        }
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

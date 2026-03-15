@@ -358,22 +358,28 @@ impl FlowchartApp {
                     self.selection.select_edge(edge_id);
                     self.inline_edge_edit = Some((edge_id, mouse));
                 } else if self.tool == Tool::Select {
-                    // Create a new default shape node centered on the click
-                    let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
-                    let w = node.size[0];
-                    let h = node.size[1];
-                    node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
-                    // Auto-assign section and style if dropped inside a section background
-                    if let Some(sec) = self.section_at_canvas_pos(canvas_pos) {
-                        apply_section_style(&mut node, &sec);
-                        node.section_name = sec;
+                    // First: check if double-click is on a section label → rename section
+                    let hit_section = self.section_label_hit(mouse);
+                    if let Some((sec_name, label_pos)) = hit_section {
+                        self.section_rename = Some((sec_name.clone(), sec_name, label_pos));
+                    } else {
+                        // Create a new default shape node centered on the click
+                        let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
+                        let w = node.size[0];
+                        let h = node.size[1];
+                        node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
+                        // Auto-assign section and style if dropped inside a section background
+                        if let Some(sec) = self.section_at_canvas_pos(canvas_pos) {
+                            apply_section_style(&mut node, &sec);
+                            node.section_name = sec;
+                        }
+                        let id = node.id;
+                        self.document.nodes.push(node);
+                        self.selection.select_node(id);
+                        self.inline_node_edit = Some((id, String::new()));
+                        self.history.push(&self.document);
+                        self.status_message = Some(("Node created".to_string(), std::time::Instant::now()));
                     }
-                    let id = node.id;
-                    self.document.nodes.push(node);
-                    self.selection.select_node(id);
-                    self.inline_node_edit = Some((id, String::new()));
-                    self.history.push(&self.document);
-                    self.status_message = Some(("Node created".to_string(), std::time::Instant::now()));
                 }
             }
         }
@@ -800,6 +806,7 @@ impl FlowchartApp {
         self.draw_multi_selection_handles(&painter);
 
         self.draw_inline_node_editor(ui, canvas_rect);
+        self.draw_section_rename_editor(ui);
         // Floating edge style bar: quick-toggle edge styles on selected edge
         self.draw_floating_edge_bar(ui, canvas_rect);
         // Quick-connect arrows: show ±4 directional buttons on hovered node
@@ -4108,6 +4115,72 @@ impl FlowchartApp {
                 );
                 painter.circle_filled(pos, dot_r, dot_color);
             }
+        }
+    }
+
+    /// Render the inline section rename editor overlay.
+    fn draw_section_rename_editor(&mut self, ui: &mut egui::Ui) {
+        if self.section_rename.is_none() { return; }
+
+        let (old_name, label_pos) = {
+            let (ref old, _, ref pos) = *self.section_rename.as_ref().unwrap();
+            (old.clone(), *pos)
+        };
+
+        // Background pill behind the text input
+        let edit_w = 180.0_f32;
+        let edit_h = 22.0_f32;
+        let bg_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(label_pos.x - 4.0, label_pos.y - 2.0),
+            egui::Vec2::new(edit_w, edit_h),
+        );
+        ui.painter().rect_filled(bg_rect, egui::CornerRadius::same(4), self.theme.surface1);
+        ui.painter().rect_stroke(bg_rect, egui::CornerRadius::same(4),
+            egui::Stroke::new(1.5, self.theme.accent.gamma_multiply(0.7)), egui::StrokeKind::Outside);
+
+        // Floating text edit area
+        let area = egui::Area::new(egui::Id::new("section_rename_area"))
+            .fixed_pos(egui::Pos2::new(label_pos.x, label_pos.y - 1.0))
+            .order(egui::Order::Foreground);
+        let mut committed = false;
+        let mut cancelled = false;
+        area.show(ui.ctx(), |ui| {
+            ui.set_max_width(edit_w);
+            let edit_text = &mut self.section_rename.as_mut().unwrap().1;
+            let re = ui.add(
+                egui::TextEdit::singleline(edit_text)
+                    .desired_width(edit_w - 8.0)
+                    .frame(false)
+                    .font(egui::TextStyle::Body)
+            );
+            re.request_focus();
+            if re.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Tab)) {
+                committed = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                cancelled = true;
+            }
+        });
+
+        if cancelled {
+            self.section_rename = None;
+            return;
+        }
+        if committed {
+            let new_name = self.section_rename.as_ref().unwrap().1.trim().to_string();
+            if !new_name.is_empty() && new_name != old_name {
+                for node in &mut self.document.nodes {
+                    if node.section_name == old_name {
+                        node.section_name = new_name.clone();
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some((
+                    format!("Section renamed to \"{new_name}\""),
+                    std::time::Instant::now(),
+                ));
+            }
+            self.section_rename = None;
         }
     }
 
