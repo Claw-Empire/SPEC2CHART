@@ -205,6 +205,30 @@ impl FlowchartApp {
         [x, y, w, h]
     }
 
+    /// Like `section_at_canvas_pos` but excludes `exclude_id` from section bounds.
+    /// Used when a dragged node shouldn't inflate its own section's bounding box.
+    pub(crate) fn section_at_canvas_pos_excluding(&self, canvas_pos: Pos2, exclude_id: crate::model::NodeId) -> Option<String> {
+        use std::collections::HashMap;
+        let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
+        let mut section_order: Vec<&str> = Vec::new();
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() || node.id == exclude_id { continue; }
+            let key = node.section_name.as_str();
+            if !section_bounds.contains_key(key) { section_order.push(key); }
+            let entry = section_bounds.entry(key).or_insert(node.rect());
+            *entry = entry.union(node.rect());
+        }
+        let pad = 24.0 / self.viewport.zoom;
+        for section_name in section_order {
+            if let Some(bounds) = section_bounds.get(section_name) {
+                if bounds.expand(pad).contains(canvas_pos) {
+                    return Some(section_name.to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// Returns the `section_name` of the first section whose bounding box (expanded
     /// by `pad = 24 px / zoom`) contains `canvas_pos`. Used to auto-assign section
     /// when a new node is created by double-click or drag-drop inside a section area.

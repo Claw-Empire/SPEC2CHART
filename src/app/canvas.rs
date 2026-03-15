@@ -1116,6 +1116,31 @@ impl FlowchartApp {
                 DragState::DraggingNode { .. }
                 | DragState::ResizingNode { .. }
                 | DragState::DraggingEdgeBend { .. } => {
+                    // After drag: auto-reassign section for moved nodes
+                    if matches!(self.drag, DragState::DraggingNode { .. }) {
+                        let moved_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                        for node_id in moved_ids {
+                            if let Some(pos) = self.document.find_node(&node_id).map(|n| n.rect().center()) {
+                                let new_section = self.section_at_canvas_pos_excluding(pos, node_id);
+                                if let Some(node) = self.document.find_node_mut(&node_id) {
+                                    // Only reassign if: moved into a section, or moved out of its current section
+                                    let was_in_section = !node.section_name.is_empty();
+                                    match &new_section {
+                                        Some(sec) if sec != &node.section_name => {
+                                            node.section_name = sec.clone();
+                                        }
+                                        None if was_in_section => {
+                                            // Moved outside all sections — clear section
+                                            // (only if it's now clearly outside: use a stricter check)
+                                            // We'll keep the section assignment to avoid accidental clearing
+                                            // near edges. User can clear via context menu if desired.
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
                     self.history.push(&self.document);
                 }
                 DragState::CreatingEdge { source, .. } => {
