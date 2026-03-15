@@ -1884,6 +1884,11 @@ impl FlowchartApp {
         egui::Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], 28)
     }
 
+    /// Public wrapper for use in canvas minimap rendering.
+    pub(crate) fn section_bg_color_pub(name: &str) -> egui::Color32 {
+        Self::section_bg_color(name)
+    }
+
     /// Draw soft colored backgrounds behind each group of nodes sharing a `section_name`.
     /// Drawn before edges and nodes so backgrounds appear underneath everything.
     pub(crate) fn draw_section_backgrounds(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {

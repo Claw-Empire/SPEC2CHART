@@ -3836,6 +3836,26 @@ impl FlowchartApp {
             )
         };
 
+        // Draw section backgrounds in minimap
+        {
+            use std::collections::HashMap;
+            let mut section_bounds: HashMap<&str, egui::Rect> = HashMap::new();
+            for node in &self.document.nodes {
+                if node.section_name.is_empty() { continue; }
+                let r = node.rect();
+                let entry = section_bounds.entry(node.section_name.as_str()).or_insert(r);
+                *entry = entry.union(r);
+            }
+            for (sec_name, bounds) in &section_bounds {
+                let min_pt = map_point(bounds.min.x, bounds.min.y);
+                let max_pt = map_point(bounds.max.x, bounds.max.y);
+                let mini_rect = egui::Rect::from_two_pos(min_pt, max_pt);
+                let bg = Self::section_bg_color_pub(sec_name);
+                let fill = egui::Color32::from_rgba_unmultiplied(bg.r(), bg.g(), bg.b(), 60);
+                painter.rect_filled(mini_rect.expand(2.0), egui::CornerRadius::same(2), fill);
+            }
+        }
+
         // Draw edges first (behind nodes)
         let edge_color_mm = self.theme.text_dim.gamma_multiply(0.5);
         let edge_sel_col  = self.theme.accent.gamma_multiply(0.8);
