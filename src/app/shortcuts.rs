@@ -228,10 +228,13 @@ impl FlowchartApp {
                     node.section_name = sec;
                 }
                 let id = node.id;
+                let label_copy = pasted_text.chars().take(300).collect::<String>();
                 self.document.nodes.push(node);
                 self.selection.select_node(id);
+                // Open inline editor so user can immediately refine the pasted text
+                self.inline_node_edit = Some((id, label_copy));
                 self.history.push(&self.document);
-                self.status_message = Some(("Text pasted as sticky note".to_string(), std::time::Instant::now()));
+                self.status_message = Some(("Text pasted as sticky note — editing".to_string(), std::time::Instant::now()));
             }
         }
 
