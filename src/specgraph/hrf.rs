@@ -88,6 +88,7 @@ use std::collections::HashMap;
 ///   `{blocked}` / `{stuck}` / `{failed}` — Critical badge (red), no progress implied
 ///   `{todo}` / `{pending}` / `{backlog}` — Warning badge (yellow), no progress
 ///   `{note:text}` / `{annotation:text}` / `{comment:text}` — 💬 annotation tooltip shown on hover
+///   `{section:Name}` / `{stage:Name}` / `{col:Name}` — assign to a kanban section inline (alias: column:/board:)
 ///   `{group:name}` / `{cluster:name}` / `{in:name}` — assign to inline group frame (auto-creates bounding frame)
 ///   `{bold}` — bold text
 ///   `{italic}` — italic text
@@ -2352,6 +2353,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut frame_color_override: Option<[u8; 4]> = None;
     let mut collapsed = false;
     let mut lane_tag: Option<String> = None;
+    let mut section_override: Option<String> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -2643,6 +2645,15 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                     _ => person_part,
                 });
             }
+        } else if tag.starts_with("section:") || tag.starts_with("stage:") || tag.starts_with("board:") || tag.starts_with("col:") || tag.starts_with("column:") {
+            // {section:Intake} — assign node to a kanban section inline (overrides header-based section)
+            let prefix = if tag.starts_with("section:") { 8 }
+                else if tag.starts_with("stage:") { 6 }
+                else if tag.starts_with("board:") { 6 }
+                else if tag.starts_with("col:") { 4 }
+                else { 7 }; // column:
+            let sec = tag[prefix..].trim().to_string();
+            if !sec.is_empty() { section_override = Some(sec); }
         } else if tag.starts_with("sublabel:") || tag.starts_with("sub:") || tag.starts_with("subtitle:") || tag.starts_with("caption:") {
             let prefix = if tag.starts_with("sublabel:") { 9 }
                 else if tag.starts_with("sub:") { 4 }
@@ -2801,6 +2812,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(lane) = lane_tag {
         node.timeline_lane = Some(lane);
     }
+    if let Some(sec) = section_override {
+        node.section_name = sec;
+    }
 
     Ok((id, node))
 }
@@ -2882,7 +2896,9 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                             "from" | "to" | "icon" | "url" | "link"
                             | "tooltip" | "tip" | "desc"
                             | "lane" | "sublabel" | "sub" | "subtitle" | "caption"
-                            | "note" | "annotation" | "comment" => {
+                            | "note" | "annotation" | "comment"
+                            | "section" | "stage" | "col" | "column" | "board"
+                            | "assigned" | "owner" | "assignee" => {
                                 format!("{}:{}", key, val)
                             }
                             // Preserve fill/color values that start with '#' (hex colors)
@@ -4882,5 +4898,29 @@ e1 --> h1: supports
         let exported = export_hrf(&doc, "Hypothesis Map");
         assert!(exported.contains("## Hypotheses"), "export should have Hypotheses section");
         assert!(exported.contains("## Evidence"), "export should have Evidence section");
+    }
+
+    #[test]
+    fn test_inline_section_tag() {
+        // {section:Name} should assign node to that section without a header
+        let input = r#"
+# Support Board
+
+## Nodes
+- [t1] Bug Report {section:Intake} {p1}
+- [t2] Feature Request {col:Backlog} {p3}
+- [t3] Crash on login {stage:In Progress} {p2}
+"#;
+        let doc = parse_hrf(input).expect("should parse");
+        assert_eq!(doc.nodes.len(), 3);
+
+        let t1 = doc.nodes.iter().find(|n| n.display_label() == "Bug Report").expect("t1");
+        assert_eq!(t1.section_name, "Intake", "section: tag should set section_name");
+
+        let t2 = doc.nodes.iter().find(|n| n.display_label() == "Feature Request").expect("t2");
+        assert_eq!(t2.section_name, "Backlog", "col: tag should set section_name");
+
+        let t3 = doc.nodes.iter().find(|n| n.display_label() == "Crash on login").expect("t3");
+        assert_eq!(t3.section_name, "In Progress", "stage: tag should set section_name");
     }
 }
