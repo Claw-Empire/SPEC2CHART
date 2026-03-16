@@ -12,11 +12,11 @@ spacing = 90
 - [oncall] On-call engineer paged {icon:📟} {critical}
   Acknowledge within 5 min
 - [severity] Assess severity {diamond} {icon:⚖️}
-- [sev1] SEV-1 — Total outage {critical} {icon:🔴} {glow}
+- [sev1] SEV-1 — Total outage {sev1} {glow} {icon:🔴}
   All users affected — war room in 10 min
-- [sev2] SEV-2 — Major degradation {warning} {icon:🟠}
+- [sev2] SEV-2 — Major degradation {sev2} {icon:🟠}
   >20% users affected — response in 30 min
-- [sev3] SEV-3 — Minor issue {info} {icon:🟡}
+- [sev3] SEV-3 — Minor issue {sev3} {icon:🟡}
   <20% affected — best-effort same day
 
 ## Phase 2: Communicate

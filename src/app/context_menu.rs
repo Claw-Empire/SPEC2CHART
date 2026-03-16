@@ -65,6 +65,30 @@ impl FlowchartApp {
         // Bulk tag
         self.tag_submenu(ui, "🏷 Tag all…", None);
 
+        // Bulk priority (support use case)
+        ui.menu_button("🔢 Set Priority…", |ui| {
+            let priorities: &[(&str, Option<NodeTag>, [u8; 4], &str)] = &[
+                ("P1 — Critical", Some(NodeTag::Critical), [243, 139, 168, 255], "System down / blocking"),
+                ("P2 — High",     Some(NodeTag::Warning),  [250, 179, 135, 255], "Major feature broken"),
+                ("P3 — Medium",   Some(NodeTag::Info),     [137, 180, 250, 255], "Degraded experience"),
+                ("P4 — Low",      None,                    [166, 227, 161, 255], "Cosmetic / question"),
+            ];
+            for (label, tag, fill, tip) in priorities {
+                if ui.button(*label).on_hover_text(*tip).clicked() {
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.tag = *tag;
+                            n.style.fill_color = *fill;
+                            n.style.text_color = auto_contrast_text(*fill);
+                        }
+                    }
+                    self.history.push(&self.document);
+                    ui.close_menu();
+                }
+            }
+        });
+
         // Bulk highlight toggle
         {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
