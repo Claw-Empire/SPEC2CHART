@@ -1776,6 +1776,45 @@ impl FlowchartApp {
             self.quick_assign_buf = Some(prefill);
         }
 
+        // Shift+E = Escalate: set Critical priority on selected tickets, move to Triage (section 2)
+        if !any_text_focused && !self.selection.node_ids.is_empty()
+            && ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.matches_exact(egui::Modifiers { shift: true, ..egui::Modifiers::NONE }))
+        {
+            // Find the 2nd section (Triage) in doc order
+            let mut seen_sections: Vec<String> = Vec::new();
+            for n in &self.document.nodes {
+                if !n.section_name.is_empty() && !seen_sections.contains(&n.section_name) {
+                    seen_sections.push(n.section_name.clone());
+                }
+            }
+            let triage_sec: Option<String> = seen_sections.get(1).cloned();
+            let ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+            let count = ids.len();
+            for id in &ids {
+                if let Some(n) = self.document.find_node_mut(id) {
+                    n.tag = Some(crate::model::NodeTag::Critical);
+                    n.style.fill_color = [243, 139, 168, 255];
+                    if let Some(ref sec) = triage_sec {
+                        n.section_name = sec.clone();
+                    }
+                }
+            }
+            self.history.push(&self.document);
+            // Animated re-layout
+            let mut doc_clone = self.document.clone();
+            for n in doc_clone.nodes.iter_mut() { if !n.pinned { n.position = [0.0, 0.0]; } }
+            crate::specgraph::layout::auto_layout(&mut doc_clone);
+            self.layout_targets.clear();
+            for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
+            let msg = if let Some(ref sec) = triage_sec {
+                if count == 1 { format!("🚨 Escalated → {}", sec) }
+                else { format!("🚨 Escalated {} tickets → {}", count, sec) }
+            } else {
+                "🚨 Escalated: P1 Critical".to_string()
+            };
+            self.status_message = Some((msg, std::time::Instant::now()));
+        }
+
         // Cmd+Enter = mark all selected nodes as Done (tag=Ok, progress=1.0)
         // Great for "close ticket" in a support kanban workflow
         if !any_text_focused && !self.selection.node_ids.is_empty()
