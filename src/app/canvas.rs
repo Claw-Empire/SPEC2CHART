@@ -2436,7 +2436,7 @@ impl FlowchartApp {
         // Collect unique sections with counts, dominant tag color, and overdue count
         use std::collections::BTreeMap;
         #[derive(Default)]
-        struct SecInfo { total: u32, critical: u32, warning: u32, ok: u32, info: u32, overdue: u32 }
+        struct SecInfo { total: u32, critical: u32, warning: u32, ok: u32, info: u32, overdue: u32, critical_overdue: u32 }
         let today = super::render::today_iso();
         let mut sec_map: BTreeMap<String, SecInfo> = BTreeMap::new();
         for node in &self.document.nodes {
@@ -2457,7 +2457,12 @@ impl FlowchartApp {
                     d.len() >= 8 && d < today.as_str()
                 } else { false }
             });
-            if is_overdue { e.overdue += 1; }
+            if is_overdue {
+                e.overdue += 1;
+                if matches!(node.tag, Some(crate::model::NodeTag::Critical)) {
+                    e.critical_overdue += 1;
+                }
+            }
         }
         if sec_map.is_empty() { return; }
 
@@ -2474,7 +2479,8 @@ impl FlowchartApp {
             let chars = name.chars().count().min(14);
             let count_chars = format!("{}", info.total).len();
             let overdue_extra = if info.overdue > 0 { 26.0 } else { 0.0 };
-            (chars + count_chars + 2) as f32 * 6.5 + pill_pad_x * 2.0 + 14.0 + overdue_extra
+            let fire_extra = if info.critical_overdue > 0 { 18.0 } else { 0.0 };
+            (chars + count_chars + 2) as f32 * 6.5 + pill_pad_x * 2.0 + 14.0 + overdue_extra + fire_extra
         }).collect();
         let total_w: f32 = pill_widths.iter().sum::<f32>() + pill_gap * (sections.len().saturating_sub(1)) as f32;
 
@@ -2512,13 +2518,36 @@ impl FlowchartApp {
                 Color32::from_rgba_unmultiplied(18, 18, 28, 200)
             };
             let painter = ui.painter();
+
+            // 🔥 on-fire halo: pulsing orange glow for pills with P1 (Critical) overdue tickets
+            if info.critical_overdue > 0 {
+                let t = ui.ctx().input(|i| i.time) as f32;
+                // Pulse at ~1.2 Hz between alpha 60 and 160
+                let pulse = ((t * 1.2 * std::f32::consts::TAU).sin() * 0.5 + 0.5) as f32;
+                let glow_alpha = (60.0 + pulse * 100.0) as u8;
+                let glow_expand = 3.0 + pulse * 3.0;
+                let glow_rect = pill_rect.expand(glow_expand);
+                painter.rect(glow_rect, CornerRadius::same((11.0 + glow_expand) as u8),
+                    Color32::TRANSPARENT,
+                    Stroke::new(2.5, Color32::from_rgba_unmultiplied(255, 120, 30, glow_alpha)),
+                    StrokeKind::Outside);
+                // Second tighter ring
+                let inner_rect = pill_rect.expand(1.0);
+                painter.rect(inner_rect, CornerRadius::same(12_u8),
+                    Color32::TRANSPARENT,
+                    Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 80, 20, (glow_alpha / 2).saturating_add(40))),
+                    StrokeKind::Outside);
+                ui.ctx().request_repaint();
+            }
+
             painter.rect(pill_rect, CornerRadius::same(11),
                 bg, Stroke::new(1.0, border_col), StrokeKind::Inside);
 
-            // Label: truncate name + total count
+            // Label: truncate name + total count; 🔥 prefix if P1 overdue
             let short: String = name.chars().take(14).collect();
             let trail = if name.chars().count() > 14 { "…" } else { "" };
-            let disp = format!("{}{} {}", short, trail, info.total);
+            let fire_prefix = if info.critical_overdue > 0 { "🔥 " } else { "" };
+            let disp = format!("{}{}{} {}", fire_prefix, short, trail, info.total);
             let label_col = if hovered { self.theme.text_primary } else { self.theme.text_secondary };
 
             // If there are overdue items, shift label left and draw a red ⚠N badge on right
