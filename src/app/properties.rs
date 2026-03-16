@@ -1492,6 +1492,60 @@ impl FlowchartApp {
         });
         ui.add_space(8.0);
 
+        // Support Actions: bulk section / assignee / due date
+        self.draw_section_header(ui, "Support Actions");
+        ui.add_space(4.0);
+
+        // Batch section assignment
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Section:").size(10.5).color(self.theme.text_dim));
+            let stages = ["Intake", "Triage", "In Progress", "Resolved", "Escalated", "Closed"];
+            for stage in &stages {
+                if ui.small_button(*stage).clicked() {
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.section_name = stage.to_string();
+                        }
+                    }
+                    self.history.push(&self.document);
+                }
+            }
+            if ui.small_button("✕").on_hover_text("Clear section").clicked() {
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) { n.section_name.clear(); }
+                }
+                self.history.push(&self.document);
+            }
+        });
+        ui.add_space(4.0);
+
+        // Batch priority
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Priority:").size(10.5).color(self.theme.text_dim));
+            let pris: &[(Option<crate::model::NodeTag>, [u8;4], &str)] = &[
+                (Some(crate::model::NodeTag::Critical), [243, 139, 168, 255], "P1"),
+                (Some(crate::model::NodeTag::Warning),  [250, 179, 135, 255], "P2"),
+                (Some(crate::model::NodeTag::Info),     [137, 180, 250, 255], "P3"),
+                (None,                                  [166, 227, 161, 255], "P4"),
+            ];
+            for (tag, fill, label) in pris {
+                let col = to_color32(*fill);
+                if ui.add(egui::Button::new(egui::RichText::new(*label).size(10.0).color(egui::Color32::from_rgb(20,20,30))).fill(col)).clicked() {
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.tag = *tag;
+                            n.style.fill_color = *fill;
+                        }
+                    }
+                    self.history.push(&self.document);
+                }
+            }
+        });
+        ui.add_space(8.0);
+
         self.draw_section_header(ui, "Batch Color");
         ui.add_space(4.0);
         let palette: &[([u8;4], &str)] = &[
