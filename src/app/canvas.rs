@@ -643,6 +643,18 @@ impl FlowchartApp {
                     if q == "glow" || q == "highlighted" {
                         return n.style.glow || n.highlight;
                     }
+                    if let Some(pri_q) = q.strip_prefix("priority:").or_else(|| q.strip_prefix("p:")) {
+                        return match pri_q.trim() {
+                            "p1" | "1" | "critical" => matches!(n.tag, Some(crate::model::NodeTag::Critical)),
+                            "p2" | "2" | "high"     => matches!(n.tag, Some(crate::model::NodeTag::Warning)),
+                            "p3" | "3" | "medium"   => matches!(n.tag, Some(crate::model::NodeTag::Info)),
+                            "p4" | "4" | "low"      => n.tag.is_none(),
+                            _                       => false,
+                        };
+                    }
+                    if q == "escalated" {
+                        return matches!(n.tag, Some(crate::model::NodeTag::Critical)) && n.style.glow;
+                    }
                     if q == "linked" {
                         return self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id);
                     }
@@ -2163,7 +2175,7 @@ impl FlowchartApp {
                 "ICE Score = Impact × Confidence × Ease → run highest first",
                 "Double Diamond · Hypothesis Canvas · Assumption Map — ⌘K",
                 "⌘⇧E = insert Experiment Card (Hypothesis → Test → Result → Learning)",
-                "⌘F search: try status:done · section:Hypotheses · orphan · linked",
+                "⌘F search: status:done · section:Triage · priority:p1 · orphan · linked",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
@@ -3860,7 +3872,7 @@ impl FlowchartApp {
         );
         let resp = ui2.add(
             egui::TextEdit::singleline(&mut self.search_query)
-                .hint_text("Search… or status:done / section:name / linked / orphan")
+                .hint_text("Search… status:done · section:name · priority:p1 · linked · orphan")
                 .desired_width(w - 60.0)
                 .font(egui::FontId::proportional(14.0))
                 .frame(false),
