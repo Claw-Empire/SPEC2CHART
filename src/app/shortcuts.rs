@@ -1686,6 +1686,70 @@ impl FlowchartApp {
             }
         }
 
+        // ] / [ = promote / demote selected nodes to next / previous kanban section
+        if !any_text_focused && !self.selection.node_ids.is_empty() {
+            let fwd = ctx.input(|i| i.key_pressed(Key::CloseBracket) && i.modifiers.is_none());
+            let bwd = ctx.input(|i| i.key_pressed(Key::OpenBracket)  && i.modifiers.is_none());
+            if fwd || bwd {
+                // Build ordered section list by first occurrence in document
+                let mut seen_sections: Vec<String> = Vec::new();
+                for n in &self.document.nodes {
+                    if !n.section_name.is_empty() && !seen_sections.contains(&n.section_name) {
+                        seen_sections.push(n.section_name.clone());
+                    }
+                }
+                if seen_sections.len() >= 2 {
+                    // Find the most-common section among selected nodes
+                    let sel_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                    for id in &sel_ids {
+                        if let Some(n) = self.document.find_node(id) {
+                            if !n.section_name.is_empty() {
+                                *counts.entry(n.section_name.clone()).or_default() += 1;
+                            }
+                        }
+                    }
+                    // Pick the dominant section (most nodes belong to), fallback to first in order
+                    let current = seen_sections.iter()
+                        .max_by_key(|s| counts.get(*s).copied().unwrap_or(0))
+                        .cloned()
+                        .unwrap_or_else(|| seen_sections[0].clone());
+                    let idx = seen_sections.iter().position(|s| s == &current).unwrap_or(0);
+                    let new_idx = if fwd {
+                        (idx + 1).min(seen_sections.len() - 1)
+                    } else {
+                        idx.saturating_sub(1)
+                    };
+                    if new_idx != idx {
+                        let new_section = seen_sections[new_idx].clone();
+                        for id in &sel_ids {
+                            if let Some(n) = self.document.find_node_mut(id) {
+                                n.section_name = new_section.clone();
+                            }
+                        }
+                        self.history.push(&self.document);
+                        let count = sel_ids.len();
+                        self.status_message = Some((
+                            if count == 1 { format!("→ {}", new_section) }
+                            else { format!("→ {} ({} nodes)", new_section, count) },
+                            std::time::Instant::now(),
+                        ));
+                        // Trigger animated re-layout (same as Cmd+L)
+                        let mut doc_clone = self.document.clone();
+                        for node in doc_clone.nodes.iter_mut() {
+                            if !node.pinned { node.position = [0.0, 0.0]; }
+                        }
+                        crate::specgraph::layout::auto_layout(&mut doc_clone);
+                        self.layout_targets.clear();
+                        for node in &doc_clone.nodes {
+                            self.layout_targets.insert(node.id, node.position);
+                        }
+                        self.pending_fit = true;
+                    }
+                }
+            }
+        }
+
         // Enter = chain: create a new node connected in the layout direction
         // Shift+Enter = chain in the orthogonal direction
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
