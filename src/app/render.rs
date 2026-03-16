@@ -502,6 +502,42 @@ impl FlowchartApp {
             }
         }
 
+        // Assignee avatar: small filled circle with initials in top-right when sublabel has 👤
+        if !node.is_frame && self.viewport.zoom > 0.5 {
+            let assignee_opt: Option<&str> = node.sublabel.split('\n')
+                .find_map(|line| line.strip_prefix("👤 ").map(|s| s.trim()));
+            if let Some(name) = assignee_opt {
+                let r = (8.0 * self.viewport.zoom.sqrt()).clamp(6.0, 13.0);
+                let cx = screen_rect.max.x - r - 3.0;
+                let cy = screen_rect.min.y + r + 3.0;
+                // Deterministic color from name hash
+                let hash: u32 = name.bytes().fold(2166136261u32, |acc, b| acc.wrapping_mul(16777619).wrapping_add(b as u32));
+                let hue_idx = (hash % 6) as usize;
+                let avatar_cols: [[u8; 3]; 6] = [
+                    [137, 180, 250], [166, 227, 161], [203, 166, 247],
+                    [250, 179, 135], [249, 226, 175], [243, 139, 168],
+                ];
+                let [ar, ag, ab] = avatar_cols[hue_idx];
+                let center = egui::pos2(cx, cy);
+                painter.circle_filled(center, r, egui::Color32::from_rgb(ar, ag, ab));
+                painter.circle_stroke(center, r, egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60)));
+                // Initials: up to 2 characters
+                let initials: String = name.split_whitespace()
+                    .filter_map(|word| word.chars().next())
+                    .take(2)
+                    .collect::<String>()
+                    .to_uppercase();
+                let init_font_sz = (r * 0.9).clamp(5.5, 11.0);
+                let text_col = egui::Color32::from_rgb(
+                    (ar as i32 - 80).clamp(0, 60) as u8,
+                    (ag as i32 - 80).clamp(0, 60) as u8,
+                    (ab as i32 - 80).clamp(0, 60) as u8,
+                );
+                painter.text(center, Align2::CENTER_CENTER, &initials,
+                    FontId::proportional(init_font_sz), text_col);
+            }
+        }
+
         // SLA time-budget bar: thin stripe across node bottom showing elapsed % of created→due window
         if !node.created_date.is_empty() && !node.is_frame && self.viewport.zoom > 0.45 {
             let due_str_opt: Option<&str> = node.sublabel.split('\n')
