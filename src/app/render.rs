@@ -406,6 +406,41 @@ impl FlowchartApp {
             }
         }
 
+        // SLA countdown badge: small pill inside top-right corner when due date is today or soon
+        if self.viewport.zoom > 0.55 {
+            let due_date_opt: Option<&str> = node.sublabel.split('\n')
+                .find_map(|line| line.strip_prefix("📅 "));
+            if let Some(due_str) = due_date_opt {
+                let today = "2026-03-16";
+                // Simple day delta (works for ISO dates within the same year/decade)
+                let days_remaining = iso_days_remaining(due_str.trim(), today);
+                let (badge_text, text_col, bg_col): (&str, egui::Color32, egui::Color32) =
+                    if days_remaining < 0 {
+                        ("OVERDUE", egui::Color32::WHITE, egui::Color32::from_rgb(185, 50, 70))
+                    } else if days_remaining == 0 {
+                        ("TODAY", egui::Color32::from_rgb(30, 20, 10), egui::Color32::from_rgb(250, 179, 135))
+                    } else if days_remaining <= 3 {
+                        let s: &'static str = match days_remaining { 1 => "1d", 2 => "2d", _ => "3d" };
+                        (s, egui::Color32::from_rgb(30, 20, 10), egui::Color32::from_rgb(249, 226, 175))
+                    } else if days_remaining <= 7 {
+                        let s: &'static str = match days_remaining { 4 => "4d", 5 => "5d", 6 => "6d", _ => "7d" };
+                        (s, egui::Color32::from_rgb(200, 220, 255), egui::Color32::from_rgba_unmultiplied(60, 80, 120, 180))
+                    } else {
+                        ("", egui::Color32::TRANSPARENT, egui::Color32::TRANSPARENT)
+                    };
+                if !badge_text.is_empty() {
+                    let font_sz = (9.0 * self.viewport.zoom.sqrt()).clamp(7.5, 12.0);
+                    let badge_rect = Rect::from_min_size(
+                        Pos2::new(screen_rect.max.x - badge_text.len() as f32 * font_sz * 0.58 - 6.0, screen_rect.min.y + 2.0),
+                        Vec2::new(badge_text.len() as f32 * font_sz * 0.58 + 4.0, font_sz + 3.0),
+                    );
+                    painter.rect_filled(badge_rect, CornerRadius::same(3), bg_col);
+                    painter.text(badge_rect.center(), Align2::CENTER_CENTER, badge_text,
+                        FontId::proportional(font_sz), text_col);
+                }
+            }
+        }
+
         // Description indicator (small dot in bottom-right when node has a description)
         if self.viewport.zoom > 0.4 {
             let has_desc = match &node.kind {
@@ -2264,5 +2299,29 @@ impl FlowchartApp {
                 StrokeKind::Outside,
             );
         }
+    }
+}
+
+/// Returns days remaining until `due_date` from `today` (ISO YYYY-MM-DD strings).
+/// Negative = overdue, 0 = today, positive = days left.
+fn iso_days_remaining(due_date: &str, today: &str) -> i32 {
+    fn to_days(s: &str) -> Option<i32> {
+        let parts: Vec<i32> = s.splitn(3, '-').filter_map(|p| p.parse().ok()).collect();
+        if parts.len() < 3 { return None; }
+        let (y, m, d) = (parts[0], parts[1], parts[2]);
+        // Days since 0001-01-01 (simple approximation; accurate for dates 1900–2100)
+        let days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let mut total = y * 365 + (y / 4) - (y / 100) + (y / 400);
+        for mo in 1..m {
+            total += days_in_month[mo as usize];
+            if mo == 2 && leap { total += 1; }
+        }
+        total += d;
+        Some(total)
+    }
+    match (to_days(due_date), to_days(today)) {
+        (Some(d), Some(t)) => d - t,
+        _ => i32::MAX, // unknown dates treated as far future
     }
 }
