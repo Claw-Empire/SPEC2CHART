@@ -2151,7 +2151,7 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (35 diagrams: arch · design thinking · support ops)",
+                "⌘K → Templates  (37 diagrams: arch · design thinking · support ops)",
                 "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",
@@ -2880,10 +2880,16 @@ impl FlowchartApp {
                             child.progress = 0.0;
                             let child_id = child.id;
                             self.document.nodes.push(child);
-                            // Create edge src → child
+                            // Create edge src → child, respecting layout direction
+                            let is_tb = matches!(self.document.layout_dir.as_str(), "TB" | "BT");
+                            let (src_side, tgt_side) = if is_tb {
+                                (crate::model::PortSide::Bottom, crate::model::PortSide::Top)
+                            } else {
+                                (crate::model::PortSide::Right, crate::model::PortSide::Left)
+                            };
                             let edge = Edge::new(
-                                Port { node_id: src_id, side: crate::model::PortSide::Right },
-                                Port { node_id: child_id, side: crate::model::PortSide::Left },
+                                Port { node_id: src_id, side: src_side },
+                                Port { node_id: child_id, side: tgt_side },
                             );
                             self.document.edges.push(edge);
                             self.selection.clear();

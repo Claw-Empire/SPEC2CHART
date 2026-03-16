@@ -1411,11 +1411,14 @@ impl FlowchartApp {
             }
         }
 
-        // Enter = chain: create a new node connected to the right of the selected node
-        // Shift+Enter = chain downward
+        // Enter = chain: create a new node connected in the layout direction
+        // Shift+Enter = chain in the orthogonal direction
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
             let shift = ctx.input(|i| i.modifiers.shift);
-            self.chain_create_node(shift);
+            // Default direction follows the document's layout_dir (TB/BT = downward; LR/RL = rightward)
+            let is_tb = matches!(self.document.layout_dir.as_str(), "TB" | "BT");
+            let downward = if shift { !is_tb } else { is_tb };
+            self.chain_create_node(downward);
         }
     }
 
