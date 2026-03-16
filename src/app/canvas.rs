@@ -814,6 +814,42 @@ impl FlowchartApp {
             rest.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             frames.into_iter().chain(rest).map(|(id, _)| id).collect()
         };
+
+        // Hover-connection highlight: draw soft rings on nodes connected to the hovered node
+        {
+            let hover_node_id: Option<NodeId> = hover_pos.and_then(|hp| {
+                self.document.nodes.iter().rev().find(|n| {
+                    let sr = Rect::from_min_size(self.viewport.canvas_to_screen(n.pos()), n.size_vec() * self.viewport.zoom);
+                    sr.contains(hp)
+                }).map(|n| n.id)
+            });
+            if let Some(hid) = hover_node_id {
+                let connected: std::collections::HashSet<NodeId> = self.document.edges.iter()
+                    .filter_map(|e| {
+                        if e.source.node_id == hid { Some(e.target.node_id) }
+                        else if e.target.node_id == hid { Some(e.source.node_id) }
+                        else { None }
+                    })
+                    .collect();
+                if !connected.is_empty() {
+                    for node in &self.document.nodes {
+                        if !connected.contains(&node.id) { continue; }
+                        let sr = Rect::from_min_size(
+                            self.viewport.canvas_to_screen(node.pos()),
+                            node.size_vec() * self.viewport.zoom,
+                        );
+                        if !sr.expand(20.0).intersects(canvas_rect) { continue; }
+                        painter.rect_stroke(
+                            sr.expand(3.5),
+                            CornerRadius::same(9),
+                            Stroke::new(1.5, Color32::from_rgba_unmultiplied(150, 190, 255, 110)),
+                            StrokeKind::Outside,
+                        );
+                    }
+                }
+            }
+        }
+
         for node_id in &node_ids {
             let Some(node) = self.document.find_node(node_id) else { continue };
             let screen_pos = self.viewport.canvas_to_screen(node.pos());
