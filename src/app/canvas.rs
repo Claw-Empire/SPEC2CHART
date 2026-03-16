@@ -4144,6 +4144,17 @@ impl FlowchartApp {
                 .collect()
         };
 
+        // Show a "create" row when query is non-empty and is not a smart-filter prefix
+        let is_filter_query = !q.is_empty() && (
+            q.starts_with("status:") || q.starts_with("priority:") || q.starts_with("p:") ||
+            q.starts_with("section:") || q.starts_with("§") || q.starts_with("assigned:") ||
+            q.starts_with("owner:") || q.starts_with("url:") || q.starts_with("due:") ||
+            q.starts_with("icon:") || q.starts_with("assigned:") ||
+            matches!(q.as_str(), "overdue" | "upcoming" | "has-url" | "no-url" | "has-due"
+                | "has-comment" | "glow" | "sla-breach" | "past-due" | "escalated" | "isolated")
+        );
+        let show_create_row = !q.is_empty() && results.is_empty() && !is_filter_query;
+
         // Clamp cursor
         if !results.is_empty() && self.search_cursor >= results.len() {
             self.search_cursor = results.len() - 1;
@@ -4152,7 +4163,8 @@ impl FlowchartApp {
         let w = 320.0_f32;
         let input_h = 38.0_f32;
         let row_h = 30.0_f32;
-        let results_h = results.len() as f32 * row_h;
+        let create_row_h = if show_create_row { 32.0 } else { 0.0 };
+        let results_h = results.len() as f32 * row_h + create_row_h;
         let total_h = input_h + results_h;
 
         let top = canvas_rect.min.y + 50.0;
@@ -4335,6 +4347,65 @@ impl FlowchartApp {
                 self.search_cursor = 0;
             }
             if is_hov { self.search_cursor = i; }
+        }
+
+        // "Create" row — shown when no results and query is a plain string
+        if show_create_row {
+            let create_y = top + input_h; // immediately below input
+            let create_rect = Rect::from_min_size(
+                Pos2::new(overlay_rect.min.x, create_y),
+                Vec2::new(w, create_row_h),
+            );
+            let create_resp = ui.allocate_rect(create_rect, egui::Sense::click());
+            let hov = create_resp.hovered();
+            let bg = if hov { Color32::from_rgba_unmultiplied(30, 160, 60, 30) }
+                     else   { Color32::from_rgba_unmultiplied(20, 100, 40, 18) };
+            ui.painter().rect_filled(create_rect, CornerRadius::same(0), bg);
+            // Divider at top
+            ui.painter().line_segment(
+                [Pos2::new(overlay_rect.min.x + 12.0, create_y),
+                 Pos2::new(overlay_rect.max.x - 12.0, create_y)],
+                Stroke::new(0.5, self.theme.surface1),
+            );
+            let raw_query = &self.search_query;
+            let short_q: String = raw_query.chars().take(30).collect();
+            let trail = if raw_query.chars().count() > 30 { "…" } else { "" };
+            let create_label = format!("➕ Create \"{}{}\"", short_q, trail);
+            ui.painter().text(
+                Pos2::new(create_rect.min.x + 14.0, create_rect.center().y),
+                Align2::LEFT_CENTER, &create_label,
+                FontId::proportional(12.0),
+                if hov { Color32::from_rgb(120, 210, 130) } else { Color32::from_rgba_unmultiplied(100, 180, 110, 180) },
+            );
+            if hov {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+
+            if create_resp.clicked() {
+                // Create a new node at canvas center with the search text as label
+                use crate::model::{Node, NodeKind, NodeShape};
+                let canvas_center = self.viewport.screen_to_canvas(canvas_rect.center());
+                let raw_q = self.search_query.clone();
+                let canvas_pos = egui::Pos2::new(canvas_center[0], canvas_center[1]);
+                let mut new_node = Node::new(NodeShape::Rectangle, canvas_pos);
+                match &mut new_node.kind {
+                    NodeKind::Shape { label, .. } => { *label = raw_q.clone(); }
+                    _ => {}
+                }
+                let new_id = new_node.id;
+                self.document.nodes.push(new_node);
+                self.selection.clear();
+                self.selection.select_node(new_id);
+                self.zoom_to_selection();
+                self.history.push(&self.document);
+                self.show_search = false;
+                self.search_query.clear();
+                self.search_cursor = 0;
+                self.status_message = Some((
+                    format!("Created \"{}\"", raw_q.chars().take(24).collect::<String>()),
+                    std::time::Instant::now(),
+                ));
+            }
         }
     }
 
