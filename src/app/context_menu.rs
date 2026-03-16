@@ -513,6 +513,45 @@ impl FlowchartApp {
             }
         }
 
+        // URL / ticket link
+        {
+            let cur_url = self.document.find_node(&node_id).map(|n| n.url.clone()).unwrap_or_default();
+            let url_label = if cur_url.is_empty() { "🔗 Set URL / Ticket link…" } else { "🔗 Change URL…" };
+            ui.menu_button(url_label, |ui| {
+                let common_templates: &[(&str, &str)] = &[
+                    ("Jira",          "https://jira.example.com/browse/TICKET-"),
+                    ("GitHub Issue",  "https://github.com/org/repo/issues/"),
+                    ("Linear",        "https://linear.app/team/issue/"),
+                    ("Notion page",   "https://notion.so/"),
+                    ("Confluence",    "https://confluence.example.com/display/SPACE/"),
+                    ("ServiceNow",    "https://instance.service-now.com/nav_to.do?uri=incident.do?sys_id="),
+                    ("Zendesk",       "https://yourteam.zendesk.com/agent/tickets/"),
+                    ("PagerDuty",     "https://yourteam.pagerduty.com/incidents/"),
+                ];
+                if !cur_url.is_empty() {
+                    ui.label(egui::RichText::new(
+                        if cur_url.len() > 40 { format!("{}…", &cur_url[..40]) } else { cur_url.clone() }
+                    ).size(9.5).weak());
+                    if ui.button("✕ Clear URL").clicked() {
+                        if let Some(n) = self.document.find_node_mut(&node_id) { n.url.clear(); }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                }
+                ui.label(egui::RichText::new("Paste a URL or pick template:").size(9.5).weak());
+                for (name, url_base) in common_templates {
+                    if ui.button(*name).clicked() {
+                        if let Some(n) = self.document.find_node_mut(&node_id) {
+                            n.url = url_base.to_string();
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                }
+            });
+        }
+
         ui.separator();
         if ui.button("🗑 Delete").clicked() {
             self.document.remove_node(&node_id);

@@ -2488,6 +2488,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             // Escalation shorthand: escalated → Critical badge + glow (needs immediate attention)
             if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
             node_glow = true;
+        } else if tag == "urgent" || tag == "critical-now" || tag == "hot" {
+            // Urgent shorthand: P1 + glow + red fill (combines priority + escalation)
+            if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
+            if fill_color.is_none() { fill_color = Some([243, 139, 168, 255]); }
+            node_glow = true;
         } else if tag == "glow" || tag == "neon" || tag == "glow-node" {
             node_glow = true;
         } else if tag.starts_with("shape:") || tag.starts_with("type:") || tag.starts_with("kind:") {

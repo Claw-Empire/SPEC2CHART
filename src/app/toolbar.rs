@@ -686,7 +686,7 @@ impl FlowchartApp {
                             ("Design sections", "## Ideas / ## Causes / ## Effects / ## Goals / ## Risks"),
                             ("Status tags", "{critical} {warning} {ok} {info}  — badge only"),
                             ("Status+progress", "{done} {wip} {review} {blocked} {todo}  — badge+progress"),
-                            ("Support priority", "{p1} {p2} {p3} {p4}  — badge+fill  ·  {escalated}  — Critical+glow"),
+                            ("Support priority", "{p1} {p2} {p3} {p4}  — badge+fill  ·  {escalated}  — Critical+glow  ·  {urgent}  — P1+red+glow"),
                             ("Support severity", "{sev1} {sev2} {sev3}  — same as p1/p2/p3 (SEV naming)"),
                             ("Support owner", "{assigned:Alice}  /  {owner:Bob}  →  sublabel with 👤 prefix"),
                             ("Support deadline", "{due:2026-03-20}  /  {deadline:Q2}  →  sublabel with 📅 prefix"),
