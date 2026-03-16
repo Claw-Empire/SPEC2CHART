@@ -2552,3 +2552,8 @@ fn iso_days_remaining(due_date: &str, today: &str) -> i32 {
         _ => i32::MAX, // unknown dates treated as far future
     }
 }
+
+/// Public wrapper for `iso_days_remaining` — used by canvas tooltip and section navigator.
+pub(crate) fn iso_days_remaining_pub(due_date: &str, today: &str) -> i32 {
+    iso_days_remaining(due_date, today)
+}

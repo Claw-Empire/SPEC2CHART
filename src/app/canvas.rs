@@ -2061,6 +2061,46 @@ impl FlowchartApp {
             if let Some(tag) = tag_label {
                 rows.push((format!("Tag: {}", tag), self.theme.text_dim));
             }
+            // SLA info: show created + due date analysis
+            {
+                let today = super::render::today_iso();
+                let due_str_opt: Option<&str> = node.sublabel.split('\n')
+                    .find_map(|line| line.strip_prefix("📅 "));
+                if let Some(due_str) = due_str_opt {
+                    let days_rem = super::render::iso_days_remaining_pub(due_str.trim(), &today);
+                    let (sla_text, sla_col) = if days_rem < 0 {
+                        (format!("⏰ OVERDUE by {} day{}", -days_rem, if days_rem == -1 { "" } else { "s" }),
+                         Color32::from_rgb(243, 139, 168))
+                    } else if days_rem == 0 {
+                        ("⏰ Due TODAY".to_string(), Color32::from_rgb(250, 179, 135))
+                    } else if days_rem == 1 {
+                        ("⏰ Due TOMORROW".to_string(), Color32::from_rgb(249, 226, 175))
+                    } else {
+                        (format!("⏰ Due in {} days", days_rem), self.theme.text_dim)
+                    };
+                    rows.push((sla_text, sla_col));
+                    // SLA % if created date is set
+                    if !node.created_date.is_empty() {
+                        let total = -super::render::iso_days_remaining_pub(&node.created_date, due_str.trim());
+                        let elapsed = -super::render::iso_days_remaining_pub(&node.created_date, &today);
+                        if total > 0 && elapsed >= 0 {
+                            let pct = ((elapsed as f32 / total as f32) * 100.0).clamp(0.0, 999.0) as u32;
+                            let bar_filled = ((elapsed as f32 / total as f32).clamp(0.0, 1.0) * 10.0) as usize;
+                            let bar = format!("{}{}", "█".repeat(bar_filled), "░".repeat(10usize.saturating_sub(bar_filled)));
+                            let sla_pct_col = if pct < 50 { Color32::from_rgb(100, 220, 60) }
+                                else if pct < 80 { Color32::from_rgb(220, 165, 30) }
+                                else { Color32::from_rgb(220, 60, 50) };
+                            rows.push((format!("SLA {}% {}", pct, bar), sla_pct_col));
+                        }
+                    }
+                }
+                if !node.created_date.is_empty() {
+                    let age = -super::render::iso_days_remaining_pub(&node.created_date, &today);
+                    if age >= 0 {
+                        rows.push((format!("📅 opened {} ({}d ago)", node.created_date, age), self.theme.text_dim.gamma_multiply(0.75)));
+                    }
+                }
+            }
             if !node.comment.is_empty() {
                 rows.push((format!("💬 {}", node.comment.chars().take(80).collect::<String>()), self.theme.text_dim.gamma_multiply(0.8)));
             }
