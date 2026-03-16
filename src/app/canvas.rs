@@ -2925,12 +2925,22 @@ impl FlowchartApp {
             ("🗑", "Delete"),
         ];
         let btn_w = 28.0;
-        // For single-node selection, include a status badge at the end
+        // For single-node selection, include status badge + section pill at the end
         let show_status_badge = self.selection.node_ids.len() == 1;
         let status_badge_w = if show_status_badge { 38.0 } else { 0.0 };
         let status_sep_w   = if show_status_badge { 6.0  } else { 0.0 };
+        // Section pill width: depends on section name length (capped at 12 chars)
+        let section_pill_w: f32 = if show_status_badge {
+            let sec = self.selection.node_ids.iter().next()
+                .and_then(|id| self.document.find_node(id))
+                .map(|n| n.section_name.clone())
+                .unwrap_or_default();
+            let chars = sec.chars().count().min(12);
+            if chars == 0 { 32.0 } else { chars as f32 * 6.5 + 18.0 }
+        } else { 0.0 };
+        let section_sep_w = if show_status_badge { 4.0 } else { 0.0 };
         let bar_w = actions.len() as f32 * btn_w + (actions.len() - 1) as f32 * 2.0 + 8.0
-            + status_badge_w + status_sep_w;
+            + status_badge_w + status_sep_w + section_pill_w + section_sep_w;
         let bar_rect = Rect::from_center_size(
             egui::Pos2::new(bar_center_x, bar_y + bar_h / 2.0),
             egui::Vec2::new(bar_w, bar_h),
@@ -2989,6 +2999,41 @@ impl FlowchartApp {
                     egui::RichText::new(badge_label).size(12.0).color(badge_color)
                 ).frame(false)).on_hover_text("Click to cycle status: None → Todo → WIP → Done → Blocked");
                 if resp.clicked() { status_clicked = true; }
+                x += status_badge_w;
+            }
+        }
+
+        // Section pill: shows current section, click cycles support workflow stages
+        let mut section_clicked = false;
+        if show_status_badge {
+            if let Some(&sel_id) = self.selection.node_ids.iter().next() {
+                let cur_section = self.document.find_node(&sel_id)
+                    .map(|n| n.section_name.clone())
+                    .unwrap_or_default();
+
+                // Separator
+                let sep_x = x + 1.0;
+                ui.painter().rect_filled(
+                    Rect::from_min_size(egui::Pos2::new(sep_x, bar_rect.min.y + 4.0), egui::Vec2::new(1.0, bar_h - 8.0)),
+                    egui::CornerRadius::ZERO, self.theme.surface1,
+                );
+                x += section_sep_w;
+
+                let sec_label = if cur_section.is_empty() {
+                    "§".to_string()
+                } else {
+                    let short: String = cur_section.chars().take(12).collect();
+                    format!("§ {}", short)
+                };
+                let sec_col = if cur_section.is_empty() { self.theme.text_dim } else { self.theme.accent.gamma_multiply(0.8) };
+                let pill_rect = Rect::from_min_size(
+                    egui::Pos2::new(x, bar_rect.min.y + 2.0),
+                    egui::Vec2::new(section_pill_w - 2.0, bar_h - 4.0),
+                );
+                let resp = ui.put(pill_rect, egui::Button::new(
+                    egui::RichText::new(&sec_label).size(11.0).color(sec_col)
+                ).frame(false)).on_hover_text("Click to cycle section: Intake → Triage → In Progress → Resolved → Escalated → Closed → none");
+                if resp.clicked() { section_clicked = true; }
             }
         }
 
@@ -3117,6 +3162,32 @@ impl FlowchartApp {
                 let msg = celebration.unwrap_or_else(|| "Status updated".to_string());
                 self.status_message = Some((msg, std::time::Instant::now()));
                 self.history.push(&self.document);
+            }
+        }
+
+        // Cycle section on section pill click
+        if section_clicked {
+            if let Some(&sel_id) = self.selection.node_ids.iter().next() {
+                let support_stages = ["Intake", "Triage", "In Progress", "Resolved", "Escalated", "Closed"];
+                if let Some(node) = self.document.find_node_mut(&sel_id) {
+                    let cur = &node.section_name;
+                    let next = if cur.is_empty() {
+                        "Intake".to_string()
+                    } else if let Some(idx) = support_stages.iter().position(|&s| s == cur.as_str()) {
+                        let next_idx = (idx + 1) % (support_stages.len() + 1);
+                        if next_idx >= support_stages.len() { String::new() } else { support_stages[next_idx].to_string() }
+                    } else {
+                        String::new() // unknown section → clear
+                    };
+                    let msg = if next.is_empty() {
+                        "Section cleared".to_string()
+                    } else {
+                        format!("→ {}", next)
+                    };
+                    node.section_name = next;
+                    self.status_message = Some((msg, std::time::Instant::now()));
+                    self.history.push(&self.document);
+                }
             }
         }
 
