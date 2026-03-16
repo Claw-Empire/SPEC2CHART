@@ -162,6 +162,42 @@ impl FlowchartApp {
             self.focus_label_edit = true;
             ui.close_menu();
         }
+        // Copy node label to clipboard
+        if let Some(label) = self.document.find_node(&node_id).and_then(|n| match &n.kind {
+            NodeKind::Shape { label, .. } => Some(label.clone()),
+            NodeKind::StickyNote { text, .. } => Some(text.clone()),
+            _ => None,
+        }) {
+            if ui.button("📋 Copy label").clicked() {
+                ui.ctx().copy_text(label);
+                self.status_message = Some(("Label copied to clipboard".to_string(), std::time::Instant::now()));
+                ui.close_menu();
+            }
+        }
+        // Spawn child node connected from this node
+        if ui.button("→ Spawn child node").clicked() {
+            let is_tb = matches!(self.document.layout_dir.as_str(), "TB" | "BT");
+            if let Some(src) = self.document.find_node(&node_id).cloned() {
+                let (dx, dy) = if is_tb { (0.0_f32, src.size[1] + 80.0) } else { (src.size[0] + 100.0, 0.0_f32) };
+                let new_pos = egui::Pos2::new(src.position[0] + dx, src.position[1] + dy);
+                let shape = match &src.kind { NodeKind::Shape { shape, .. } => *shape, _ => NodeShape::RoundedRect };
+                let mut child = Node::new(shape, new_pos);
+                child.size = src.size;
+                child.style = src.style.clone();
+                child.section_name = src.section_name.clone();
+                child.z_offset = src.z_offset;
+                child.tag = None; child.progress = 0.0;
+                let child_id = child.id;
+                self.document.nodes.push(child);
+                let (ss, ts) = if is_tb { (PortSide::Bottom, PortSide::Top) } else { (PortSide::Right, PortSide::Left) };
+                self.document.edges.push(Edge::new(Port { node_id, side: ss }, Port { node_id: child_id, side: ts }));
+                self.selection.clear();
+                self.selection.select_node(child_id);
+                self.focus_label_edit = true;
+                self.history.push(&self.document);
+            }
+            ui.close_menu();
+        }
         if ui.button("⎘ Duplicate").clicked() {
             if let Some(node) = self.document.find_node(&node_id).cloned() {
                 let mut copy = node;
