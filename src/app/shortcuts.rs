@@ -1797,6 +1797,47 @@ impl FlowchartApp {
             ));
         }
 
+        // Ctrl+1..4 = jump selected tickets to section N (direct column assignment in kanban)
+        // Uses actual Control key (not Cmd) so it's free on Mac
+        if !any_text_focused && !self.selection.node_ids.is_empty() {
+            let ctrl_only = egui::Modifiers { ctrl: true, ..egui::Modifiers::NONE };
+            let sec_keys = [Key::Num1, Key::Num2, Key::Num3, Key::Num4];
+            let pressed_idx = sec_keys.iter().position(|&k| {
+                ctx.input(|i| i.key_pressed(k) && i.modifiers.matches_exact(ctrl_only))
+            });
+            if let Some(idx) = pressed_idx {
+                // Build section list in first-occurrence order
+                let mut seen: Vec<String> = Vec::new();
+                for n in &self.document.nodes {
+                    if !n.section_name.is_empty() && !seen.contains(&n.section_name) {
+                        seen.push(n.section_name.clone());
+                    }
+                }
+                if let Some(target_sec) = seen.get(idx) {
+                    let target_sec = target_sec.clone();
+                    let sel_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                    let count = sel_ids.len();
+                    for id in &sel_ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.section_name = target_sec.clone();
+                        }
+                    }
+                    self.history.push(&self.document);
+                    // Trigger animated re-layout
+                    let mut doc_clone = self.document.clone();
+                    for n in doc_clone.nodes.iter_mut() { if !n.pinned { n.position = [0.0, 0.0]; } }
+                    crate::specgraph::layout::auto_layout(&mut doc_clone);
+                    self.layout_targets.clear();
+                    for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
+                    self.status_message = Some((
+                        if count == 1 { format!("→ {}", target_sec) }
+                        else { format!("→ {} ({} tickets)", target_sec, count) },
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+        }
+
         // Enter = chain: create a new node connected in the layout direction
         // Shift+Enter = chain in the orthogonal direction
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
