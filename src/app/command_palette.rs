@@ -89,6 +89,7 @@ enum PaletteAction {
     LoadSupportHealthDashboardTemplate,
     LoadPostmortemTemplate,
     LoadSupportSLAMatrixTemplate,
+    LoadSupportQueueTemplate,
 }
 
 impl FlowchartApp {
@@ -940,6 +941,13 @@ impl FlowchartApp {
                     Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
                 }
             }
+            PaletteAction::LoadSupportQueueTemplate => {
+                let spec = include_str!("../../assets/examples/support_queue.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Queue kanban loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
         }
     }
 }
@@ -1022,6 +1030,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "📈",  label: "Load Support Health Dashboard (volume · SLA · CSAT · escalations)", category: "Templates", action: PaletteAction::LoadSupportHealthDashboardTemplate },
         PaletteEntry { icon: "📋",  label: "Load Incident Postmortem (blameless retro: timeline · root cause · action items)", category: "Templates", action: PaletteAction::LoadPostmortemTemplate },
         PaletteEntry { icon: "⏱",  label: "Load Support SLA Matrix (P1/P2/P3/P4 response · resolve · escalation targets)", category: "Templates", action: PaletteAction::LoadSupportSLAMatrixTemplate },
+        PaletteEntry { icon: "📋",  label: "Load Support Queue kanban (Intake → Triage → In Progress → Resolved)", category: "Templates", action: PaletteAction::LoadSupportQueueTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
