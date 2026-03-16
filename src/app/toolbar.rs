@@ -600,6 +600,7 @@ impl FlowchartApp {
                     ("Voice of Customer", include_str!("../../assets/examples/voice_of_customer.spec")),
                     ("Customer Onboarding", include_str!("../../assets/examples/customer_onboarding.spec")),
                     ("Health Dashboard", include_str!("../../assets/examples/support_health_dashboard.spec")),
+                    ("Postmortem", include_str!("../../assets/examples/postmortem.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);

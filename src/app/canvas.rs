@@ -655,6 +655,33 @@ impl FlowchartApp {
                     if q == "escalated" {
                         return matches!(n.tag, Some(crate::model::NodeTag::Critical)) && n.style.glow;
                     }
+                    if q == "overdue" || q == "due:overdue" || q == "past-due" {
+                        // Match nodes with a 📅 sublabel whose date is today or in the past
+                        let today = "2026-03-16"; // current date
+                        if let Some(date_str) = n.sublabel.strip_prefix("📅 ") {
+                            let d = date_str.trim();
+                            return d <= today && d.len() >= 8; // ISO date comparison
+                        }
+                        return false;
+                    }
+                    if q == "upcoming" || q == "due:upcoming" || q == "due:future" {
+                        let today = "2026-03-16";
+                        if let Some(date_str) = n.sublabel.strip_prefix("📅 ") {
+                            let d = date_str.trim();
+                            return d > today;
+                        }
+                        return false;
+                    }
+                    if q == "has-due" || q == "has-deadline" {
+                        return n.sublabel.starts_with("📅");
+                    }
+                    if let Some(due_q) = q.strip_prefix("due:") {
+                        let tgt = due_q.trim().to_lowercase();
+                        if let Some(date_str) = n.sublabel.strip_prefix("📅 ") {
+                            return date_str.trim().to_lowercase().contains(&tgt);
+                        }
+                        return false;
+                    }
                     if let Some(assignee_q) = q.strip_prefix("assigned:").or_else(|| q.strip_prefix("owner:")) {
                         // {assigned:Alice} → sublabel starts with "👤 "
                         let tgt = assignee_q.trim().to_lowercase();
@@ -2174,7 +2201,7 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (38 diagrams: arch · design thinking · support ops)",
+                "⌘K → Templates  (39 diagrams: arch · design thinking · support ops)",
                 "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",

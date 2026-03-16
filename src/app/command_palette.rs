@@ -87,6 +87,7 @@ enum PaletteAction {
     LoadVoiceOfCustomerTemplate,
     LoadCustomerOnboardingTemplate,
     LoadSupportHealthDashboardTemplate,
+    LoadPostmortemTemplate,
 }
 
 impl FlowchartApp {
@@ -924,6 +925,13 @@ impl FlowchartApp {
                     Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
                 }
             }
+            PaletteAction::LoadPostmortemTemplate => {
+                let spec = include_str!("../../assets/examples/postmortem.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Postmortem template loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
         }
     }
 }
@@ -1004,6 +1012,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "📣",  label: "Load Voice of Customer (signals → themes → actions)", category: "Templates", action: PaletteAction::LoadVoiceOfCustomerTemplate },
         PaletteEntry { icon: "🚀",  label: "Load Customer Onboarding Journey (sign-up → aha moment → health)", category: "Templates", action: PaletteAction::LoadCustomerOnboardingTemplate },
         PaletteEntry { icon: "📈",  label: "Load Support Health Dashboard (volume · SLA · CSAT · escalations)", category: "Templates", action: PaletteAction::LoadSupportHealthDashboardTemplate },
+        PaletteEntry { icon: "📋",  label: "Load Incident Postmortem (blameless retro: timeline · root cause · action items)", category: "Templates", action: PaletteAction::LoadPostmortemTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
