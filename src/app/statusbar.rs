@@ -27,6 +27,35 @@ impl FlowchartApp {
         let undo_steps = self.history.undo_steps();
         let redo_steps = self.history.redo_steps();
 
+        // Kanban metrics: computed when document has sections
+        let has_sections = self.document.nodes.iter().any(|n| !n.section_name.is_empty());
+        let kanban_metrics = if has_sections {
+            let today = super::render::today_iso();
+            let mut open = 0u32;
+            let mut overdue = 0u32;
+            let mut done = 0u32;
+            let mut fire = 0u32; // Critical + overdue
+            for n in &self.document.nodes {
+                if n.is_frame { continue; }
+                let is_done = matches!(n.tag, Some(crate::model::NodeTag::Ok)) || n.progress >= 1.0;
+                if is_done { done += 1; continue; }
+                open += 1;
+                let is_overdue = n.sublabel.split('\n').any(|line| {
+                    if let Some(ds) = line.strip_prefix("📅 ") {
+                        let d = ds.trim();
+                        d.len() >= 8 && d < today.as_str()
+                    } else { false }
+                });
+                if is_overdue {
+                    overdue += 1;
+                    if matches!(n.tag, Some(crate::model::NodeTag::Critical)) { fire += 1; }
+                }
+            }
+            Some((open, overdue, done, fire))
+        } else {
+            None
+        };
+
         // Compute canvas cursor position from raw pointer
         let cursor_canvas = ctx.input(|i| i.pointer.hover_pos()).map(|sp| {
             let cp = self.viewport.screen_to_canvas(sp);
@@ -213,6 +242,27 @@ impl FlowchartApp {
                         ui.add_space(8.0);
                         separator(ui, surface1);
                         ui.add_space(8.0);
+                        // Kanban metrics (right-to-left order)
+                        if let Some((open, overdue, done, fire)) = kanban_metrics {
+                            ui.add_space(8.0);
+                            separator(ui, surface1);
+                            ui.add_space(8.0);
+                            // Show from right: done | overdue | fire | open
+                            if done > 0 {
+                                label(ui, &format!("✓{done}"), Color32::from_rgb(166, 227, 161));
+                                ui.add_space(5.0);
+                            }
+                            if fire > 0 {
+                                label(ui, &format!("🔥{fire}"), Color32::from_rgb(255, 120, 30));
+                                ui.add_space(4.0);
+                            }
+                            if overdue > 0 {
+                                label(ui, &format!("⚠{overdue}"), Color32::from_rgb(243, 139, 168));
+                                ui.add_space(4.0);
+                            }
+                            label(ui, &format!("{open} open"), text_secondary);
+                        }
+
                         // Graph totals (right-to-left, so reversed order)
                         label(ui, &format!("{total_edges}e  {total_nodes}n"), text_dim);
                         if tag_active {
