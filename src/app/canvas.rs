@@ -2163,7 +2163,7 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (37 diagrams: arch · design thinking · support ops)",
+                "⌘K → Templates  (38 diagrams: arch · design thinking · support ops)",
                 "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",

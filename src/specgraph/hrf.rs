@@ -2600,6 +2600,15 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag.starts_with("tooltip:") || tag.starts_with("tip:") || tag.starts_with("desc:") {
             let prefix = if tag.starts_with("tooltip:") { 8 } else if tag.starts_with("tip:") { 4 } else { 5 };
             tooltip_text = Some(tag[prefix..].trim().to_string());
+        } else if tag.starts_with("assigned:") || tag.starts_with("owner:") || tag.starts_with("assignee:") {
+            // {assigned:Alice} / {owner:Bob} → sublabel "👤 name"
+            let prefix = if tag.starts_with("assigned:") { 9 }
+                else if tag.starts_with("owner:") { 6 }
+                else { 9 }; // assignee:
+            let name = tag[prefix..].trim();
+            if !name.is_empty() {
+                sublabel_text = Some(format!("👤 {name}"));
+            }
         } else if tag.starts_with("sublabel:") || tag.starts_with("sub:") || tag.starts_with("subtitle:") || tag.starts_with("caption:") {
             let prefix = if tag.starts_with("sublabel:") { 9 }
                 else if tag.starts_with("sub:") { 4 }

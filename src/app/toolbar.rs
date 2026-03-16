@@ -599,6 +599,7 @@ impl FlowchartApp {
                     ("KB Structure", include_str!("../../assets/examples/knowledge_base_structure.spec")),
                     ("Voice of Customer", include_str!("../../assets/examples/voice_of_customer.spec")),
                     ("Customer Onboarding", include_str!("../../assets/examples/customer_onboarding.spec")),
+                    ("Health Dashboard", include_str!("../../assets/examples/support_health_dashboard.spec")),
                 ];
                 ui.label(egui::RichText::new("Architecture:").size(9.0).color(self.theme.text_dim));
                 ui.add_space(1.0);
@@ -685,6 +686,7 @@ impl FlowchartApp {
                             ("Status+progress", "{done} {wip} {review} {blocked} {todo}  — badge+progress"),
                             ("Support priority", "{p1} {p2} {p3} {p4}  — badge+fill  ·  {escalated}  — Critical+glow"),
                             ("Support severity", "{sev1} {sev2} {sev3}  — same as p1/p2/p3 (SEV naming)"),
+                            ("Support owner", "{assigned:Alice}  /  {owner:Bob}  →  sublabel with 👤 prefix"),
                             ("Node glow", "{glow} / {neon}  — neon border halo on node"),
                             ("Color", "{fill:blue/green/red/yellow/purple/teal/orange/sky/lavender/gray/none}"),
                             ("Color", "{fill:#rrggbb} {border-color:red} {text-color:white}"),
