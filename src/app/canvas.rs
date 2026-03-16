@@ -684,10 +684,49 @@ impl FlowchartApp {
                     }
                     if let Some(due_q) = q.strip_prefix("due:") {
                         let tgt = due_q.trim().to_lowercase();
-                        if let Some(date_str) = n.sublabel.strip_prefix("📅 ") {
-                            return date_str.trim().to_lowercase().contains(&tgt);
+                        let date_str_opt = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ").map(|s| s.trim().to_string()));
+                        match tgt.as_str() {
+                            "today" => {
+                                return date_str_opt.as_deref() == Some(today_str.as_str());
+                            }
+                            "tomorrow" => {
+                                // tomorrow = today + 1 day
+                                let parts: Vec<i64> = today_str.splitn(3, '-').filter_map(|p| p.parse().ok()).collect();
+                                if parts.len() == 3 {
+                                    let (y, m, d) = (parts[0], parts[1], parts[2]);
+                                    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+                                    let month_days = [0i64, 31, if leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+                                    let (ny, nm, nd) = if d < month_days[m as usize] { (y, m, d+1) } else if m < 12 { (y, m+1, 1) } else { (y+1, 1, 1) };
+                                    let tmr = format!("{:04}-{:02}-{:02}", ny, nm, nd);
+                                    return date_str_opt.as_deref() == Some(tmr.as_str());
+                                }
+                                return false;
+                            }
+                            "overdue" | "past-due" | "late" => {
+                                return date_str_opt.as_deref().map_or(false, |d| d <= today_str.as_str() && d.len() >= 8);
+                            }
+                            _ => {
+                                // due:N → due within N days (e.g. due:3 = due in ≤3 days, including overdue)
+                                if let Ok(n_days) = tgt.parse::<i32>() {
+                                    if let Some(ref ds) = date_str_opt {
+                                        let remaining = super::render::iso_days_remaining_pub(ds.trim(), &today_str);
+                                        return remaining <= n_days;
+                                    }
+                                    return false;
+                                }
+                                // fallback: substring match on date string
+                                return date_str_opt.map_or(false, |d| d.to_lowercase().contains(&tgt));
+                            }
                         }
-                        return false;
+                    }
+                    // comment:word → search within ticket comment text
+                    if let Some(comment_q) = q.strip_prefix("comment:").or_else(|| q.strip_prefix("note:")) {
+                        return n.comment.to_lowercase().contains(comment_q.trim());
+                    }
+                    // @name → shorthand for assigned:name
+                    if let Some(at_q) = q.strip_prefix('@') {
+                        let tgt = at_q.trim().to_lowercase();
+                        return n.sublabel.to_lowercase().contains(&tgt);
                     }
                     if let Some(assignee_q) = q.strip_prefix("assigned:").or_else(|| q.strip_prefix("owner:")).or_else(|| q.strip_prefix("assignee:")) {
                         // {assigned:Alice} → sublabel starts with "👤 "
@@ -2341,7 +2380,7 @@ impl FlowchartApp {
                 "ICE Score = Impact × Confidence × Ease → run highest first",
                 "Double Diamond · Hypothesis Canvas · Assumption Map — ⌘K",
                 "⌘⇧E = insert Experiment Card (Hypothesis → Test → Result → Learning)",
-                "⌘F search: status:done · section:Triage · priority:p1 · orphan · linked",
+                "⌘F search: p1 · @alice · due:today · due:3 · comment:stripe · section:Triage · orphan",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
