@@ -699,10 +699,30 @@ impl FlowchartApp {
                     if q == "unlinked" || q == "orphan" {
                         return !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id);
                     }
-                    // Default: label / description / section name
+                    if let Some(url_q) = q.strip_prefix("url:").or_else(|| q.strip_prefix("link:")) {
+                        return n.url.to_lowercase().contains(url_q.trim());
+                    }
+                    if q == "has-url" || q == "has-link" {
+                        return !n.url.is_empty();
+                    }
+                    if q == "no-url" || q == "no-link" {
+                        return n.url.is_empty();
+                    }
+                    if q == "commented" || q == "has-comment" || q == "has-note" {
+                        return !n.comment.is_empty();
+                    }
+                    if q == "overdue" || q == "sla-breach" {
+                        // Also check by comment field syntax
+                        if let Some(date_str) = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ")) {
+                            return date_str.trim() <= "2026-03-16";
+                        }
+                        return false;
+                    }
+                    // Default: label / description / section name / URL / sublabel
                     let label = n.display_label().to_lowercase();
                     let desc = match &n.kind { crate::model::NodeKind::Shape { description, .. } => description.to_lowercase(), _ => String::new() };
                     label.contains(&q) || desc.contains(&q) || n.section_name.to_lowercase().contains(&q)
+                        || n.url.to_lowercase().contains(&q) || n.sublabel.to_lowercase().contains(&q)
                 })
                 .map(|n| n.id)
                 .collect()
@@ -4096,7 +4116,7 @@ impl FlowchartApp {
         );
         let resp = ui2.add(
             egui::TextEdit::singleline(&mut self.search_query)
-                .hint_text("Search… status:done · priority:p1 · assigned:Alice · section:name")
+                .hint_text("Search… status:done · priority:p1 · assigned:Alice · url:jira · overdue")
                 .desired_width(w - 60.0)
                 .font(egui::FontId::proportional(14.0))
                 .frame(false),

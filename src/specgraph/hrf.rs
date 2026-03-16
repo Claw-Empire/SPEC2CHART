@@ -2493,6 +2493,18 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
             if fill_color.is_none() { fill_color = Some([243, 139, 168, 255]); }
             node_glow = true;
+        } else if tag == "wontfix" || tag == "won't-fix" || tag == "wont-fix" || tag == "no-fix" || tag == "closed" {
+            // Won't fix / closed: gray fill, no tag (neutral closure state)
+            if fill_color.is_none() { fill_color = Some([88, 91, 112, 255]); } // gray
+            if opacity_override.is_none() { opacity_override = Some(0.7); }
+        } else if tag == "pending" || tag == "waiting" || tag == "on-hold" {
+            // Pending/waiting: blue-gray fill, Warning tag (needs attention but blocked)
+            if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+            if fill_color.is_none() { fill_color = Some([108, 112, 134, 255]); } // blue-gray
+        } else if tag == "in-progress" || tag == "active" || tag == "doing" {
+            // Explicit in-progress: maps to WIP (Info tag + progress)
+            if node_tag.is_none() { node_tag = Some(NodeTag::Info); }
+            if progress < 0.01 { progress = 0.5; }
         } else if tag == "glow" || tag == "neon" || tag == "glow-node" {
             node_glow = true;
         } else if tag.starts_with("shape:") || tag.starts_with("type:") || tag.starts_with("kind:") {
