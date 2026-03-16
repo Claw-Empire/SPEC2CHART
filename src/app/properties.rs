@@ -1546,20 +1546,43 @@ impl FlowchartApp {
         self.draw_section_header(ui, "Support Actions");
         ui.add_space(4.0);
 
-        // Batch section assignment
+        // Batch section assignment — show actual document sections, fallback to defaults
+        let doc_sections: Vec<String> = {
+            let mut seen: Vec<String> = Vec::new();
+            for n in &self.document.nodes {
+                if !n.section_name.is_empty() && !seen.contains(&n.section_name) {
+                    seen.push(n.section_name.clone());
+                }
+            }
+            if seen.is_empty() {
+                // Fallback when no sections exist yet
+                ["Intake", "Triage", "In Progress", "Resolved"].iter().map(|s| s.to_string()).collect()
+            } else {
+                seen
+            }
+        };
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Section:").size(10.5).color(self.theme.text_dim));
-            let stages = ["Intake", "Triage", "In Progress", "Resolved", "Escalated", "Closed"];
-            for stage in &stages {
-                if ui.small_button(*stage).clicked() {
-                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
-                    for id in &ids {
-                        if let Some(n) = self.document.find_node_mut(id) {
-                            n.section_name = stage.to_string();
-                        }
-                    }
-                    self.history.push(&self.document);
+            let mut clicked_section: Option<String> = None;
+            for stage in &doc_sections {
+                // Highlight if all selected nodes are in this section
+                let all_in = self.selection.node_ids.iter().all(|id| {
+                    self.document.find_node(id).map_or(false, |n| &n.section_name == stage)
+                });
+                let btn = egui::RichText::new(stage.as_str()).size(10.5);
+                let btn = if all_in { btn.strong().color(egui::Color32::from_rgb(166, 227, 161)) } else { btn };
+                if ui.small_button(btn).clicked() {
+                    clicked_section = Some(stage.clone());
                 }
+            }
+            if let Some(stage) = clicked_section {
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        n.section_name = stage.clone();
+                    }
+                }
+                self.history.push(&self.document);
             }
             if ui.small_button("✕").on_hover_text("Clear section").clicked() {
                 let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
