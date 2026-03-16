@@ -2384,6 +2384,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut lane_tag: Option<String> = None;
     let mut section_override: Option<String> = None;
     let mut created_date_tag: Option<String> = None;
+    let mut priority_tag: u8 = 0;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -2505,17 +2506,21 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             // Support priority/severity shorthand: P1/SEV-1 → Critical badge + red fill
             if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
             if fill_color.is_none() { fill_color = Some([243, 139, 168, 255]); } // red
+            if priority_tag == 0 { priority_tag = 1; }
         } else if tag == "p2" || tag == "priority-2" || tag == "sev2" || tag == "sev-2" {
             // Support priority: P2/SEV-2 → Warning badge + orange fill
             if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
             if fill_color.is_none() { fill_color = Some([250, 179, 135, 255]); } // orange
+            if priority_tag == 0 { priority_tag = 2; }
         } else if tag == "p3" || tag == "priority-3" || tag == "sev3" || tag == "sev-3" {
             // Support priority: P3/SEV-3 → Info badge + blue fill
             if node_tag.is_none() { node_tag = Some(NodeTag::Info); }
             if fill_color.is_none() { fill_color = Some([137, 180, 250, 255]); } // blue
+            if priority_tag == 0 { priority_tag = 3; }
         } else if tag == "p4" || tag == "priority-4" {
             // Support priority: P4 → no badge (low), subtle green fill
             if fill_color.is_none() { fill_color = Some([166, 227, 161, 255]); } // green
+            if priority_tag == 0 { priority_tag = 4; }
         } else if tag == "escalated" || tag == "escalate" {
             // Escalation shorthand: escalated → Critical badge + glow (needs immediate attention)
             if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
@@ -2854,6 +2859,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     }
     if let Some(date) = created_date_tag {
         node.created_date = date;
+    }
+    if priority_tag > 0 {
+        node.priority = priority_tag;
     }
 
     Ok((id, node))
@@ -3301,12 +3309,19 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     NodeShape::Callout => " {callout}",
                 }
             };
-            let tag_tag = match node.tag {
-                Some(NodeTag::Critical) => " {critical}",
-                Some(NodeTag::Warning) => " {warning}",
-                Some(NodeTag::Ok) => " {ok}",
-                Some(NodeTag::Info) => " {info}",
-                None => "",
+            // Prefer {p1}/{p2}/{p3}/{p4} over generic tag names when priority is set
+            let tag_tag_owned: String;
+            let tag_tag = if node.priority > 0 {
+                tag_tag_owned = format!(" {{p{}}}", node.priority);
+                &tag_tag_owned
+            } else {
+                match node.tag {
+                    Some(NodeTag::Critical) => " {critical}",
+                    Some(NodeTag::Warning) => " {warning}",
+                    Some(NodeTag::Ok) => " {ok}",
+                    Some(NodeTag::Info) => " {info}",
+                    None => "",
+                }
             };
             let pin_tag = if node.pinned {
                 format!(" {{pos:{:.0},{:.0}}}", node.position[0], node.position[1])

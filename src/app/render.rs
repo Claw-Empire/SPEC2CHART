@@ -441,19 +441,19 @@ impl FlowchartApp {
             if let Some(due_str) = due_date_opt {
                 let today = today_iso();
                 let days_remaining = iso_days_remaining(due_str.trim(), &today);
-                let (badge_text, text_col, bg_col): (&str, egui::Color32, egui::Color32) =
+                let (badge_text, text_col, bg_col): (String, egui::Color32, egui::Color32) =
                     if days_remaining < 0 {
-                        ("OVERDUE", egui::Color32::WHITE, egui::Color32::from_rgb(185, 50, 70))
+                        let d = -days_remaining;
+                        let s = if d == 1 { "1d late".to_string() } else { format!("{}d late", d) };
+                        (s, egui::Color32::WHITE, egui::Color32::from_rgb(185, 50, 70))
                     } else if days_remaining == 0 {
-                        ("TODAY", egui::Color32::from_rgb(30, 20, 10), egui::Color32::from_rgb(250, 179, 135))
-                    } else if days_remaining <= 3 {
-                        let s: &'static str = match days_remaining { 1 => "1d", 2 => "2d", _ => "3d" };
-                        (s, egui::Color32::from_rgb(30, 20, 10), egui::Color32::from_rgb(249, 226, 175))
+                        ("TODAY".to_string(), egui::Color32::from_rgb(30, 20, 10), egui::Color32::from_rgb(250, 179, 135))
                     } else if days_remaining <= 7 {
-                        let s: &'static str = match days_remaining { 4 => "4d", 5 => "5d", 6 => "6d", _ => "7d" };
-                        (s, egui::Color32::from_rgb(200, 220, 255), egui::Color32::from_rgba_unmultiplied(60, 80, 120, 180))
+                        (format!("{}d", days_remaining), egui::Color32::from_rgb(30, 20, 10),
+                            if days_remaining <= 3 { egui::Color32::from_rgb(249, 226, 175) }
+                            else { egui::Color32::from_rgba_unmultiplied(60, 80, 120, 180) })
                     } else {
-                        ("", egui::Color32::TRANSPARENT, egui::Color32::TRANSPARENT)
+                        (String::new(), egui::Color32::TRANSPARENT, egui::Color32::TRANSPARENT)
                     };
                 if !badge_text.is_empty() {
                     let font_sz = (9.0 * self.viewport.zoom.sqrt()).clamp(7.5, 12.0);
@@ -462,7 +462,7 @@ impl FlowchartApp {
                         Vec2::new(badge_text.len() as f32 * font_sz * 0.58 + 4.0, font_sz + 3.0),
                     );
                     painter.rect_filled(badge_rect, CornerRadius::same(3), bg_col);
-                    painter.text(badge_rect.center(), Align2::CENTER_CENTER, badge_text,
+                    painter.text(badge_rect.center(), Align2::CENTER_CENTER, &badge_text,
                         FontId::proportional(font_sz), text_col);
                 }
             }
@@ -720,7 +720,7 @@ impl FlowchartApp {
             }
         }
 
-        // Node tag badge (top-left pill)
+        // Node tag badge (top-left pill); shows "P1"/"P2"/"P3"/"P4" when priority is set
         if let Some(tag) = node.tag {
             if self.viewport.zoom > 0.35 {
                 let tag_color = to_color32(tag.color());
@@ -732,7 +732,13 @@ impl FlowchartApp {
                     Pos2::new(screen_rect.min.x + stripe_w, screen_rect.max.y),
                 );
                 painter.rect_filled(stripe_rect, CornerRadius { nw: cr as u8, sw: cr as u8, ne: 0, se: 0 }, tag_color.gamma_multiply(0.7));
-                let label = tag.label();
+                let priority_label_owned;
+                let label = if node.priority > 0 {
+                    priority_label_owned = format!("P{}", node.priority);
+                    &priority_label_owned as &str
+                } else {
+                    tag.label()
+                };
                 let font_size = 8.5 * self.viewport.zoom.sqrt();
                 let pad_x = 4.0 * self.viewport.zoom.sqrt();
                 let pad_y = 2.0 * self.viewport.zoom.sqrt();
