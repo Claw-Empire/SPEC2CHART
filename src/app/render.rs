@@ -276,6 +276,11 @@ impl FlowchartApp {
                 d.len() >= 8 && d < today_str.as_str()
             } else { false }
         });
+        // Compute days remaining for due-date rings
+        let due_days_remaining: Option<i32> = node.sublabel.split('\n').find_map(|line| {
+            line.strip_prefix("📅 ").map(|d| iso_days_remaining(d.trim(), &today_str))
+        });
+
         if is_overdue && !node.is_frame {
             let time = painter.ctx().input(|i| i.time);
             // Fast urgent pulse: ~1.5 Hz
@@ -293,6 +298,28 @@ impl FlowchartApp {
                 StrokeKind::Outside,
             );
             painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        } else if due_days_remaining == Some(0) && !node.is_frame {
+            // Due today: slow amber pulse (~0.8 Hz)
+            let time = painter.ctx().input(|i| i.time);
+            let pulse = ((time * 1.6 * std::f64::consts::PI).sin() as f32) * 0.35 + 0.65;
+            let expand = 2.5 + pulse * 1.5;
+            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + 2.0) as u8);
+            painter.rect_stroke(
+                screen_rect.expand(expand),
+                cr,
+                Stroke::new(1.8 * self.viewport.zoom.sqrt().max(0.5), Color32::from_rgba_unmultiplied(250, 179, 70, (pulse * 210.0 + 30.0) as u8)),
+                StrokeKind::Outside,
+            );
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        } else if due_days_remaining == Some(1) && !node.is_frame {
+            // Due tomorrow: static soft yellow ring (no pulse, just a gentle warning)
+            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + 1.5) as u8);
+            painter.rect_stroke(
+                screen_rect.expand(2.0),
+                cr,
+                Stroke::new(1.2 * self.viewport.zoom.sqrt().max(0.4), Color32::from_rgba_unmultiplied(249, 226, 175, 150)),
+                StrokeKind::Outside,
+            );
         }
 
         // Drop shadow (rendered before node so it appears behind)
