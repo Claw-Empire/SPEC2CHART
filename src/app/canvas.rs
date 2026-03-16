@@ -941,6 +941,7 @@ impl FlowchartApp {
 
         self.draw_tag_filter_pills(&painter, canvas_rect, ui);
         self.draw_persistent_filter_chip(ui, canvas_rect);
+        self.draw_kanban_column_headers(&painter, canvas_rect);
 
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
@@ -3647,6 +3648,71 @@ impl FlowchartApp {
         // Close on Escape
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_workload_panel = false;
+        }
+    }
+
+    /// Sticky kanban column headers: pinned to top of canvas, show section name + ticket count.
+    /// Only shown in LR layout with multiple sections when zoomed in enough.
+    fn draw_kanban_column_headers(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        if self.document.layout_dir != "LR" { return; }
+        if matches!(self.view_mode, super::ViewMode::ThreeD) { return; }
+        if self.viewport.zoom < 0.3 { return; }
+
+        // Build ordered sections + x-span
+        let mut section_order: Vec<String> = Vec::new();
+        for n in &self.document.nodes {
+            if !n.section_name.is_empty() && !section_order.contains(&n.section_name) {
+                section_order.push(n.section_name.clone());
+            }
+        }
+        if section_order.len() < 2 { return; }
+
+        let mut section_x_min: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
+        let mut section_x_max: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
+        let mut section_count: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+        for n in &self.document.nodes {
+            if n.section_name.is_empty() { continue; }
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(n.pos()),
+                n.size_vec() * self.viewport.zoom,
+            );
+            let entry_min = section_x_min.entry(&n.section_name).or_insert(f32::MAX);
+            *entry_min = entry_min.min(sr.min.x);
+            let entry_max = section_x_max.entry(&n.section_name).or_insert(f32::MIN);
+            *entry_max = entry_max.max(sr.max.x);
+            *section_count.entry(&n.section_name).or_default() += 1;
+        }
+
+        let header_h = 22.0_f32;
+        let top_y = canvas_rect.min.y + 2.0;
+        let pad = 12.0_f32 * self.viewport.zoom.sqrt().max(0.5);
+
+        let column_fills: &[[u8; 4]] = &[
+            [203, 166, 247, 25], [250, 179, 135, 25], [137, 180, 250, 25],
+            [166, 227, 161, 25], [249, 226, 175, 25], [243, 139, 168, 25],
+        ];
+
+        for (i, sec) in section_order.iter().enumerate() {
+            let x_min = match section_x_min.get(sec.as_str()) { Some(&v) => v, None => continue };
+            let x_max = match section_x_max.get(sec.as_str()) { Some(&v) => v, None => continue };
+            let cx = (x_min + x_max) * 0.5;
+            if cx < canvas_rect.min.x || cx > canvas_rect.max.x { continue; }
+            let count = section_count.get(sec.as_str()).copied().unwrap_or(0);
+            let col_w = (x_max - x_min + pad * 2.0).max(80.0);
+            let header_rect = Rect::from_center_size(
+                egui::pos2(cx, top_y + header_h * 0.5),
+                egui::vec2(col_w.min(canvas_rect.width() - 20.0), header_h),
+            );
+            let fill = column_fills[i % column_fills.len()];
+            painter.rect_filled(header_rect, CornerRadius::same(5),
+                Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], 80));
+            painter.rect_stroke(header_rect, CornerRadius::same(5),
+                egui::Stroke::new(0.8, Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], 120)),
+                StrokeKind::Outside);
+            let label = format!("{}  {}", sec, count);
+            painter.text(header_rect.center(), Align2::CENTER_CENTER,
+                &label, egui::FontId::proportional(11.0),
+                Color32::from_rgba_unmultiplied(fill[0].saturating_add(60), fill[1].saturating_add(60), fill[2].saturating_add(60), 230));
         }
     }
 
