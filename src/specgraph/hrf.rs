@@ -3321,8 +3321,19 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     format!(" {{text-color:#{:02x}{:02x}{:02x}}}", tc[0], tc[1], tc[2])
                 }
             } else { String::new() };
+            // Multi-line sublabel: split "👤 Alice\n📅 date" into separate {assigned:}/{due:} tags
             let sublabel_tag = if !node.sublabel.is_empty() {
-                format!(" {{sublabel:{}}}", node.sublabel)
+                let mut parts = Vec::new();
+                for line in node.sublabel.split('\n') {
+                    if let Some(name) = line.strip_prefix("👤 ") {
+                        parts.push(format!(" {{assigned:{}}}", name.trim()));
+                    } else if let Some(date) = line.strip_prefix("📅 ") {
+                        parts.push(format!(" {{due:{}}}", date.trim()));
+                    } else if !line.is_empty() {
+                        parts.push(format!(" {{sublabel:{}}}", line));
+                    }
+                }
+                parts.join("")
             } else { String::new() };
             let depth_3d_tag = if node.depth_3d > 0.0 {
                 format!(" {{3d-depth:{:.0}}}", node.depth_3d)

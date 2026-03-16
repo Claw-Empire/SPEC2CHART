@@ -268,6 +268,32 @@ impl FlowchartApp {
             painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
         }
 
+        // Overdue indicator: pulsing red ring when node has a past-due 📅 date
+        let is_overdue = node.sublabel.split('\n').any(|line| {
+            if let Some(date_str) = line.strip_prefix("📅 ") {
+                let d = date_str.trim();
+                d.len() >= 8 && d <= "2026-03-16"
+            } else { false }
+        });
+        if is_overdue && !node.is_frame {
+            let time = painter.ctx().input(|i| i.time);
+            // Fast urgent pulse: ~1.5 Hz
+            let urgency = ((time * 3.0 * std::f64::consts::PI).sin() as f32) * 0.4 + 0.6;
+            let expand = 3.0 + urgency * 2.5;
+            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + expand * 0.3) as u8);
+            // Urgent red glow fill
+            painter.rect_filled(screen_rect.expand(expand + 2.0), cr,
+                Color32::from_rgba_unmultiplied(243, 139, 168, (urgency * 18.0) as u8));
+            // Sharp red stroke
+            painter.rect_stroke(
+                screen_rect.expand(expand),
+                cr,
+                Stroke::new(1.5 * self.viewport.zoom.sqrt().max(0.5), Color32::from_rgba_unmultiplied(243, 139, 168, (urgency * 200.0 + 40.0) as u8)),
+                StrokeKind::Outside,
+            );
+            painter.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+        }
+
         // Drop shadow (rendered before node so it appears behind)
         if node.style.shadow && !node.is_frame {
             let shadow_offset = Vec2::new(3.0, 5.0) * self.viewport.zoom.sqrt();
