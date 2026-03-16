@@ -2151,7 +2151,7 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (33 diagrams: arch · design thinking · support ops)",
+                "⌘K → Templates  (35 diagrams: arch · design thinking · support ops)",
                 "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",
@@ -2758,6 +2758,7 @@ impl FlowchartApp {
             ("✏", "Edit label"),
             ("⎘", "Duplicate (⌘D)"),
             ("📋", "Copy style (⌘⇧C)"),
+            ("→", "Spawn connected child node"),
             ("🗑", "Delete"),
         ];
         let btn_w = 28.0;
@@ -2853,7 +2854,47 @@ impl FlowchartApp {
                         }
                     }
                 }
-                3 => { // Delete
+                3 => { // Spawn connected child node
+                    if let Some(&src_id) = self.selection.node_ids.iter().next() {
+                        if let Some(src) = self.document.find_node(&src_id).cloned() {
+                            // Offset direction based on document layout (LR = right, TB = down)
+                            let (dx, dy) = if self.document.layout_dir == "TB" || self.document.layout_dir == "BT" {
+                                (0.0_f32, src.size[1] + 80.0)
+                            } else {
+                                (src.size[0] + 100.0, 0.0_f32)
+                            };
+                            let new_pos = egui::Pos2::new(src.position[0] + dx, src.position[1] + dy);
+                            let mut child = Node::new(
+                                match &src.kind {
+                                    NodeKind::Shape { shape, .. } => *shape,
+                                    _ => NodeShape::RoundedRect,
+                                },
+                                new_pos,
+                            );
+                            child.size = src.size;
+                            child.style = src.style.clone();
+                            child.section_name = src.section_name.clone();
+                            child.z_offset = src.z_offset;
+                            // Clear status so new node starts fresh
+                            child.tag = None;
+                            child.progress = 0.0;
+                            let child_id = child.id;
+                            self.document.nodes.push(child);
+                            // Create edge src → child
+                            let edge = Edge::new(
+                                Port { node_id: src_id, side: crate::model::PortSide::Right },
+                                Port { node_id: child_id, side: crate::model::PortSide::Left },
+                            );
+                            self.document.edges.push(edge);
+                            self.selection.clear();
+                            self.selection.select_node(child_id);
+                            self.inline_node_edit = Some((child_id, String::new()));
+                            self.history.push(&self.document);
+                            self.status_message = Some(("Child node spawned — type to label".to_string(), std::time::Instant::now()));
+                        }
+                    }
+                }
+                4 => { // Delete
                     let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
                     for id in &ids { self.document.remove_node(id); }
                     self.selection.clear();
