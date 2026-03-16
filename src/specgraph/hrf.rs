@@ -1074,6 +1074,19 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         "animated" | "flow" => edge.style.animated = true,
                         "thick" | "bold" => edge.style.width = 5.0,
                         "ortho" | "orthogonal" => edge.style.orthogonal = true,
+                        "escalate" | "escalation" | "escalated" => {
+                            edge.style.color = [243, 139, 168, 255];
+                            edge.style.width = 3.5;
+                            edge.style.glow = true;
+                        }
+                        "resolves" | "resolved-by" | "fixes" | "closes" => {
+                            edge.style.color = [166, 227, 161, 255];
+                            edge.style.dashed = true;
+                        }
+                        "blocks" | "blocked-by" | "blocking" => {
+                            edge.style.color = [250, 179, 135, 255];
+                            edge.style.width = 3.0;
+                        }
                         _ => {}
                     }
                 }
@@ -2274,6 +2287,22 @@ fn parse_flow_line_chain(
                     "arrow:open" | "open" => edge.style.arrow_head = ArrowHead::Open,
                     "arrow:circle" | "circle-end" => edge.style.arrow_head = ArrowHead::Circle,
                     "arrow:none" | "no-arrow" | "line" => edge.style.arrow_head = ArrowHead::None,
+                    // Support escalation shorthand: thick red glow (urgent escalation path)
+                    "escalate" | "escalation" | "escalated" => {
+                        edge.style.color = [243, 139, 168, 255]; // red
+                        edge.style.width = 3.5;
+                        edge.style.glow = true;
+                    }
+                    // Resolution dependency: green dashed (this edge resolves that ticket)
+                    "resolves" | "resolved-by" | "fixes" | "closes" => {
+                        edge.style.color = [166, 227, 161, 255]; // green
+                        edge.style.dashed = true;
+                    }
+                    // Blocks/blocks dependency: orange thick
+                    "blocks" | "blocked-by" | "blocking" => {
+                        edge.style.color = [250, 179, 135, 255]; // orange
+                        edge.style.width = 3.0;
+                    }
                     _ => {}
                 }
             }

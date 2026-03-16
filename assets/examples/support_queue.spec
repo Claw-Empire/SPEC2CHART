@@ -53,9 +53,10 @@ spacing = 80
   UTC offset calculation corrected for DST transition
 
 ## Flow
-t1 --> t4
+t1 --> t4 {escalate}
 t2 --> t5
-t4 --> t7
+t4 --> t7 {escalate}
 t5 --> t8
-t7 --> t10
-t8 --> t11 {dashed}
+t7 --> t10 {resolves}
+t8 --> t11 {resolves}
+t4 --> t1 {blocks}
