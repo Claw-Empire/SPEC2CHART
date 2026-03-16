@@ -892,6 +892,64 @@ impl FlowchartApp {
             ));
         }
 
+        // Cmd+Shift+X = export nodes as CSV to clipboard (selection or all)
+        {
+            let cmd_shift_x = Modifiers { shift: true, ..cmd };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::X) && i.modifiers.matches_exact(cmd_shift_x)) {
+                let nodes: Vec<&crate::model::Node> = if !self.selection.node_ids.is_empty() {
+                    self.document.nodes.iter()
+                        .filter(|n| self.selection.node_ids.contains(&n.id))
+                        .collect()
+                } else {
+                    self.document.nodes.iter().collect()
+                };
+
+                let mut csv = String::from("Label,Section,Priority,Status,Assignee,Due Date,URL,Comment\n");
+                for n in &nodes {
+                    let label = n.display_label().replace('"', "\"\"");
+                    let section = n.section_name.replace('"', "\"\"");
+                    let priority = match n.tag {
+                        Some(crate::model::NodeTag::Critical) => "P1",
+                        Some(crate::model::NodeTag::Warning)  => "P2",
+                        Some(crate::model::NodeTag::Info)      => "P3",
+                        Some(crate::model::NodeTag::Ok)        => "P4",
+                        None => "",
+                    };
+                    let status = match (n.tag, n.progress) {
+                        (Some(crate::model::NodeTag::Ok), p) if p >= 0.99 => "Done",
+                        (Some(crate::model::NodeTag::Info), _) => "WIP",
+                        (Some(crate::model::NodeTag::Warning), p) if p >= 0.75 => "Review",
+                        (Some(crate::model::NodeTag::Warning), _) => "Todo",
+                        (Some(crate::model::NodeTag::Critical), _) => "Blocked",
+                        _ => "",
+                    };
+                    let assignee = n.sublabel.lines()
+                        .find(|l| l.starts_with("👤 "))
+                        .and_then(|l| l.strip_prefix("👤 "))
+                        .unwrap_or("")
+                        .replace('"', "\"\"");
+                    let due = n.sublabel.lines()
+                        .find(|l| l.starts_with("📅 "))
+                        .and_then(|l| l.strip_prefix("📅 "))
+                        .unwrap_or("")
+                        .replace('"', "\"\"");
+                    let url = n.url.replace('"', "\"\"");
+                    let comment = n.comment.replace('"', "\"\"").replace('\n', " ");
+                    csv.push_str(&format!(
+                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                        label, section, priority, status, assignee, due, url, comment
+                    ));
+                }
+
+                ctx.copy_text(csv);
+                let count = nodes.len();
+                self.status_message = Some((
+                    format!("CSV copied — {} rows", count),
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+
         // ? = toggle shortcuts panel
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F1) || (i.key_pressed(Key::Slash) && i.modifiers.shift)) {
             self.show_shortcuts_panel = !self.show_shortcuts_panel;

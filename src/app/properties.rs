@@ -263,6 +263,7 @@ impl FlowchartApp {
                 ("⇧D (nodes sel.)", "Set due date = today"),
                 ("⇧W (nodes sel.)", "Set due date = next week (+7d)"),
                 ("⌘⇧R", "Copy support report as Markdown"),
+                ("⌘⇧X", "Copy tickets as CSV (Label, Section, Priority, Status, Assignee, Due, URL)"),
             ]),
             ("Layout", &[
                 ("⇧L", "Force-directed layout"),
