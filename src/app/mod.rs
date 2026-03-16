@@ -368,6 +368,35 @@ impl FlowchartApp {
         }
     }
 
+    /// In LR kanban layout, returns the section name for a canvas-space x-coordinate.
+    /// Used to auto-assign section_name when creating nodes in a kanban column.
+    pub(crate) fn section_for_canvas_x(&self, canvas_x: f32) -> Option<String> {
+        if self.document.layout_dir != "LR" { return None; }
+        // Build section x-ranges in canvas space
+        let mut section_order: Vec<String> = Vec::new();
+        let mut section_x_min: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        let mut section_x_max: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        for n in &self.document.nodes {
+            if n.section_name.is_empty() { continue; }
+            let x = n.position[0];
+            let x_max = x + n.size[0];
+            if !section_order.contains(&n.section_name) { section_order.push(n.section_name.clone()); }
+            let entry_min = section_x_min.entry(n.section_name.clone()).or_insert(f32::MAX);
+            *entry_min = entry_min.min(x);
+            let entry_max = section_x_max.entry(n.section_name.clone()).or_insert(f32::MIN);
+            *entry_max = entry_max.max(x_max);
+        }
+        if section_order.len() < 2 { return None; }
+        // Find which section's range contains canvas_x (with padding)
+        let pad = 40.0_f32;
+        for sec in &section_order {
+            let xmin = section_x_min.get(sec).copied().unwrap_or(f32::MAX) - pad;
+            let xmax = section_x_max.get(sec).copied().unwrap_or(f32::MIN) + pad;
+            if canvas_x >= xmin && canvas_x <= xmax { return Some(sec.clone()); }
+        }
+        None
+    }
+
     /// Toggle between dark and light mode, re-applying egui visuals.
     pub(crate) fn toggle_dark_mode(&mut self, ctx: &egui::Context) {
         self.dark_mode = !self.dark_mode;

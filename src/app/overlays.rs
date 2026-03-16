@@ -479,7 +479,7 @@ impl FlowchartApp {
                 progress: 0.0,
                 timeline_period: None,
                 timeline_lane: None,
-                section_name: String::new(),
+                section_name: self.section_for_canvas_x(canvas_pos.x).unwrap_or_default(),
                 created_date: String::new(),
             };
             let id = node.id;

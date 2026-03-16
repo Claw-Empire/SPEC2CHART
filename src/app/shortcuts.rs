@@ -397,6 +397,10 @@ impl FlowchartApp {
             let mut node = crate::model::Node::new(shape, canvas_center);
             let w = node.size[0]; let h = node.size[1];
             node.set_pos(egui::Pos2::new(canvas_center.x - w / 2.0, canvas_center.y - h / 2.0));
+            // Auto-assign to kanban section if cursor is within a column band
+            if let Some(sec) = self.section_for_canvas_x(canvas_center.x) {
+                node.section_name = sec;
+            }
             let id = node.id;
             self.document.nodes.push(node);
             self.selection.select_node(id);
