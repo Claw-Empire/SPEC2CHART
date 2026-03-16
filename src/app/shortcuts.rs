@@ -417,7 +417,7 @@ impl FlowchartApp {
         let shape_to_create: Option<crate::model::NodeShape> = if !any_text_focused {
             if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.is_none()) && self.selection.node_ids.is_empty() {
                 Some(crate::model::NodeShape::Rectangle)
-            } else if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.is_none()) {
+            } else if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.is_none()) && self.selection.node_ids.is_empty() {
                 Some(crate::model::NodeShape::Circle)
             } else if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.is_none()) {
                 Some(crate::model::NodeShape::Diamond)
@@ -1799,6 +1799,17 @@ impl FlowchartApp {
                     }
                 }
             }
+        }
+
+        // C (no modifier) + nodes selected = open quick-comment popup
+        if !any_text_focused && !self.selection.node_ids.is_empty()
+            && ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.is_none())
+        {
+            let prefill = self.selection.node_ids.iter().next()
+                .and_then(|id| self.document.find_node(id))
+                .map(|n| n.comment.clone())
+                .unwrap_or_default();
+            self.quick_comment_buf = Some(prefill);
         }
 
         // A (no modifier) + nodes selected = open quick-assign popup

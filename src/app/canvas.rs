@@ -913,6 +913,7 @@ impl FlowchartApp {
         self.draw_inline_node_editor(ui, canvas_rect);
         self.draw_section_rename_editor(ui);
         self.draw_quick_assign_popup(ui, canvas_rect);
+        self.draw_quick_comment_popup(ui, canvas_rect);
         // Floating edge style bar: quick-toggle edge styles on selected edge
         self.draw_floating_edge_bar(ui, canvas_rect);
         // Quick-connect arrows: show ±4 directional buttons on hovered node
@@ -5501,6 +5502,90 @@ impl FlowchartApp {
                     self.quick_assign_buf = None;
                 }
             });
+    }
+
+    /// Quick-comment popup: shown when `quick_comment_buf` is Some (C key with selection).
+    fn draw_quick_comment_popup(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        if self.quick_comment_buf.is_none() { return; }
+        let sel_ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+        if sel_ids.is_empty() { self.quick_comment_buf = None; return; }
+
+        // Position above the first selected node (topmost)
+        let mut top = f32::MAX;
+        let mut cx = canvas_rect.center().x;
+        for id in &sel_ids {
+            if let Some(n) = self.document.find_node(id) {
+                let sr = self.viewport.canvas_to_screen(n.pos());
+                if sr.y < top { top = sr.y; cx = sr.x + n.size[0] * self.viewport.zoom * 0.5; }
+            }
+        }
+        if top == f32::MAX { self.quick_comment_buf = None; return; }
+
+        let popup_w = 280.0_f32;
+        let popup_h = 86.0_f32;
+        let popup_x = (cx - popup_w / 2.0).clamp(canvas_rect.min.x + 4.0, canvas_rect.max.x - popup_w - 4.0);
+        let popup_y = (top - popup_h - 8.0).max(canvas_rect.min.y + 4.0);
+        let popup_rect = Rect::from_min_size(egui::pos2(popup_x, popup_y), egui::vec2(popup_w, popup_h));
+
+        {
+            let painter = ui.painter();
+            painter.rect_filled(popup_rect, CornerRadius::same(8), Color32::from_rgba_unmultiplied(20, 20, 32, 240));
+            painter.rect_stroke(popup_rect, CornerRadius::same(8),
+                egui::Stroke::new(1.0, self.theme.surface1), StrokeKind::Outside);
+            painter.text(egui::pos2(popup_rect.min.x + 10.0, popup_rect.min.y + 8.0),
+                Align2::LEFT_TOP, "💬 Comment  (Enter = save · Esc = cancel)",
+                egui::FontId::proportional(10.0), self.theme.text_dim);
+        }
+
+        let text_rect = Rect::from_min_size(
+            egui::pos2(popup_rect.min.x + 8.0, popup_rect.min.y + 24.0),
+            egui::vec2(popup_w - 16.0, popup_h - 32.0),
+        );
+
+        let mut submit = false;
+        let mut cancel = false;
+        let sel_ids2 = sel_ids.clone();
+
+        ui.allocate_ui_at_rect(text_rect, |ui| {
+            let resp = ui.add(
+                egui::TextEdit::multiline(self.quick_comment_buf.as_mut().unwrap())
+                    .font(egui::FontId::proportional(11.0))
+                    .desired_width(text_rect.width())
+                    .desired_rows(3)
+                    .frame(false)
+                    .text_color(self.theme.text_primary)
+            );
+            if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                cancel = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command) {
+                submit = true;
+            }
+            if !resp.has_focus() && !resp.gained_focus() {
+                resp.request_focus();
+            }
+        });
+
+        if submit {
+            let comment = self.quick_comment_buf.clone().unwrap_or_default();
+            for id in &sel_ids2 {
+                if let Some(n) = self.document.find_node_mut(id) {
+                    n.comment = comment.clone();
+                }
+            }
+            let count = sel_ids2.len();
+            if !comment.is_empty() {
+                self.history.push(&self.document);
+                self.status_message = Some((
+                    if count == 1 { "💬 Comment saved".to_string() }
+                    else { format!("💬 Comment saved ({} nodes)", count) },
+                    std::time::Instant::now(),
+                ));
+            }
+            self.quick_comment_buf = None;
+        } else if cancel {
+            self.quick_comment_buf = None;
+        }
     }
 
     /// Draw 4 directional arrow buttons around a hovered node.

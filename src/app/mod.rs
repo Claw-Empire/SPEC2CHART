@@ -246,6 +246,9 @@ pub struct FlowchartApp {
     /// Quick-assign popup state: when Some, show the assignee entry field.
     /// A = open, Enter = apply, Escape = cancel.
     pub(crate) quick_assign_buf: Option<String>,
+    /// Quick-comment popup state: when Some, show the comment entry field.
+    /// C = open, Enter = apply, Escape = cancel.
+    pub(crate) quick_comment_buf: Option<String>,
     /// Workload summary panel (Cmd+Shift+W)
     pub(crate) show_workload_panel: bool,
 }
@@ -364,6 +367,7 @@ impl FlowchartApp {
             cam3d_zoom_vel: 0.0,
             context_menu_origin: None,
             quick_assign_buf: None,
+            quick_comment_buf: None,
             show_workload_panel: false,
         }
     }
