@@ -921,7 +921,8 @@ impl FlowchartApp {
 
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
-        self.draw_search_overlay(ui, canvas_rect);
+        let sm_clone = search_matches.clone();
+        self.draw_search_overlay(ui, canvas_rect, &sm_clone);
         self.draw_zoom_presets(ui, canvas_rect);
         if self.show_minimap {
             self.draw_minimap(&painter, canvas_rect);
@@ -2201,7 +2202,7 @@ impl FlowchartApp {
             ],
             super::DiagramMode::Flowchart => &[
                 "Double-click anywhere to add your first node",
-                "⌘K → Templates  (39 diagrams: arch · design thinking · support ops)",
+                "⌘K → Templates  (40 diagrams: arch · design thinking · support ops)",
                 "ICE Scoring · Causal Loop · Theory of Change · Experiment Board — new in ⌘K",
                 "Try {hypothesis} {assumption} {evidence} {conclusion}",
                 "H = hypothesis · Y = assumption · W = evidence (quick-create)",
@@ -3844,17 +3845,18 @@ impl FlowchartApp {
         }
     }
 
-    fn draw_search_overlay(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+    fn draw_search_overlay(&mut self, ui: &mut egui::Ui, canvas_rect: Rect, search_matches: &std::collections::HashSet<NodeId>) {
         if !self.show_search { return; }
 
-        // Collect matching results
+        // Collect matching results — use the same smart-filter set as canvas highlights
         let q = self.search_query.to_lowercase();
         let max_results = 8_usize;
+        let total_count = search_matches.len();
         let results: Vec<(NodeId, String)> = if q.is_empty() {
             Vec::new()
         } else {
             self.document.nodes.iter()
-                .filter(|n| n.display_label().to_lowercase().contains(&q))
+                .filter(|n| search_matches.contains(&n.id))
                 .take(max_results)
                 .map(|n| (n.id, n.display_label().to_string()))
                 .collect()
@@ -3938,13 +3940,13 @@ impl FlowchartApp {
         // Jump to result on Enter; Shift+Enter = select ALL matches
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             let shift = ctx.input(|i| i.modifiers.shift);
-            if shift || results.len() == 1 {
-                // Select all matching nodes and zoom to fit
+            if shift || total_count == 1 {
+                // Select ALL matching nodes (not just the visible 8) and zoom to fit
                 self.selection.clear();
-                for (nid, _) in &results { self.selection.node_ids.insert(*nid); }
-                if !results.is_empty() { self.zoom_to_selection(); }
-                if results.len() > 1 {
-                    self.status_message = Some((format!("Selected {} nodes", results.len()), std::time::Instant::now()));
+                for nid in search_matches { self.selection.node_ids.insert(*nid); }
+                if !search_matches.is_empty() { self.zoom_to_selection(); }
+                if total_count > 1 {
+                    self.status_message = Some((format!("Selected {} nodes", total_count), std::time::Instant::now()));
                 }
             } else if let Some(&(nid, _)) = results.get(self.search_cursor).or_else(|| results.first()) {
                 self.selection.select_node(nid);
@@ -3956,16 +3958,20 @@ impl FlowchartApp {
             return;
         }
 
-        // Result count badge
+        // Result count badge — "N of M" when results are capped, "0" when no match
         {
-            let badge = if results.is_empty() && !q.is_empty() { "0".to_string() }
-                        else if !results.is_empty() { format!("{}", results.len()) }
-                        else { String::new() };
+            let badge = if q.is_empty() { String::new() }
+                        else if total_count == 0 { "0".to_string() }
+                        else if total_count > max_results { format!("{} of {}", max_results, total_count) }
+                        else { format!("{}", total_count) };
             if !badge.is_empty() {
+                let badge_color = if total_count == 0 { self.theme.text_dim }
+                                  else if total_count > max_results { self.theme.accent }
+                                  else { self.theme.text_dim };
                 ui2.painter().text(
                     Pos2::new(overlay_rect.max.x - 8.0, overlay_rect.min.y + input_h / 2.0),
                     Align2::RIGHT_CENTER, &badge,
-                    FontId::proportional(11.0), self.theme.text_dim,
+                    FontId::proportional(11.0), badge_color,
                 );
             }
         }
