@@ -2085,6 +2085,9 @@ impl FlowchartApp {
         let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
         // counts: [critical(P1), warning(P2), info(P3), ok(P4), overdue]
         let mut section_prio: HashMap<&str, [u32; 5]> = HashMap::new();
+        // total and done counts per section — used for section-complete glow
+        let mut section_total: HashMap<&str, u32> = HashMap::new();
+        let mut section_done: HashMap<&str, u32> = HashMap::new();
         for node in &self.document.nodes {
             if node.section_name.is_empty() { continue; }
             let sr = Rect::from_min_size(
@@ -2111,6 +2114,10 @@ impl FlowchartApp {
                 } else { false }
             });
             if is_overdue { prio[4] += 1; }
+            // Track total / done for section-complete indicator
+            *section_total.entry(&node.section_name).or_default() += 1;
+            let is_done = matches!(node.tag, Some(crate::model::NodeTag::Ok)) && node.progress >= 0.99;
+            if is_done { *section_done.entry(&node.section_name).or_default() += 1; }
         }
         if section_bounds.is_empty() { return; }
 
@@ -2157,12 +2164,36 @@ impl FlowchartApp {
                 else { "" };
 
             let display = format!("{icon}{section_name}");
+
+            // Section-complete glow: when every node in the section is marked done
+            let total = section_total.get(section_name).copied().unwrap_or(0);
+            let done  = section_done.get(section_name).copied().unwrap_or(0);
+            let all_done = total > 0 && done == total;
+            if all_done {
+                // Measure approx text width for the glow rect
+                let approx_w = display.len() as f32 * font_size * 0.55 + 12.0;
+                let glow_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(label_pos.x - 4.0, label_pos.y - 2.0),
+                    egui::Vec2::new(approx_w, font_size + 6.0),
+                );
+                painter.rect_filled(glow_rect, egui::CornerRadius::same(5),
+                    egui::Color32::from_rgba_unmultiplied(166, 227, 161, 40));
+                painter.rect_stroke(glow_rect, egui::CornerRadius::same(5),
+                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(166, 227, 161, 120)),
+                    egui::StrokeKind::Outside);
+            }
+
+            let display_with_check = if all_done { format!("{display} ✓") } else { display };
             painter.text(
                 label_pos,
                 Align2::LEFT_TOP,
-                &display,
+                &display_with_check,
                 FontId::new(font_size, egui::FontFamily::Proportional),
-                text_col,
+                if all_done {
+                    egui::Color32::from_rgba_unmultiplied(166, 227, 161, 230)
+                } else {
+                    text_col
+                },
             );
 
             // Priority mini-bar: show compact "●P1:N ●P2:N ..." when section has tagged nodes
