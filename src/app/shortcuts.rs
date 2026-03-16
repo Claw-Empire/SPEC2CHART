@@ -722,6 +722,65 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+Shift+T = insert Quick Support Ticket card (Intake → Triage → In Progress → Resolved)
+        {
+            let cmd_shift_t = egui::Modifiers { command: true, shift: true, ..Default::default() };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::T) && i.modifiers.matches_exact(cmd_shift_t)) {
+                let center = ctx.input(|i| i.pointer.hover_pos())
+                    .map(|s| self.viewport.screen_to_canvas(s))
+                    .unwrap_or_else(|| {
+                        let c = self.canvas_rect.center();
+                        self.viewport.screen_to_canvas(c)
+                    });
+                let spacing = 170.0_f32;
+                let total_w = spacing * 3.0;
+                let start_x = center.x - total_w / 2.0;
+                let y = center.y - 30.0;
+                // Intake=blue, Triage=purple, In Progress=yellow, Resolved=green
+                let labels = ["Intake", "Triage", "In Progress", "Resolved"];
+                let fills: [[u8; 4]; 4] = [
+                    [137, 180, 250, 255],  // blue — Intake
+                    [203, 166, 247, 255],  // purple — Triage
+                    [249, 226, 175, 255],  // yellow — In Progress
+                    [166, 227, 161, 255],  // green — Resolved
+                ];
+                let tags = [
+                    Some(crate::model::NodeTag::Info),
+                    Some(crate::model::NodeTag::Warning),
+                    Some(crate::model::NodeTag::Info),
+                    Some(crate::model::NodeTag::Ok),
+                ];
+                let section = "Support";
+                let mut ids = Vec::new();
+                for (k, ((&lbl, &fill), tag)) in labels.iter().zip(fills.iter()).zip(tags.iter()).enumerate() {
+                    let pos = egui::Pos2::new(start_x + k as f32 * spacing, y);
+                    let mut node = crate::model::Node::new(crate::model::NodeShape::RoundedRect, pos);
+                    node.size = [140.0, 54.0];
+                    if let crate::model::NodeKind::Shape { ref mut label, .. } = node.kind {
+                        *label = lbl.to_string();
+                    }
+                    node.style.fill_color = fill;
+                    node.style.text_color = crate::app::theme::auto_contrast_text(fill);
+                    node.section_name = section.to_string();
+                    node.tag = *tag;
+                    ids.push(node.id);
+                    self.document.nodes.push(node);
+                    self.node_birth_times.insert(*ids.last().unwrap(), ctx.input(|i| i.time));
+                }
+                for w in ids.windows(2) {
+                    let edge = crate::model::Edge::new(
+                        crate::model::Port { node_id: w[0], side: crate::model::PortSide::Right },
+                        crate::model::Port { node_id: w[1], side: crate::model::PortSide::Left  },
+                    );
+                    self.document.edges.push(edge);
+                }
+                self.selection.clear();
+                self.selection.select_node(ids[0]);
+                self.history.push(&self.document);
+                self.status_message = Some(("Support ticket card created — edit labels to begin".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+Shift+F = zoom to fit selected nodes (or all if nothing selected)
         let cmd_shift = egui::Modifiers { command: true, shift: true, ..Default::default() };
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd_shift)) {

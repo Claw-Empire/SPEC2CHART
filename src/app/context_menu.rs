@@ -292,22 +292,31 @@ impl FlowchartApp {
                 ui.label(egui::RichText::new("Common sections").size(10.0).weak());
             }
 
-            let presets = [
+            // Design thinking presets
+            let presets_design = [
                 "Hypotheses", "Assumptions", "Evidence", "Conclusions",
                 "Questions", "Experiments", "Options", "Risks",
                 "Roses", "Buds", "Thorns", "Actions",
                 "Strengths", "Weaknesses", "Opportunities", "Threats",
             ];
-            for &section in &presets {
-                if doc_sections.iter().any(|s| s.as_str() == section) { continue; } // skip dupes
-                let is_current = current_section.as_str() == section;
-                let label = if is_current { format!("✓ {section}") } else { section.to_string() };
-                if ui.button(label).clicked() {
-                    if let Some(n) = self.document.find_node_mut(&node_id) {
-                        n.section_name = if is_current { String::new() } else { section.to_string() };
+            // Support ops presets
+            let presets_support = [
+                "Intake", "Triage", "In Progress", "Resolved",
+                "Escalated", "Closed", "Backlog", "On Hold",
+                "P1 — Critical", "P2 — High", "P3 — Medium", "P4 — Low",
+            ];
+            for presets_group in [&presets_design[..], &presets_support[..]] {
+                for &section in presets_group {
+                    if doc_sections.iter().any(|s| s.as_str() == section) { continue; } // skip dupes
+                    let is_current = current_section.as_str() == section;
+                    let label = if is_current { format!("✓ {section}") } else { section.to_string() };
+                    if ui.button(label).clicked() {
+                        if let Some(n) = self.document.find_node_mut(&node_id) {
+                            n.section_name = if is_current { String::new() } else { section.to_string() };
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
                     }
-                    self.history.push(&self.document);
-                    ui.close_menu();
                 }
             }
             ui.separator();

@@ -713,6 +713,7 @@ impl FlowchartApp {
                             ("Multi-target", "a -> [b, c, d] {tags}  (shared-style fan-out)"),
                             ("Multi-source", "[a, b, c] -> target {tags}  (fan-in)"),
                             ("## Style", "primary = {fill:blue} {highlight}  →  use {primary}"),
+                            ("Quick cards", "⌘⇧E = Experiment card  ·  ⌘⇧T = Support ticket card"),
                             ("3D cam keys", "1=Iso  2=Top  3=Front  4=Side  (in 3D mode)"),
                             ("3D cam cfg", "camera = iso|top|front|side  (## Config)"),
                             ("3D auto-z", "auto-z = true  (auto-assign z from topology)"),
