@@ -941,7 +941,7 @@ impl FlowchartApp {
 
         self.draw_tag_filter_pills(&painter, canvas_rect, ui);
         self.draw_persistent_filter_chip(ui, canvas_rect);
-        self.draw_kanban_column_headers(&painter, canvas_rect);
+        self.draw_kanban_column_headers(ui, canvas_rect);
 
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
@@ -3653,7 +3653,8 @@ impl FlowchartApp {
 
     /// Sticky kanban column headers: pinned to top of canvas, show section name + ticket count.
     /// Only shown in LR layout with multiple sections when zoomed in enough.
-    fn draw_kanban_column_headers(&self, painter: &egui::Painter, canvas_rect: Rect) {
+    /// Clicking a header activates a `section:Name` filter (click again to clear).
+    fn draw_kanban_column_headers(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
         if self.document.layout_dir != "LR" { return; }
         if matches!(self.view_mode, super::ViewMode::ThreeD) { return; }
         if self.viewport.zoom < 0.3 { return; }
@@ -3667,20 +3668,20 @@ impl FlowchartApp {
         }
         if section_order.len() < 2 { return; }
 
-        let mut section_x_min: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
-        let mut section_x_max: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
-        let mut section_count: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+        let mut section_x_min: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        let mut section_x_max: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+        let mut section_count: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         for n in &self.document.nodes {
             if n.section_name.is_empty() { continue; }
             let sr = Rect::from_min_size(
                 self.viewport.canvas_to_screen(n.pos()),
                 n.size_vec() * self.viewport.zoom,
             );
-            let entry_min = section_x_min.entry(&n.section_name).or_insert(f32::MAX);
+            let entry_min = section_x_min.entry(n.section_name.clone()).or_insert(f32::MAX);
             *entry_min = entry_min.min(sr.min.x);
-            let entry_max = section_x_max.entry(&n.section_name).or_insert(f32::MIN);
+            let entry_max = section_x_max.entry(n.section_name.clone()).or_insert(f32::MIN);
             *entry_max = entry_max.max(sr.max.x);
-            *section_count.entry(&n.section_name).or_default() += 1;
+            *section_count.entry(n.section_name.clone()).or_default() += 1;
         }
 
         let header_h = 22.0_f32;
@@ -3692,27 +3693,65 @@ impl FlowchartApp {
             [166, 227, 161, 25], [249, 226, 175, 25], [243, 139, 168, 25],
         ];
 
+        // Determine active section filter
+        let active_section = self.search_query.strip_prefix("section:")
+            .map(|s| s.to_string());
+
+        let mut clicked_section: Option<String> = None;
         for (i, sec) in section_order.iter().enumerate() {
-            let x_min = match section_x_min.get(sec.as_str()) { Some(&v) => v, None => continue };
-            let x_max = match section_x_max.get(sec.as_str()) { Some(&v) => v, None => continue };
+            let x_min = match section_x_min.get(sec) { Some(&v) => v, None => continue };
+            let x_max = match section_x_max.get(sec) { Some(&v) => v, None => continue };
             let cx = (x_min + x_max) * 0.5;
             if cx < canvas_rect.min.x || cx > canvas_rect.max.x { continue; }
-            let count = section_count.get(sec.as_str()).copied().unwrap_or(0);
+            let count = section_count.get(sec).copied().unwrap_or(0);
             let col_w = (x_max - x_min + pad * 2.0).max(80.0);
             let header_rect = Rect::from_center_size(
                 egui::pos2(cx, top_y + header_h * 0.5),
                 egui::vec2(col_w.min(canvas_rect.width() - 20.0), header_h),
             );
+            let is_active = active_section.as_deref() == Some(sec.as_str());
             let fill = column_fills[i % column_fills.len()];
-            painter.rect_filled(header_rect, CornerRadius::same(5),
-                Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], 80));
-            painter.rect_stroke(header_rect, CornerRadius::same(5),
-                egui::Stroke::new(0.8, Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], 120)),
-                StrokeKind::Outside);
-            let label = format!("{}  {}", sec, count);
-            painter.text(header_rect.center(), Align2::CENTER_CENTER,
-                &label, egui::FontId::proportional(11.0),
-                Color32::from_rgba_unmultiplied(fill[0].saturating_add(60), fill[1].saturating_add(60), fill[2].saturating_add(60), 230));
+            let bg_alpha = if is_active { 160u8 } else { 80u8 };
+            {
+                let painter = ui.painter();
+                painter.rect_filled(header_rect, CornerRadius::same(5),
+                    Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], bg_alpha));
+                let stroke_alpha = if is_active { 220u8 } else { 120u8 };
+                painter.rect_stroke(header_rect, CornerRadius::same(5),
+                    egui::Stroke::new(if is_active { 1.5 } else { 0.8 }, Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], stroke_alpha)),
+                    StrokeKind::Outside);
+                let label = if is_active { format!("✕ {}  {}", sec, count) } else { format!("{}  {}", sec, count) };
+                let txt_alpha = 230u8;
+                painter.text(header_rect.center(), Align2::CENTER_CENTER,
+                    &label, egui::FontId::proportional(11.0),
+                    Color32::from_rgba_unmultiplied(fill[0].saturating_add(60), fill[1].saturating_add(60), fill[2].saturating_add(60), txt_alpha));
+            }
+            let resp = ui.allocate_rect(header_rect, egui::Sense::click());
+            if resp.clicked() {
+                clicked_section = Some(sec.clone());
+            }
+            // Tooltip hint
+            if resp.hovered() {
+                let painter = ui.painter();
+                painter.rect_stroke(header_rect, CornerRadius::same(5),
+                    egui::Stroke::new(1.5, Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], 200)),
+                    StrokeKind::Outside);
+            }
+        }
+
+        // Apply click
+        if let Some(sec) = clicked_section {
+            let filter = format!("section:{}", sec);
+            if self.search_query == filter && self.persist_search_filter {
+                // Toggle off
+                self.search_query.clear();
+                self.persist_search_filter = false;
+                self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+            } else {
+                self.search_query = filter;
+                self.persist_search_filter = true;
+                self.status_message = Some((format!("Showing: {}", sec), std::time::Instant::now()));
+            }
         }
     }
 
