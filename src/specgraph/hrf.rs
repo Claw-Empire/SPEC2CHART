@@ -2601,22 +2601,30 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             let prefix = if tag.starts_with("tooltip:") { 8 } else if tag.starts_with("tip:") { 4 } else { 5 };
             tooltip_text = Some(tag[prefix..].trim().to_string());
         } else if tag.starts_with("due:") || tag.starts_with("deadline:") || tag.starts_with("by:") {
-            // {due:2026-03-20} / {deadline:Q2} → sublabel "📅 date"
+            // {due:2026-03-20} / {deadline:Q2} → sublabel "📅 date" (compose with existing assignee)
             let prefix = if tag.starts_with("due:") { 4 }
                 else if tag.starts_with("deadline:") { 9 }
                 else { 3 }; // by:
             let date = tag[prefix..].trim();
             if !date.is_empty() {
-                sublabel_text = Some(format!("📅 {date}"));
+                let due_part = format!("📅 {date}");
+                sublabel_text = Some(match &sublabel_text {
+                    Some(existing) if existing.starts_with("👤") => format!("{}\n{}", existing, due_part),
+                    _ => due_part,
+                });
             }
         } else if tag.starts_with("assigned:") || tag.starts_with("owner:") || tag.starts_with("assignee:") {
-            // {assigned:Alice} / {owner:Bob} → sublabel "👤 name"
+            // {assigned:Alice} / {owner:Bob} → sublabel "👤 name" (compose with existing due date)
             let prefix = if tag.starts_with("assigned:") { 9 }
                 else if tag.starts_with("owner:") { 6 }
                 else { 9 }; // assignee:
             let name = tag[prefix..].trim();
             if !name.is_empty() {
-                sublabel_text = Some(format!("👤 {name}"));
+                let person_part = format!("👤 {name}");
+                sublabel_text = Some(match &sublabel_text {
+                    Some(existing) if existing.starts_with("📅") => format!("{}\n{}", person_part, existing),
+                    _ => person_part,
+                });
             }
         } else if tag.starts_with("sublabel:") || tag.starts_with("sub:") || tag.starts_with("subtitle:") || tag.starts_with("caption:") {
             let prefix = if tag.starts_with("sublabel:") { 9 }

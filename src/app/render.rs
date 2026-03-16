@@ -407,25 +407,27 @@ impl FlowchartApp {
         }
 
         // Sublabel: small secondary text below node (visible at normal+ zoom)
+        // Supports multi-line (split on '\n') for combined "👤 Alice\n📅 date" display
         if !node.sublabel.is_empty() && self.viewport.zoom > 0.45 {
             let sub_font_size = (9.5 * self.viewport.zoom.sqrt()).clamp(8.0, 14.0);
             let sub_col = to_color32(node.style.text_color).gamma_multiply(0.62);
-            let sub_pos = Pos2::new(screen_rect.center().x, screen_rect.max.y + sub_font_size * 0.25 + 1.0);
-            // Draw subtle background pill so it's legible over canvas bg
-            let sub_galley = painter.layout_no_wrap(
-                node.sublabel.clone(),
-                FontId::proportional(sub_font_size),
-                sub_col,
-            );
-            let pill_rect = Rect::from_center_size(sub_pos + Vec2::new(0.0, sub_font_size * 0.5), sub_galley.size() + Vec2::new(6.0, 3.0));
-            painter.rect_filled(pill_rect, CornerRadius::same(3), self.theme.canvas_bg.gamma_multiply(0.75));
-            painter.text(
-                sub_pos + Vec2::new(0.0, sub_font_size * 0.5),
-                Align2::CENTER_CENTER,
-                &node.sublabel,
-                FontId::proportional(sub_font_size),
-                sub_col,
-            );
+            let lines: Vec<&str> = node.sublabel.split('\n').collect();
+            let line_h = sub_font_size * 1.4;
+            let start_y = screen_rect.max.y + sub_font_size * 0.25 + 1.0;
+            for (li, line) in lines.iter().enumerate() {
+                if line.is_empty() { continue; }
+                let cy = start_y + li as f32 * line_h + sub_font_size * 0.5;
+                let sub_pos = Pos2::new(screen_rect.center().x, cy);
+                let sub_galley = painter.layout_no_wrap(
+                    line.to_string(),
+                    FontId::proportional(sub_font_size),
+                    sub_col,
+                );
+                let pill_rect = Rect::from_center_size(sub_pos, sub_galley.size() + Vec2::new(6.0, 3.0));
+                painter.rect_filled(pill_rect, CornerRadius::same(3), self.theme.canvas_bg.gamma_multiply(0.75));
+                painter.text(sub_pos, Align2::CENTER_CENTER, line,
+                    FontId::proportional(sub_font_size), sub_col);
+            }
         }
 
         // Progress bar (thin filled strip at node bottom; shown when progress > 0)

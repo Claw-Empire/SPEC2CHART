@@ -374,7 +374,9 @@ impl FlowchartApp {
                         } else { vec![node_id] };
                         for id in &ids {
                             if let Some(n) = self.document.find_node_mut(id) {
-                                n.sublabel = format!("👤 {}", name);
+                                // Preserve existing due date
+                                let due = n.sublabel.split('\n').find(|s| s.starts_with("📅")).map(|s| s.to_string());
+                                n.sublabel = if let Some(d) = due { format!("👤 {}\n{}", name, d) } else { format!("👤 {}", name) };
                             }
                         }
                         self.history.push(&self.document);
@@ -392,7 +394,8 @@ impl FlowchartApp {
                     } else { vec![node_id] };
                     for id in &ids {
                         if let Some(n) = self.document.find_node_mut(id) {
-                            n.sublabel = format!("👤 {}", name);
+                            let due = n.sublabel.split('\n').find(|s| s.starts_with("📅")).map(|s| s.to_string());
+                            n.sublabel = if let Some(d) = due { format!("👤 {}\n{}", name, d) } else { format!("👤 {}", name) };
                         }
                     }
                     self.history.push(&self.document);
@@ -406,7 +409,9 @@ impl FlowchartApp {
                 } else { vec![node_id] };
                 for id in &ids {
                     if let Some(n) = self.document.find_node_mut(id) {
-                        if n.sublabel.starts_with("👤") { n.sublabel.clear(); }
+                        // Keep due date if present
+                        let due = n.sublabel.split('\n').find(|s| s.starts_with("📅")).map(|s| s.to_string());
+                        n.sublabel = due.unwrap_or_default();
                     }
                 }
                 self.history.push(&self.document);
@@ -433,7 +438,9 @@ impl FlowchartApp {
                     } else { vec![node_id] };
                     for id in &ids {
                         if let Some(n) = self.document.find_node_mut(id) {
-                            n.sublabel = format!("📅 {}", date);
+                            // Preserve existing assignee
+                            let person = n.sublabel.split('\n').find(|s| s.starts_with("👤")).map(|s| s.to_string());
+                            n.sublabel = if let Some(p) = person { format!("{}\n📅 {}", p, date) } else { format!("📅 {}", date) };
                         }
                     }
                     self.history.push(&self.document);
@@ -447,7 +454,9 @@ impl FlowchartApp {
                 } else { vec![node_id] };
                 for id in &ids {
                     if let Some(n) = self.document.find_node_mut(id) {
-                        if n.sublabel.starts_with("📅") { n.sublabel.clear(); }
+                        // Keep assignee if present
+                        let person = n.sublabel.split('\n').find(|s| s.starts_with("👤")).map(|s| s.to_string());
+                        n.sublabel = person.unwrap_or_default();
                     }
                 }
                 self.history.push(&self.document);
