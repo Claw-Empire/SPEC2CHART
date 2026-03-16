@@ -771,6 +771,47 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+Shift+I = new intake ticket: creates a single ticket in the first section, opens for editing
+        {
+            let cmd_shift_i = egui::Modifiers { command: true, shift: true, ..Default::default() };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.matches_exact(cmd_shift_i)) {
+                // Find first section in document order
+                let first_section: String = self.document.nodes.iter()
+                    .find(|n| !n.section_name.is_empty())
+                    .map(|n| n.section_name.clone())
+                    .unwrap_or_else(|| "Intake".to_string());
+                let today = super::render::today_iso();
+                let canvas_center = {
+                    let c = self.canvas_rect.center();
+                    self.viewport.screen_to_canvas(c)
+                };
+                let mut node = crate::model::Node::new(crate::model::NodeShape::RoundedRect, canvas_center);
+                node.size = [160.0, 58.0];
+                if let crate::model::NodeKind::Shape { ref mut label, .. } = node.kind {
+                    *label = "New Ticket".to_string();
+                }
+                node.style.fill_color = [137, 180, 250, 255];
+                node.style.text_color = crate::app::theme::auto_contrast_text([137, 180, 250, 255]);
+                node.section_name = first_section.clone();
+                node.sublabel = format!("👤 \n📅 {}", today);
+                node.created_date = today;
+                let new_id = node.id;
+                self.document.nodes.push(node);
+                self.node_birth_times.insert(new_id, ctx.input(|i| i.time));
+                self.selection.select_node(new_id);
+                // Open inline editor for the label
+                self.inline_node_edit = Some((new_id, "New Ticket".to_string()));
+                self.history.push(&self.document);
+                // Animated layout
+                let mut doc_clone = self.document.clone();
+                for n in doc_clone.nodes.iter_mut() { if !n.pinned { n.position = [0.0, 0.0]; } }
+                crate::specgraph::layout::auto_layout(&mut doc_clone);
+                self.layout_targets.clear();
+                for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
+                self.status_message = Some((format!("New ticket → {}", first_section), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+Shift+T = insert Quick Support Ticket card (Intake → Triage → In Progress → Resolved)
         {
             let cmd_shift_t = egui::Modifiers { command: true, shift: true, ..Default::default() };
