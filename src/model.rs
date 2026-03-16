@@ -771,6 +771,14 @@ pub struct FlowchartDocument {
     /// Canonical ordered list of swim-lane labels (from `## Lane N:` sections or auto-discovered).
     #[serde(default)]
     pub timeline_lanes: Vec<String>,
+    /// SLA target days by priority index: [p1_days, p2_days, p3_days, p4_days].
+    /// Defaults to [1, 3, 7, 14]. Used to compute due dates for new intake tickets.
+    #[serde(default = "default_sla_days")]
+    pub sla_days: [u32; 4],
+}
+
+fn default_sla_days() -> [u32; 4] {
+    [1, 3, 7, 14]
 }
 
 impl FlowchartDocument {

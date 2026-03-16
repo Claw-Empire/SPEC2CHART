@@ -1234,6 +1234,19 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.layer_names.insert(idx, val.clone());
                 }
             }
+            // SLA target days by priority: sla-p1 = 1, sla-p2 = 3, etc.
+            "sla-p1" | "sla_p1" => {
+                if let Ok(v) = val.parse::<u32>() { doc.sla_days[0] = v; }
+            }
+            "sla-p2" | "sla_p2" => {
+                if let Ok(v) = val.parse::<u32>() { doc.sla_days[1] = v; }
+            }
+            "sla-p3" | "sla_p3" => {
+                if let Ok(v) = val.parse::<u32>() { doc.sla_days[2] = v; }
+            }
+            "sla-p4" | "sla_p4" => {
+                if let Ok(v) = val.parse::<u32>() { doc.sla_days[3] = v; }
+            }
             _ => {}
         }
     }

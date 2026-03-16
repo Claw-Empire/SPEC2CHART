@@ -803,11 +803,12 @@ impl FlowchartApp {
                     .max()
                     .unwrap_or(0);
                 let new_hrf_id = format!("t{}", max_t_id + 1);
-                // Default due = created + 7 days
+                // Default due = created + SLA days for P3 (from document config, default 7)
+                let p3_sla = self.document.sla_days[2].max(1) as i64;
                 let due_7d = {
                     use std::time::{SystemTime, UNIX_EPOCH};
                     let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
-                    let days7 = ((secs / 86400) + 7) as i32;
+                    let days7 = ((secs / 86400) + p3_sla) as i32;
                     let z = days7 + 719468;
                     let era = if z >= 0 { z } else { z - 146096 } / 146097;
                     let doe = (z - era * 146097) as u32;

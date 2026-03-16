@@ -728,6 +728,7 @@ impl FlowchartApp {
                             ("Kanban sort", "⌥P = sort by priority (P1→P4)  ·  ⌥D = sort by due date (soonest first)"),
                             ("Workload", "⌘⇧W = assignee×column matrix  (click row to filter)"),
                             ("SLA bar", "{created:} + 📅 due → color bar at node bottom (green→amber→red)"),
+                            ("SLA config", "sla-p1=1  sla-p2=3  sla-p3=7  sla-p4=14  (## Config, sets due days for ⌘⇧I)"),
                             ("Inline section", "{section:Intake} {stage:Triage} {col:Done}  (set kanban column inline)"),
                             ("CSV export", "⌘⇧X = copy tickets as CSV (selection or all nodes)"),
                             ("3D cam keys", "1=Iso  2=Top  3=Front  4=Side  (in 3D mode)"),

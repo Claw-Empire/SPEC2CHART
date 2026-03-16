@@ -8,6 +8,10 @@ Hover ticket 0.8s for SLA detail · ⌘⇧W workload panel · ] / [ advance/demo
 ## Config
 flow = LR
 spacing = 80
+sla-p1 = 1
+sla-p2 = 3
+sla-p3 = 7
+sla-p4 = 14
 
 ## Intake
 - [t1] Login page 500 errors {p1} {glow} {critical}
