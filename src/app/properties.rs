@@ -299,6 +299,7 @@ impl FlowchartApp {
     fn draw_node_properties(&mut self, ui: &mut egui::Ui) {
         let theme = self.theme.clone();
         let node_id = *self.selection.node_ids.iter().next().unwrap();
+        let sla_days_copy = self.document.sla_days; // copy before mutable borrow
         let mut applied_quick_style: Option<&'static str> = None;
         if let Some(node) = self.document.find_node_mut(&node_id) {
             let kind_name = match &node.kind {
@@ -481,6 +482,33 @@ impl FlowchartApp {
                                 ui.label(egui::RichText::new(format!("SLA: {}% elapsed ({}/{} days)", pct, elapsed, total)).size(10.5).color(sla_col));
                             }
                         }
+                    }
+
+                    // Ticket ID + Priority + SLA target (when set)
+                    if !node.hrf_id.is_empty() || node.priority > 0 {
+                        ui.add_space(6.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if !node.hrf_id.is_empty() {
+                                ui.label(egui::RichText::new(format!("#{}", node.hrf_id))
+                                    .size(11.0).monospace().color(theme.text_dim.gamma_multiply(0.7)));
+                            }
+                            if node.priority > 0 {
+                                let (p_label, p_col) = match node.priority {
+                                    1 => ("P1", Color32::from_rgb(243, 139, 168)),
+                                    2 => ("P2", Color32::from_rgb(250, 179, 135)),
+                                    3 => ("P3", Color32::from_rgb(137, 180, 250)),
+                                    _ => ("P4", Color32::from_rgb(166, 227, 161)),
+                                };
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new(p_label).size(11.0).strong().color(p_col));
+                                // SLA target from configured sla_days
+                                let sla_idx = (node.priority as usize).saturating_sub(1).min(3);
+                                let target_days = sla_days_copy[sla_idx];
+                                let tgt_label = if target_days == 1 { "SLA: 1 day".to_string() } else { format!("SLA: {} days", target_days) };
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new(&tgt_label).size(10.5).color(theme.text_dim.gamma_multiply(0.65)));
+                            }
+                        });
                     }
 
                     // Section (groups node with colored background on canvas)
@@ -1623,19 +1651,20 @@ impl FlowchartApp {
         // Batch priority
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Priority:").size(10.5).color(self.theme.text_dim));
-            let pris: &[(Option<crate::model::NodeTag>, [u8;4], &str)] = &[
-                (Some(crate::model::NodeTag::Critical), [243, 139, 168, 255], "P1"),
-                (Some(crate::model::NodeTag::Warning),  [250, 179, 135, 255], "P2"),
-                (Some(crate::model::NodeTag::Info),     [137, 180, 250, 255], "P3"),
-                (None,                                  [166, 227, 161, 255], "P4"),
+            let pris: &[(Option<crate::model::NodeTag>, u8, [u8;4], &str)] = &[
+                (Some(crate::model::NodeTag::Critical), 1, [243, 139, 168, 255], "P1"),
+                (Some(crate::model::NodeTag::Warning),  2, [250, 179, 135, 255], "P2"),
+                (Some(crate::model::NodeTag::Info),     3, [137, 180, 250, 255], "P3"),
+                (None,                                  4, [166, 227, 161, 255], "P4"),
             ];
-            for (tag, fill, label) in pris {
+            for (tag, prio, fill, label) in pris {
                 let col = to_color32(*fill);
                 if ui.add(egui::Button::new(egui::RichText::new(*label).size(10.0).color(egui::Color32::from_rgb(20,20,30))).fill(col)).clicked() {
                     let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
                     for id in &ids {
                         if let Some(n) = self.document.find_node_mut(id) {
                             n.tag = *tag;
+                            n.priority = *prio;
                             n.style.fill_color = *fill;
                         }
                     }
