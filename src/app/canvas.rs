@@ -3740,8 +3740,11 @@ impl FlowchartApp {
         let mut section_x_min: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
         let mut section_x_max: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
         let mut section_count: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut section_done: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut section_overdue: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let today_hdr = super::render::today_iso();
         for n in &self.document.nodes {
-            if n.section_name.is_empty() { continue; }
+            if n.section_name.is_empty() || n.is_frame { continue; }
             let sr = Rect::from_min_size(
                 self.viewport.canvas_to_screen(n.pos()),
                 n.size_vec() * self.viewport.zoom,
@@ -3751,6 +3754,16 @@ impl FlowchartApp {
             let entry_max = section_x_max.entry(n.section_name.clone()).or_insert(f32::MIN);
             *entry_max = entry_max.max(sr.max.x);
             *section_count.entry(n.section_name.clone()).or_default() += 1;
+            if matches!(n.tag, Some(crate::model::NodeTag::Ok)) || n.progress >= 1.0 {
+                *section_done.entry(n.section_name.clone()).or_default() += 1;
+            }
+            let is_over = n.sublabel.split('\n').any(|line| {
+                if let Some(ds) = line.strip_prefix("📅 ") {
+                    let d = ds.trim();
+                    d.len() >= 8 && d < today_hdr.as_str()
+                } else { false }
+            });
+            if is_over { *section_overdue.entry(n.section_name.clone()).or_default() += 1; }
         }
 
         let header_h = 22.0_f32;
@@ -3789,11 +3802,20 @@ impl FlowchartApp {
                 painter.rect_stroke(header_rect, CornerRadius::same(5),
                     egui::Stroke::new(if is_active { 1.5 } else { 0.8 }, Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], stroke_alpha)),
                     StrokeKind::Outside);
-                let label = if is_active { format!("✕ {}  {}", sec, count) } else { format!("{}  {}", sec, count) };
+                let done = section_done.get(sec).copied().unwrap_or(0);
+                let overdue = section_overdue.get(sec).copied().unwrap_or(0);
+                let done_part = if done > 0 { format!("  ✓{}/{}", done, count) } else { format!("  {}", count) };
+                let overdue_part = if overdue > 0 { format!("  ⚠{}", overdue) } else { String::new() };
+                let dismiss = if is_active { "✕ " } else { "" };
+                let label = format!("{}{}{}{}", dismiss, sec, done_part, overdue_part);
                 let txt_alpha = 230u8;
+                let txt_col = if overdue > 0 {
+                    Color32::from_rgba_unmultiplied(243, 139, 168, txt_alpha)
+                } else {
+                    Color32::from_rgba_unmultiplied(fill[0].saturating_add(60), fill[1].saturating_add(60), fill[2].saturating_add(60), txt_alpha)
+                };
                 painter.text(header_rect.center(), Align2::CENTER_CENTER,
-                    &label, egui::FontId::proportional(11.0),
-                    Color32::from_rgba_unmultiplied(fill[0].saturating_add(60), fill[1].saturating_add(60), fill[2].saturating_add(60), txt_alpha));
+                    &label, egui::FontId::proportional(11.0), txt_col);
             }
             let resp = ui.allocate_rect(header_rect, egui::Sense::click());
             if resp.clicked() {
