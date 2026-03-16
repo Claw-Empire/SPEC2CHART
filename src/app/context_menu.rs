@@ -466,18 +466,41 @@ impl FlowchartApp {
 
         // Due date quick-set submenu
         ui.menu_button("📅 Set Due Date…", |ui| {
-            let today_str = "2026-03-16";
-            // Pre-compute common relative dates
-            let date_opts: &[(&str, &str)] = &[
-                ("Today (2026-03-16)",        "2026-03-16"),
-                ("Tomorrow (2026-03-17)",     "2026-03-17"),
-                ("This Friday (2026-03-20)",  "2026-03-20"),
-                ("Next Monday (2026-03-23)",  "2026-03-23"),
-                ("End of month (2026-03-31)", "2026-03-31"),
-                ("End of Q2 (2026-06-30)",    "2026-06-30"),
+            let today_str = crate::app::render::today_iso();
+            // Compute relative dates dynamically
+            let add_days_str = |offset: i64| -> String {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+                let day_n = (secs / 86400) + offset;
+                let z = day_n as i32 + 719468;
+                let era = if z >= 0 { z } else { z - 146096 } / 146097;
+                let doe = (z - era * 146097) as u32;
+                let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+                let y = yoe as i32 + era * 400;
+                let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                let mp = (5 * doy + 2) / 153;
+                let d = doy - (153 * mp + 2) / 5 + 1;
+                let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                let y = if m <= 2 { y + 1 } else { y };
+                format!("{:04}-{:02}-{:02}", y, m, d)
+            };
+            let t0 = today_str.clone();
+            let t1 = add_days_str(1);
+            let t3 = add_days_str(3);
+            let t7 = add_days_str(7);
+            let t14 = add_days_str(14);
+            let t30 = add_days_str(30);
+            let date_opts: Vec<(String, String)> = vec![
+                (format!("Today ({})", t0), t0),
+                (format!("Tomorrow ({})", t1), t1),
+                (format!("+3 days ({})", t3), t3),
+                (format!("+1 week ({})", t7), t7),
+                (format!("+2 weeks ({})", t14), t14),
+                (format!("+30 days ({})", t30), t30),
             ];
-            for (label, date) in date_opts {
-                if ui.button(*label).clicked() {
+            let date_opts: Vec<(&str, &str)> = date_opts.iter().map(|(l, d)| (l.as_str(), d.as_str())).collect();
+            for (label, date) in &date_opts {
+                if ui.button(label.clone()).clicked() {
                     let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
                         self.selection.node_ids.iter().copied().collect()
                     } else { vec![node_id] };
