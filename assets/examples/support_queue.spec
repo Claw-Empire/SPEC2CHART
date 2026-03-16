@@ -1,8 +1,9 @@
 # Customer Support Queue
 
 Live kanban for active support tickets.
-Use ⇧D/⇧W to set due dates · P key to set priority · S key to cycle status.
-] / [ to advance or demote a ticket · ⌘↩ to mark done · ⌘⇧R for markdown report · ⌘⇧X for CSV export.
+⇧E escalate (P1+Triage) · P priority · S status · A assign · ] / [ advance/demote column
+⌃1/2/3/4 jump to section · ⌘↩ done · ⇧D due today · ⇧W due next week
+Hover ticket 0.8s for SLA detail · ⌘⇧W workload · ⌘⇧R report · ⌘⇧X CSV
 
 ## Config
 flow = LR
