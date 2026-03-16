@@ -1174,6 +1174,16 @@ impl FlowchartApp {
             self.toggle_dark_mode(ctx);
         }
 
+        // Cmd+Shift+W = toggle workload summary panel
+        {
+            let cmd_shift_w = Modifiers { shift: true, ..cmd };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.matches_exact(cmd_shift_w)) {
+                self.show_workload_panel = !self.show_workload_panel;
+                let msg = if self.show_workload_panel { "Workload Panel On" } else { "Workload Panel Off" };
+                self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            }
+        }
+
         // W = toggle focus mode (dim non-selected)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.is_none()) {
             self.focus_mode = !self.focus_mode;

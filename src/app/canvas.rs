@@ -954,6 +954,9 @@ impl FlowchartApp {
         if self.show_quick_notes {
             self.draw_quick_notes_panel(ui, canvas_rect);
         }
+        if self.show_workload_panel {
+            self.draw_workload_panel(ui, canvas_rect);
+        }
 
         // Minimap click-to-pan and drag-to-pan (only when minimap is visible)
         if self.show_minimap {
@@ -3509,6 +3512,139 @@ impl FlowchartApp {
             .frame(false)
             .text_color(Color32::from_rgba_unmultiplied(80, 55, 15, 230))
         );
+    }
+
+    /// Workload summary panel (Cmd+Shift+W): assignee × section ticket counts
+    fn draw_workload_panel(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        // Collect sections in order of first occurrence
+        let mut section_order: Vec<String> = Vec::new();
+        let mut seen_sections: BTreeSet<String> = BTreeSet::new();
+        for n in &self.document.nodes {
+            if !n.section_name.is_empty() && !seen_sections.contains(&n.section_name) {
+                section_order.push(n.section_name.clone());
+                seen_sections.insert(n.section_name.clone());
+            }
+        }
+
+        // Build: assignee -> (section -> count)
+        let mut workload: BTreeMap<String, BTreeMap<String, u32>> = BTreeMap::new();
+        for n in &self.document.nodes {
+            let assignee = n.sublabel.lines()
+                .find(|l| l.starts_with("👤 "))
+                .and_then(|l| l.strip_prefix("👤 "))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| "Unassigned".to_string());
+            let section = if n.section_name.is_empty() { "—".to_string() } else { n.section_name.clone() };
+            *workload.entry(assignee).or_default().entry(section).or_default() += 1;
+        }
+        if workload.is_empty() { self.show_workload_panel = false; return; }
+
+        let row_h = 18.0_f32;
+        let col_w = 56.0_f32;
+        let label_w = 90.0_f32;
+        let header_h = 32.0_f32;
+        let panel_w = label_w + col_w * section_order.len() as f32 + col_w + 16.0;
+        let panel_h = header_h + row_h * workload.len() as f32 + 24.0;
+        let panel_w = panel_w.clamp(240.0, canvas_rect.width() - 32.0);
+        let margin = 16.0_f32;
+        let panel_rect = Rect::from_min_size(
+            egui::pos2(
+                canvas_rect.max.x - panel_w - margin - 200.0, // offset left of properties panel
+                canvas_rect.min.y + margin + 14.0,
+            ),
+            egui::vec2(panel_w, panel_h),
+        );
+
+        let painter = ui.painter();
+        painter.rect_filled(panel_rect, CornerRadius::same(8), self.theme.tooltip_bg);
+        painter.rect_stroke(panel_rect, CornerRadius::same(8),
+            Stroke::new(1.2, self.theme.surface1), StrokeKind::Outside);
+
+        // Title
+        painter.text(
+            panel_rect.min + egui::vec2(10.0, 8.0), Align2::LEFT_TOP,
+            "👥 Workload  ⌘⇧W",
+            egui::FontId::proportional(11.0), self.theme.text_secondary,
+        );
+
+        // Column headers: sections
+        let header_y = panel_rect.min.y + header_h - row_h;
+        let mut col_x = panel_rect.min.x + label_w;
+        for sec in &section_order {
+            let short = if sec.len() > 6 { format!("{}…", &sec[..5]) } else { sec.clone() };
+            painter.text(
+                egui::pos2(col_x + col_w * 0.5, header_y), Align2::CENTER_BOTTOM,
+                &short, egui::FontId::proportional(9.5), self.theme.text_secondary,
+            );
+            col_x += col_w;
+        }
+        // Total column header
+        painter.text(
+            egui::pos2(col_x + col_w * 0.5, header_y), Align2::CENTER_BOTTOM,
+            "Total", egui::FontId::proportional(9.5), self.theme.text_secondary,
+        );
+
+        // Rows: one per assignee
+        let mut row_y = panel_rect.min.y + header_h;
+        for (assignee, section_counts) in &workload {
+            let row_rect = Rect::from_min_size(
+                egui::pos2(panel_rect.min.x, row_y),
+                egui::vec2(panel_w, row_h),
+            );
+            // Alternate row bg
+            if (row_y as i32 / row_h as i32) % 2 == 0 {
+                painter.rect_filled(row_rect, CornerRadius::ZERO, self.theme.surface0.linear_multiply(0.5));
+            }
+            // Assignee label
+            let short_name = if assignee.len() > 11 { format!("{}…", &assignee[..10]) } else { assignee.clone() };
+            painter.text(
+                egui::pos2(panel_rect.min.x + 8.0, row_y + row_h * 0.5), Align2::LEFT_CENTER,
+                &short_name, egui::FontId::proportional(11.0), self.theme.text_primary,
+            );
+            // Section counts
+            let mut col_x2 = panel_rect.min.x + label_w;
+            let mut total = 0u32;
+            for sec in &section_order {
+                let count = section_counts.get(sec).copied().unwrap_or(0);
+                total += count;
+                if count > 0 {
+                    let count_str = count.to_string();
+                    // Color by section position: later sections (resolved) = green
+                    let sec_idx = section_order.iter().position(|s| s == sec).unwrap_or(0);
+                    let frac = sec_idx as f32 / section_order.len().max(1) as f32;
+                    let cell_color = if frac >= 0.75 {
+                        Color32::from_rgba_unmultiplied(166, 227, 161, 200) // done/resolved
+                    } else if frac >= 0.5 {
+                        Color32::from_rgba_unmultiplied(137, 180, 250, 200) // in progress
+                    } else if frac >= 0.25 {
+                        Color32::from_rgba_unmultiplied(250, 179, 135, 200) // triage
+                    } else {
+                        Color32::from_rgba_unmultiplied(203, 166, 247, 200) // intake
+                    };
+                    let cell_rect = Rect::from_center_size(
+                        egui::pos2(col_x2 + col_w * 0.5, row_y + row_h * 0.5),
+                        egui::vec2(col_w - 8.0, row_h - 4.0),
+                    );
+                    painter.rect_filled(cell_rect, CornerRadius::same(4), cell_color.linear_multiply(0.3));
+                    painter.text(cell_rect.center(), Align2::CENTER_CENTER,
+                        &count_str, egui::FontId::proportional(11.0), cell_color);
+                }
+                col_x2 += col_w;
+            }
+            // Total
+            painter.text(
+                egui::pos2(col_x2 + col_w * 0.5, row_y + row_h * 0.5), Align2::CENTER_CENTER,
+                &total.to_string(), egui::FontId::proportional(11.0), self.theme.text_secondary,
+            );
+            row_y += row_h;
+        }
+
+        // Close on Escape
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_workload_panel = false;
+        }
     }
 
     fn draw_heatmap_overlay(&self, painter: &egui::Painter, canvas_rect: Rect) {
