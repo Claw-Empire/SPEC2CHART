@@ -624,7 +624,81 @@ impl FlowchartApp {
             let today_str = super::render::today_iso();
             self.document.nodes.iter()
                 .filter(|n| {
-                    // Smart filter prefixes
+                    // ── Multi-term AND mode ──────────────────────────────────────
+                    // "p1 overdue", "@alice due:3", "@bob p2 section:Triage", etc.
+                    // Activated when query has spaces and doesn't start with a colon-prefix.
+                    if q.contains(' ') && !q.starts_with("status:") && !q.starts_with("section:") {
+                        let colon_before_space = q.find(':').map_or(false, |ci| q.find(' ').map_or(false, |si| ci < si));
+                        if !colon_before_space {
+                            let tokens: Vec<&str> = q.split_whitespace().collect();
+                            if tokens.len() >= 2 {
+                                // Evaluate each token as a standalone predicate and AND them
+                                let match_term = |term: &str| -> bool {
+                                    match term {
+                                        "p1" => n.priority == 1 || matches!(n.tag, Some(crate::model::NodeTag::Critical)),
+                                        "p2" => n.priority == 2 || matches!(n.tag, Some(crate::model::NodeTag::Warning)),
+                                        "p3" => n.priority == 3 || matches!(n.tag, Some(crate::model::NodeTag::Info)),
+                                        "p4" => n.priority == 4,
+                                        "overdue" | "late" | "past-due" | "sla-breach" => {
+                                            n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
+                                                .map_or(false, |d| d.trim() <= today_str.as_str() && d.len() >= 8)
+                                        }
+                                        "upcoming" => {
+                                            n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
+                                                .map_or(false, |d| d.trim() > today_str.as_str())
+                                        }
+                                        "linked" => self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
+                                        "orphan" | "unlinked" => !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
+                                        "assigned" | "has-owner" => n.sublabel.contains("👤"),
+                                        "unassigned" | "no-owner" => !n.sublabel.contains("👤"),
+                                        "glow" | "highlighted" => n.style.glow || n.highlight,
+                                        "commented" | "has-comment" => !n.comment.is_empty(),
+                                        _ => {
+                                            if let Some(at_q) = term.strip_prefix('@') {
+                                                return n.sublabel.to_lowercase().contains(at_q);
+                                            }
+                                            if let Some(id_q) = term.strip_prefix('#') {
+                                                return n.hrf_id.to_lowercase() == id_q || n.hrf_id.to_lowercase().starts_with(id_q);
+                                            }
+                                            if let Some(aq) = term.strip_prefix("assigned:").or_else(|| term.strip_prefix("assignee:")) {
+                                                return n.sublabel.to_lowercase().contains(aq);
+                                            }
+                                            if let Some(sq) = term.strip_prefix("section:") {
+                                                return n.section_name.to_lowercase().contains(sq);
+                                            }
+                                            if let Some(due_q) = term.strip_prefix("due:") {
+                                                let date_opt = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ").map(|s| s.trim().to_string()));
+                                                return match due_q {
+                                                    "today" => date_opt.as_deref() == Some(today_str.as_str()),
+                                                    "overdue" | "late" => date_opt.as_deref().map_or(false, |d| d <= today_str.as_str()),
+                                                    _ => due_q.parse::<i32>().map_or(false, |nd| {
+                                                        date_opt.as_ref().map_or(false, |d| super::render::iso_days_remaining_pub(d.trim(), &today_str) <= nd)
+                                                    }),
+                                                };
+                                            }
+                                            if let Some(cq) = term.strip_prefix("comment:") {
+                                                return n.comment.to_lowercase().contains(cq);
+                                            }
+                                            if let Some(sq) = term.strip_prefix("status:") {
+                                                return match sq {
+                                                    "done" => matches!(n.tag, Some(crate::model::NodeTag::Ok)),
+                                                    "blocked" => matches!(n.tag, Some(crate::model::NodeTag::Critical)),
+                                                    "wip" => matches!(n.tag, Some(crate::model::NodeTag::Info)),
+                                                    "todo" => matches!(n.tag, Some(crate::model::NodeTag::Warning)),
+                                                    _ => false,
+                                                };
+                                            }
+                                            // Unknown token: text search
+                                            let lbl = n.display_label().to_lowercase();
+                                            lbl.contains(term) || n.sublabel.to_lowercase().contains(term) || n.section_name.to_lowercase().contains(term)
+                                        }
+                                    }
+                                };
+                                return tokens.iter().all(|t| match_term(t));
+                            }
+                        }
+                    }
+                    // ── Single-term smart filter prefixes ────────────────────────
                     if let Some(status_q) = q.strip_prefix("status:") {
                         let tag_match = match status_q.trim() {
                             "done"    | "✅" => matches!(n.tag, Some(crate::model::NodeTag::Ok)),
