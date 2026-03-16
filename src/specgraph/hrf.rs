@@ -2469,6 +2469,25 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
         } else if tag == "todo" || tag == "pending" || tag == "backlog" || tag == "queued" {
             // Status shorthand: todo → Warning badge (no progress)
             if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+        } else if tag == "p1" || tag == "priority-1" || tag == "sev1" || tag == "sev-1" {
+            // Support priority/severity shorthand: P1/SEV-1 → Critical badge + red fill
+            if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
+            if fill_color.is_none() { fill_color = Some([243, 139, 168, 255]); } // red
+        } else if tag == "p2" || tag == "priority-2" || tag == "sev2" || tag == "sev-2" {
+            // Support priority: P2/SEV-2 → Warning badge + orange fill
+            if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+            if fill_color.is_none() { fill_color = Some([250, 179, 135, 255]); } // orange
+        } else if tag == "p3" || tag == "priority-3" || tag == "sev3" || tag == "sev-3" {
+            // Support priority: P3/SEV-3 → Info badge + blue fill
+            if node_tag.is_none() { node_tag = Some(NodeTag::Info); }
+            if fill_color.is_none() { fill_color = Some([137, 180, 250, 255]); } // blue
+        } else if tag == "p4" || tag == "priority-4" {
+            // Support priority: P4 → no badge (low), subtle green fill
+            if fill_color.is_none() { fill_color = Some([166, 227, 161, 255]); } // green
+        } else if tag == "escalated" || tag == "escalate" {
+            // Escalation shorthand: escalated → Critical badge + glow (needs immediate attention)
+            if node_tag.is_none() { node_tag = Some(NodeTag::Critical); }
+            node_glow = true;
         } else if tag == "glow" || tag == "neon" || tag == "glow-node" {
             node_glow = true;
         } else if tag.starts_with("shape:") || tag.starts_with("type:") || tag.starts_with("kind:") {
