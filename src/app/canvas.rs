@@ -923,6 +923,7 @@ impl FlowchartApp {
         self.draw_empty_canvas_hint(&painter, canvas_rect);
         let sm_clone = search_matches.clone();
         self.draw_search_overlay(ui, canvas_rect, &sm_clone);
+        self.draw_section_navigator(ui, canvas_rect);
         self.draw_zoom_presets(ui, canvas_rect);
         if self.show_minimap {
             self.draw_minimap(&painter, canvas_rect);
@@ -2400,6 +2401,117 @@ impl FlowchartApp {
                 }
                 break;
             }
+        }
+    }
+
+    /// Horizontal pill strip at bottom-center: one pill per section, click to pan there.
+    fn draw_section_navigator(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        // Collect unique sections with counts and dominant tag color
+        use std::collections::BTreeMap;
+        #[derive(Default)]
+        struct SecInfo { total: u32, critical: u32, warning: u32, ok: u32, info: u32 }
+        let mut sec_map: BTreeMap<String, SecInfo> = BTreeMap::new();
+        for node in &self.document.nodes {
+            if node.section_name.is_empty() { continue; }
+            let e = sec_map.entry(node.section_name.clone()).or_default();
+            e.total += 1;
+            match node.tag {
+                Some(crate::model::NodeTag::Critical) => e.critical += 1,
+                Some(crate::model::NodeTag::Warning)  => e.warning += 1,
+                Some(crate::model::NodeTag::Ok)        => e.ok += 1,
+                Some(crate::model::NodeTag::Info)      => e.info += 1,
+                None => {}
+            }
+        }
+        if sec_map.is_empty() { return; }
+
+        let pill_h = 22.0_f32;
+        let pill_pad_x = 10.0_f32;
+        let pill_gap = 5.0_f32;
+        let bottom_margin = 36.0_f32; // above status bar
+
+        // Compute pill widths
+        let sections: Vec<(String, SecInfo)> = sec_map.into_iter().collect();
+        let font = FontId::proportional(10.5);
+        // Estimate pill widths (approx 6.5px/char + padding)
+        let pill_widths: Vec<f32> = sections.iter().map(|(name, info)| {
+            let chars = name.chars().count().min(14);
+            let count_chars = format!("{}", info.total).len();
+            (chars + count_chars + 2) as f32 * 6.5 + pill_pad_x * 2.0 + 14.0
+        }).collect();
+        let total_w: f32 = pill_widths.iter().sum::<f32>() + pill_gap * (sections.len().saturating_sub(1)) as f32;
+
+        // Center horizontally, bottom-anchored
+        let start_x = canvas_rect.center().x - total_w / 2.0;
+        let pill_y = canvas_rect.max.y - bottom_margin - pill_h;
+
+        let hover_pos = ui.ctx().input(|i| i.pointer.hover_pos());
+        let clicked   = ui.ctx().input(|i| i.pointer.primary_clicked());
+
+        let mut x = start_x;
+        for ((name, info), pw) in sections.iter().zip(pill_widths.iter()) {
+            let pill_rect = Rect::from_min_size(
+                Pos2::new(x, pill_y),
+                Vec2::new(*pw, pill_h),
+            );
+            let hovered = hover_pos.map_or(false, |p| pill_rect.contains(p));
+
+            // Dominant status color for pill border
+            let border_col = if info.critical > 0 {
+                Color32::from_rgb(243, 139, 168)
+            } else if info.warning > 0 {
+                Color32::from_rgb(250, 179, 135)
+            } else if info.ok > 0 {
+                Color32::from_rgb(166, 227, 161)
+            } else if info.info > 0 {
+                Color32::from_rgb(137, 180, 250)
+            } else {
+                self.theme.accent.gamma_multiply(0.4)
+            };
+
+            let bg = if hovered {
+                Color32::from_rgba_unmultiplied(30, 30, 50, 230)
+            } else {
+                Color32::from_rgba_unmultiplied(18, 18, 28, 200)
+            };
+            let painter = ui.painter();
+            painter.rect(pill_rect, CornerRadius::same(11),
+                bg, Stroke::new(1.0, border_col), StrokeKind::Inside);
+
+            // Label: truncate name
+            let short: String = name.chars().take(14).collect();
+            let trail = if name.chars().count() > 14 { "…" } else { "" };
+            let disp = format!("{}{} {}", short, trail, info.total);
+            let label_col = if hovered { self.theme.text_primary } else { self.theme.text_secondary };
+            painter.text(
+                pill_rect.center(),
+                Align2::CENTER_CENTER, &disp,
+                font.clone(), label_col,
+            );
+
+            // Pan on click
+            if hovered && clicked {
+                let sec_rects: Vec<Rect> = self.document.nodes.iter()
+                    .filter(|n| &n.section_name == name)
+                    .map(|n| n.rect())
+                    .collect();
+                if let Some(first) = sec_rects.first() {
+                    let mut bb = *first;
+                    for r in &sec_rects[1..] { bb = bb.union(*r); }
+                    let zoom = self.viewport.zoom;
+                    let cx = canvas_rect.center().x;
+                    let cy = canvas_rect.center().y;
+                    let target_ox = cx - bb.center().x * zoom;
+                    let target_oy = cy - bb.center().y * zoom;
+                    self.pan_target = Some([target_ox, target_oy]);
+                    self.status_message = Some((
+                        format!("→ \"{}\" ({} nodes)", name, info.total),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+
+            x += pw + pill_gap;
         }
     }
 
