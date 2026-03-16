@@ -1057,19 +1057,48 @@ impl FlowchartApp {
 
         // P = cycle background pattern
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.is_none()) {
-            self.bg_pattern = match self.bg_pattern {
-                super::BgPattern::Dots       => super::BgPattern::Lines,
-                super::BgPattern::Lines      => super::BgPattern::Crosshatch,
-                super::BgPattern::Crosshatch => super::BgPattern::None,
-                super::BgPattern::None       => super::BgPattern::Dots,
-            };
-            let name = match self.bg_pattern {
-                super::BgPattern::Dots       => "Dots",
-                super::BgPattern::Lines      => "Lines",
-                super::BgPattern::Crosshatch => "Crosshatch",
-                super::BgPattern::None       => "No pattern",
-            };
-            self.status_message = Some((name.to_string(), std::time::Instant::now()));
+            if !self.selection.node_ids.is_empty() {
+                // P + nodes selected → cycle support priority: None→P1→P2→P3→P4→None
+                let node_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                // Determine next priority from first selected node
+                let current_tag = self.document.find_node(node_ids.first().unwrap())
+                    .and_then(|n| n.tag);
+                let (new_tag, new_fill, label) = match current_tag {
+                    None => (Some(crate::model::NodeTag::Critical), Some([243u8, 139, 168, 255]), "P1 — Critical"),
+                    Some(crate::model::NodeTag::Critical) => (Some(crate::model::NodeTag::Warning), Some([250u8, 179, 135, 255]), "P2 — High"),
+                    Some(crate::model::NodeTag::Warning)  => (Some(crate::model::NodeTag::Info),     Some([137u8, 180, 250, 255]), "P3 — Medium"),
+                    Some(crate::model::NodeTag::Info)      => (None,                                   Some([166u8, 227, 161, 255]), "P4 — Low"),
+                    Some(crate::model::NodeTag::Ok)        => (None,                                   None,                         "No priority"),
+                };
+                for id in &node_ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        node.tag = new_tag;
+                        if let Some(fc) = new_fill {
+                            node.style.fill_color = fc;
+                        } else {
+                            // Reset to default fill
+                            node.style.fill_color = crate::model::NodeStyle::default().fill_color;
+                        }
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some((format!("Priority: {}", label), std::time::Instant::now()));
+            } else {
+                // No selection: cycle background pattern
+                self.bg_pattern = match self.bg_pattern {
+                    super::BgPattern::Dots       => super::BgPattern::Lines,
+                    super::BgPattern::Lines      => super::BgPattern::Crosshatch,
+                    super::BgPattern::Crosshatch => super::BgPattern::None,
+                    super::BgPattern::None       => super::BgPattern::Dots,
+                };
+                let name = match self.bg_pattern {
+                    super::BgPattern::Dots       => "Dots",
+                    super::BgPattern::Lines      => "Lines",
+                    super::BgPattern::Crosshatch => "Crosshatch",
+                    super::BgPattern::None       => "No pattern",
+                };
+                self.status_message = Some((name.to_string(), std::time::Instant::now()));
+            }
         }
 
         // Shift+T = toggle dark/light mode (full theme switch)

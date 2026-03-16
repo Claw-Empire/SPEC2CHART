@@ -2031,6 +2031,20 @@ impl FlowchartApp {
                 else if s.contains("observation") || s.contains("insight") { "👁 " }
                 else if s.contains("strength") || s.contains("opportunit") { "🌱 " }
                 else if s.contains("weakness") || s.contains("threat") { "⚡ " }
+                // Support ops sections
+                else if s.contains("intake") || s.contains("inbound") { "📥 " }
+                else if s.contains("triage") { "🔍 " }
+                else if s.contains("in progress") || s.contains("active") { "🔄 " }
+                else if s.contains("resolved") || s.contains("closed") || s.contains("done") { "✅ " }
+                else if s.contains("escalat") { "🚨 " }
+                else if s.contains("backlog") || s.contains("on hold") { "🗂 " }
+                else if s == "p1" || s.contains("critical") { "🔴 " }
+                else if s == "p2" || s.contains("high") { "🟠 " }
+                else if s == "p3" || s.contains("medium") { "🔵 " }
+                else if s == "p4" || s.contains("low") { "🟢 " }
+                else if s.contains("postmortem") || s.contains("retro") { "📋 " }
+                else if s.contains("timeline") || s.contains("schedule") { "📅 " }
+                else if s.contains("root cause") { "💡 " }
                 else { "" };
 
             let display = format!("{icon}{section_name}");

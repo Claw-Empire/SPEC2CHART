@@ -258,6 +258,9 @@ impl FlowchartApp {
                 ("Del / ⌫", "Delete"),
                 ("⌘C / ⌘V", "Copy / Paste"),
                 ("⌘L", "Lock / unlock"),
+                ("S (nodes sel.)", "Cycle status: todo→wip→done→blocked"),
+                ("P (nodes sel.)", "Cycle priority: P1→P2→P3→P4→none"),
+                ("⌘⇧R", "Copy support report as Markdown"),
             ]),
             ("Layout", &[
                 ("⇧L", "Force-directed layout"),
