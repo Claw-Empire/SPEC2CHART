@@ -376,9 +376,46 @@ impl FlowchartApp {
             }
         }
 
+        // R key (no modifier) + selection = resolve ticket (Done + last section); without selection = Rectangle
+        if !any_text_focused && !self.selection.node_ids.is_empty()
+            && ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.is_none())
+        {
+            // Find last section in doc order
+            let mut seen_sections: Vec<String> = Vec::new();
+            for n in &self.document.nodes {
+                if !n.section_name.is_empty() && !seen_sections.contains(&n.section_name) {
+                    seen_sections.push(n.section_name.clone());
+                }
+            }
+            let resolve_sec: Option<String> = seen_sections.last().cloned();
+            let ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+            let count = ids.len();
+            for id in &ids {
+                if let Some(n) = self.document.find_node_mut(id) {
+                    n.tag = Some(crate::model::NodeTag::Ok);
+                    n.progress = 1.0;
+                    if let Some(ref sec) = resolve_sec {
+                        n.section_name = sec.clone();
+                    }
+                }
+            }
+            self.history.push(&self.document);
+            // Animated re-layout
+            let mut doc_clone = self.document.clone();
+            for n in doc_clone.nodes.iter_mut() { if !n.pinned { n.position = [0.0, 0.0]; } }
+            crate::specgraph::layout::auto_layout(&mut doc_clone);
+            self.layout_targets.clear();
+            for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
+            let msg = if let Some(ref sec) = resolve_sec {
+                if count == 1 { format!("✓ Resolved → {}", sec) }
+                else { format!("✓ Resolved {} tickets → {}", count, sec) }
+            } else { "✓ Resolved".to_string() };
+            self.status_message = Some((msg, std::time::Instant::now()));
+        }
+
         // Quick shape creation shortcuts (skip when editing text)
         let shape_to_create: Option<crate::model::NodeShape> = if !any_text_focused {
-            if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.is_none()) {
+            if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.is_none()) && self.selection.node_ids.is_empty() {
                 Some(crate::model::NodeShape::Rectangle)
             } else if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.is_none()) {
                 Some(crate::model::NodeShape::Circle)
