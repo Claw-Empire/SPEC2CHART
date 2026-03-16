@@ -53,6 +53,9 @@ impl FlowchartApp {
             self.draw_grid(&painter, canvas_rect);
         }
 
+        // Kanban column backgrounds: faint vertical bands per section (LR layout only)
+        self.draw_kanban_column_bands(&painter, canvas_rect);
+
         // --- Input handling ---
         let pointer_pos = response
             .hover_pos()
@@ -3644,6 +3647,70 @@ impl FlowchartApp {
         // Close on Escape
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_workload_panel = false;
+        }
+    }
+
+    /// Kanban column bands: draw faint vertical column backgrounds when in LR layout
+    /// with multiple sections. Makes the kanban board look and feel like a real board.
+    fn draw_kanban_column_bands(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        // Only applicable in LR layout (left-to-right kanban) and 2D view
+        if self.document.layout_dir != "LR" { return; }
+        if matches!(self.view_mode, super::ViewMode::ThreeD) { return; }
+        // Only when there are nodes with distinct sections
+        let mut section_order: Vec<String> = Vec::new();
+        for n in &self.document.nodes {
+            if !n.section_name.is_empty() && !section_order.contains(&n.section_name) {
+                section_order.push(n.section_name.clone());
+            }
+        }
+        if section_order.len() < 2 { return; }
+
+        // Compute x-span per section
+        let mut section_x_min: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
+        let mut section_x_max: std::collections::HashMap<&str, f32> = std::collections::HashMap::new();
+        for n in &self.document.nodes {
+            if n.section_name.is_empty() { continue; }
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(n.pos()),
+                n.size_vec() * self.viewport.zoom,
+            );
+            let entry_min = section_x_min.entry(&n.section_name).or_insert(f32::MAX);
+            *entry_min = entry_min.min(sr.min.x);
+            let entry_max = section_x_max.entry(&n.section_name).or_insert(f32::MIN);
+            *entry_max = entry_max.max(sr.max.x);
+        }
+
+        // Section column palette (soft, subtle fills) — cycling through 6 distinct hues
+        let column_fills: &[[u8; 4]] = &[
+            [203, 166, 247, 12], // mauve
+            [250, 179, 135, 12], // peach
+            [137, 180, 250, 12], // blue
+            [166, 227, 161, 12], // green
+            [249, 226, 175, 12], // yellow
+            [243, 139, 168, 12], // pink
+        ];
+
+        let pad = 12.0_f32 * self.viewport.zoom.sqrt().max(0.5);
+        for (i, sec) in section_order.iter().enumerate() {
+            let x_min = match section_x_min.get(sec.as_str()) { Some(&v) => v, None => continue };
+            let x_max = match section_x_max.get(sec.as_str()) { Some(&v) => v, None => continue };
+            if x_min >= x_max { continue; }
+            let col_rect = Rect::from_x_y_ranges(
+                (x_min - pad)..=(x_max + pad),
+                canvas_rect.min.y..=canvas_rect.max.y,
+            );
+            if !col_rect.intersects(canvas_rect) { continue; }
+            let fill = column_fills[i % column_fills.len()];
+            painter.rect_filled(col_rect, CornerRadius::ZERO,
+                Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], fill[3]));
+            // Faint separator line on right edge (except last column)
+            if i + 1 < section_order.len() {
+                let mid_x = x_max + pad;
+                painter.line_segment(
+                    [egui::pos2(mid_x, canvas_rect.min.y), egui::pos2(mid_x, canvas_rect.max.y)],
+                    egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(fill[0], fill[1], fill[2], 30)),
+                );
+            }
         }
     }
 
