@@ -785,16 +785,45 @@ impl FlowchartApp {
                     let c = self.canvas_rect.center();
                     self.viewport.screen_to_canvas(c)
                 };
+                // Auto-generate hrf_id: find max numeric suffix of existing ids prefixed with 't'
+                let max_t_id: u32 = self.document.nodes.iter()
+                    .filter_map(|n| {
+                        n.hrf_id.strip_prefix('t')
+                            .and_then(|s| s.parse::<u32>().ok())
+                    })
+                    .max()
+                    .unwrap_or(0);
+                let new_hrf_id = format!("t{}", max_t_id + 1);
+                // Default due = created + 7 days
+                let due_7d = {
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+                    let days7 = ((secs / 86400) + 7) as i32;
+                    let z = days7 + 719468;
+                    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+                    let doe = (z - era * 146097) as u32;
+                    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+                    let y = yoe as i32 + era * 400;
+                    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                    let mp = (5 * doy + 2) / 153;
+                    let d = doy - (153 * mp + 2) / 5 + 1;
+                    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                    format!("{:04}-{:02}-{:02}", y, m, d)
+                };
                 let mut node = crate::model::Node::new(crate::model::NodeShape::RoundedRect, canvas_center);
                 node.size = [160.0, 58.0];
                 if let crate::model::NodeKind::Shape { ref mut label, .. } = node.kind {
                     *label = "New Ticket".to_string();
                 }
+                // Default P3 (medium priority)
+                node.tag = Some(crate::model::NodeTag::Info);
+                node.priority = 3;
                 node.style.fill_color = [137, 180, 250, 255];
                 node.style.text_color = crate::app::theme::auto_contrast_text([137, 180, 250, 255]);
                 node.section_name = first_section.clone();
-                node.sublabel = format!("👤 \n📅 {}", today);
+                node.sublabel = format!("👤 \n📅 {}", due_7d);
                 node.created_date = today;
+                node.hrf_id = new_hrf_id.clone();
                 let new_id = node.id;
                 self.document.nodes.push(node);
                 self.node_birth_times.insert(new_id, ctx.input(|i| i.time));
@@ -808,7 +837,7 @@ impl FlowchartApp {
                 crate::specgraph::layout::auto_layout(&mut doc_clone);
                 self.layout_targets.clear();
                 for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
-                self.status_message = Some((format!("New ticket → {}", first_section), std::time::Instant::now()));
+                self.status_message = Some((format!("New ticket {} → {}", new_hrf_id, first_section), std::time::Instant::now()));
             }
         }
 
@@ -1975,6 +2004,7 @@ impl FlowchartApp {
             for id in &ids {
                 if let Some(n) = self.document.find_node_mut(id) {
                     n.tag = Some(crate::model::NodeTag::Critical);
+                    n.priority = 1;
                     n.style.fill_color = [243, 139, 168, 255];
                     if let Some(ref sec) = triage_sec {
                         n.section_name = sec.clone();
