@@ -2053,8 +2053,11 @@ impl FlowchartApp {
         use std::collections::HashMap;
         use egui::{Align2, FontId, Rect};
 
-        // Collect bounding boxes per section_name (non-empty sections only)
+        // Collect bounding boxes + priority counts per section_name (non-empty sections only)
+        let today = today_iso();
         let mut section_bounds: HashMap<&str, Rect> = HashMap::new();
+        // counts: [critical(P1), warning(P2), info(P3), ok(P4), overdue]
+        let mut section_prio: HashMap<&str, [u32; 5]> = HashMap::new();
         for node in &self.document.nodes {
             if node.section_name.is_empty() { continue; }
             let sr = Rect::from_min_size(
@@ -2065,6 +2068,22 @@ impl FlowchartApp {
             if !sr.expand(200.0).intersects(canvas_rect) { continue; }
             let entry = section_bounds.entry(&node.section_name).or_insert(sr);
             *entry = entry.union(sr);
+            let prio = section_prio.entry(&node.section_name).or_insert([0u32; 5]);
+            match node.tag {
+                Some(crate::model::NodeTag::Critical) => prio[0] += 1,
+                Some(crate::model::NodeTag::Warning)  => prio[1] += 1,
+                Some(crate::model::NodeTag::Info)      => prio[2] += 1,
+                Some(crate::model::NodeTag::Ok)        => prio[3] += 1,
+                None => {}
+            }
+            // Overdue: 📅 date in past
+            let is_overdue = node.sublabel.split('\n').any(|l| {
+                if let Some(ds) = l.strip_prefix("📅 ") {
+                    let d = ds.trim();
+                    d.len() >= 8 && d < today.as_str()
+                } else { false }
+            });
+            if is_overdue { prio[4] += 1; }
         }
         if section_bounds.is_empty() { return; }
 
@@ -2118,6 +2137,55 @@ impl FlowchartApp {
                 FontId::new(font_size, egui::FontFamily::Proportional),
                 text_col,
             );
+
+            // Priority mini-bar: show compact "●P1:N ●P2:N ..." when section has tagged nodes
+            // Only shown when zoomed in enough (font_size on screen >= 11)
+            if font_size >= 11.0 {
+                if let Some(&[crit, warn, info, ok, overdue]) = section_prio.get(section_name) {
+                    let any_prio = crit + warn + info + ok > 0;
+                    let any_overdue = overdue > 0;
+                    if any_prio || any_overdue {
+                        let bar_y = label_pos.y + font_size + 3.0;
+                        let mut bx = label_pos.x;
+                        let bar_font = FontId::new(8.5, egui::FontFamily::Proportional);
+                        let dot_r = 3.0_f32;
+                        let gap = 4.0;
+                        let show = [
+                            (crit, egui::Color32::from_rgb(243, 139, 168), "P1"),
+                            (warn, egui::Color32::from_rgb(250, 179, 135), "P2"),
+                            (info, egui::Color32::from_rgb(137, 180, 250), "P3"),
+                            (ok,   egui::Color32::from_rgb(166, 227, 161), "P4"),
+                        ];
+                        for (count, col, lbl) in &show {
+                            if *count == 0 { continue; }
+                            // Dot
+                            painter.circle_filled(egui::Pos2::new(bx + dot_r, bar_y + dot_r + 1.0), dot_r, *col);
+                            bx += dot_r * 2.0 + 2.0;
+                            // Label "P1:N"
+                            let text = format!("{}:{}", lbl, count);
+                            let text_w = text.len() as f32 * 5.0;
+                            painter.text(
+                                egui::Pos2::new(bx, bar_y + dot_r + 1.0),
+                                Align2::LEFT_CENTER, &text, bar_font.clone(),
+                                egui::Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 180),
+                            );
+                            bx += text_w + gap;
+                        }
+                        // Overdue indicator
+                        if any_overdue {
+                            let ov_col = egui::Color32::from_rgb(220, 80, 80);
+                            painter.circle_filled(egui::Pos2::new(bx + dot_r, bar_y + dot_r + 1.0), dot_r, ov_col);
+                            bx += dot_r * 2.0 + 2.0;
+                            let ov_text = format!("⚠{}", overdue);
+                            painter.text(
+                                egui::Pos2::new(bx, bar_y + dot_r + 1.0),
+                                Align2::LEFT_CENTER, &ov_text, bar_font.clone(),
+                                egui::Color32::from_rgba_unmultiplied(220, 80, 80, 200),
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 

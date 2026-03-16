@@ -873,12 +873,14 @@ impl FlowchartApp {
                         }
                         _ => String::new(),
                     };
-                    let assignee = if n.sublabel.starts_with("👤") {
-                        format!("  `{}`", n.sublabel.trim())
-                    } else { String::new() };
-                    let due = if n.sublabel.starts_with("📅") {
-                        format!("  `{}`", n.sublabel.trim())
-                    } else { String::new() };
+                    let assignee = n.sublabel.lines()
+                        .find(|l| l.starts_with("👤 "))
+                        .map(|l| format!("  `{}`", l.trim()))
+                        .unwrap_or_default();
+                    let due = n.sublabel.lines()
+                        .find(|l| l.starts_with("📅 "))
+                        .map(|l| format!("  `{}`", l.trim()))
+                        .unwrap_or_default();
                     md.push_str(&format!("- {} **{}**{}{}{}\n", status, label, desc, assignee, due));
                 }
                 md.push('\n');
