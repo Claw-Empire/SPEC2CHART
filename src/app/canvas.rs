@@ -2286,16 +2286,25 @@ impl FlowchartApp {
             } else if let Some(tag) = tag_label {
                 rows.push((format!("Tag: {}", tag), self.theme.text_dim));
             }
-            // SLA info: show created + due date analysis
+            // SLA info: show created + due date analysis + configured SLA target
             {
                 let today = super::render::today_iso();
                 let due_str_opt: Option<&str> = node.sublabel.split('\n')
                     .find_map(|line| line.strip_prefix("📅 "));
+                // Show configured SLA target if priority is set
+                if node.priority > 0 {
+                    let sla_idx = (node.priority as usize).saturating_sub(1).min(3);
+                    let target_days = self.document.sla_days[sla_idx];
+                    let tgt_label = if target_days == 1 { "1 day".to_string() } else { format!("{} days", target_days) };
+                    rows.push((format!("P{} SLA target: {}", node.priority, tgt_label),
+                        Color32::from_rgba_unmultiplied(160, 170, 200, 170)));
+                }
                 if let Some(due_str) = due_str_opt {
                     let days_rem = super::render::iso_days_remaining_pub(due_str.trim(), &today);
                     let (sla_text, sla_col) = if days_rem < 0 {
-                        (format!("⏰ OVERDUE by {} day{}", -days_rem, if days_rem == -1 { "" } else { "s" }),
-                         Color32::from_rgb(243, 139, 168))
+                        let breach = -days_rem;
+                        let breach_label = if breach == 1 { "1 day".to_string() } else { format!("{} days", breach) };
+                        (format!("⏰ OVERDUE by {}", breach_label), Color32::from_rgb(243, 139, 168))
                     } else if days_rem == 0 {
                         ("⏰ Due TODAY".to_string(), Color32::from_rgb(250, 179, 135))
                     } else if days_rem == 1 {
