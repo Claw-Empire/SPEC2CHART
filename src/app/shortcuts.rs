@@ -1750,6 +1750,18 @@ impl FlowchartApp {
             }
         }
 
+        // A (no modifier) + nodes selected = open quick-assign popup
+        if !any_text_focused && !self.selection.node_ids.is_empty()
+            && ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.is_none())
+        {
+            // Pre-fill with the first selected node's current assignee (if any)
+            let prefill = self.selection.node_ids.iter().next()
+                .and_then(|id| self.document.find_node(id))
+                .and_then(|n| n.sublabel.lines().find(|l| l.starts_with("👤 ")).map(|l| l.trim_start_matches("👤 ").to_string()))
+                .unwrap_or_default();
+            self.quick_assign_buf = Some(prefill);
+        }
+
         // Enter = chain: create a new node connected in the layout direction
         // Shift+Enter = chain in the orthogonal direction
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {

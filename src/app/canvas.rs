@@ -909,6 +909,7 @@ impl FlowchartApp {
 
         self.draw_inline_node_editor(ui, canvas_rect);
         self.draw_section_rename_editor(ui);
+        self.draw_quick_assign_popup(ui, canvas_rect);
         // Floating edge style bar: quick-toggle edge styles on selected edge
         self.draw_floating_edge_bar(ui, canvas_rect);
         // Quick-connect arrows: show ±4 directional buttons on hovered node
@@ -4944,6 +4945,163 @@ impl FlowchartApp {
                 self.inline_node_edit = None;
             }
         });
+    }
+
+    /// Quick-assign popup: shown when `quick_assign_buf` is Some.
+    /// A text field appears above the selection centroid; Enter applies, Escape cancels.
+    fn draw_quick_assign_popup(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        if self.quick_assign_buf.is_none() { return; }
+
+        // Compute selection bounding box in screen space
+        let sel_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+        if sel_ids.is_empty() { self.quick_assign_buf = None; return; }
+
+        let mut top = f32::MAX;
+        let mut left = f32::MAX;
+        let mut right = f32::MIN;
+        for id in &sel_ids {
+            if let Some(n) = self.document.find_node(id) {
+                let sr = Rect::from_min_size(
+                    self.viewport.canvas_to_screen(n.pos()),
+                    n.size_vec() * self.viewport.zoom,
+                );
+                top   = top.min(sr.min.y);
+                left  = left.min(sr.min.x);
+                right = right.max(sr.max.x);
+            }
+        }
+        if top == f32::MAX { self.quick_assign_buf = None; return; }
+
+        // Collect known assignees from the whole document for autocomplete
+        let mut known_assignees: Vec<String> = Vec::new();
+        for n in &self.document.nodes {
+            for line in n.sublabel.lines() {
+                if let Some(name) = line.strip_prefix("👤 ") {
+                    let name = name.trim().to_string();
+                    if !name.is_empty() && !known_assignees.contains(&name) {
+                        known_assignees.push(name);
+                    }
+                }
+            }
+        }
+        known_assignees.sort();
+
+        let popup_w = (right - left).clamp(160.0, 280.0);
+        let popup_h = 36.0;
+        let cx = (left + right) * 0.5;
+        let popup_rect = Rect::from_min_size(
+            egui::pos2((cx - popup_w * 0.5).clamp(canvas_rect.min.x + 8.0, canvas_rect.max.x - popup_w - 8.0),
+                       (top - popup_h - 10.0).max(canvas_rect.min.y + 8.0)),
+            egui::vec2(popup_w, popup_h),
+        );
+
+        // Draw popup background
+        {
+            let painter = ui.painter();
+            painter.rect_filled(popup_rect.expand(2.0), CornerRadius::same(8), self.theme.tooltip_bg);
+            painter.rect_stroke(popup_rect.expand(2.0), CornerRadius::same(8),
+                Stroke::new(1.5, self.theme.accent), StrokeKind::Outside);
+        }
+
+        // Autocomplete suggestions above the text box
+        let q = self.quick_assign_buf.as_deref().unwrap_or("").to_lowercase();
+        let suggestions: Vec<String> = known_assignees.iter()
+            .filter(|a| q.is_empty() || a.to_lowercase().starts_with(&q))
+            .take(4)
+            .map(|s| s.clone())
+            .collect();
+        let sug_h = 22.0;
+        let mut clicked_suggestion: Option<String> = None;
+        if !suggestions.is_empty() {
+            let sug_total_h = suggestions.len() as f32 * sug_h;
+            let sug_rect = Rect::from_min_size(
+                egui::pos2(popup_rect.min.x, popup_rect.min.y - sug_total_h - 4.0),
+                egui::vec2(popup_w, sug_total_h),
+            );
+            {
+                let painter = ui.painter();
+                painter.rect_filled(sug_rect.expand(2.0), CornerRadius::same(6), self.theme.tooltip_bg);
+                painter.rect_stroke(sug_rect.expand(2.0), CornerRadius::same(6),
+                    Stroke::new(1.0, self.theme.surface1), StrokeKind::Outside);
+            }
+            for (i, sug) in suggestions.iter().enumerate() {
+                let row_rect = Rect::from_min_size(
+                    egui::pos2(sug_rect.min.x + 2.0, sug_rect.min.y + i as f32 * sug_h),
+                    egui::vec2(popup_w - 4.0, sug_h),
+                );
+                let resp = ui.allocate_rect(row_rect, egui::Sense::click());
+                let hovered = resp.hovered();
+                let clicked = resp.clicked();
+                let painter = ui.painter();
+                if hovered {
+                    painter.rect_filled(row_rect, CornerRadius::same(4), self.theme.accent.linear_multiply(0.25));
+                }
+                painter.text(row_rect.left_center() + egui::vec2(6.0, 0.0), Align2::LEFT_CENTER,
+                    format!("👤 {}", sug), egui::FontId::proportional(12.0), self.theme.text_primary);
+                if clicked {
+                    clicked_suggestion = Some(sug.clone());
+                }
+            }
+            if let Some(s) = clicked_suggestion {
+                self.quick_assign_buf = Some(s);
+            }
+        }
+
+        egui::Area::new(egui::Id::new("quick_assign_area"))
+            .fixed_pos(popup_rect.min)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                ui.set_width(popup_w);
+                ui.set_height(popup_h);
+                let text = match &mut self.quick_assign_buf {
+                    Some(t) => t,
+                    None => return,
+                };
+                let resp = ui.add_sized(
+                    egui::vec2(popup_w, popup_h),
+                    egui::TextEdit::singleline(text)
+                        .hint_text("Assign to…")
+                        .font(egui::FontId::proportional(13.0))
+                        .desired_width(popup_w),
+                );
+                if !resp.has_focus() { resp.request_focus(); }
+
+                let commit = ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+                let cancel = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
+                let clicked_away = ui.ctx().input(|i| i.pointer.primary_clicked())
+                    && !popup_rect.expand(50.0).contains(ui.ctx().input(|i| i.pointer.interact_pos().unwrap_or(egui::Pos2::ZERO)));
+
+                if commit || clicked_away {
+                    let assignee = text.trim().to_string();
+                    let sel_ids2: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                    for id in &sel_ids2 {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            // Compose sublabel: replace/insert "👤 " line
+                            let other_lines: Vec<String> = n.sublabel.lines()
+                                .filter(|l| !l.starts_with("👤 "))
+                                .map(|l| l.to_string())
+                                .collect();
+                            let mut parts: Vec<String> = Vec::new();
+                            if !assignee.is_empty() { parts.push(format!("👤 {}", assignee)); }
+                            parts.extend(other_lines);
+                            parts.retain(|l| !l.is_empty());
+                            n.sublabel = parts.join("\n");
+                        }
+                    }
+                    let count = sel_ids2.len();
+                    if !assignee.is_empty() {
+                        self.history.push(&self.document);
+                        self.status_message = Some((
+                            if count == 1 { format!("Assigned: {}", assignee) }
+                            else { format!("Assigned: {} ({} nodes)", assignee, count) },
+                            std::time::Instant::now(),
+                        ));
+                    }
+                    self.quick_assign_buf = None;
+                } else if cancel {
+                    self.quick_assign_buf = None;
+                }
+            });
     }
 
     /// Draw 4 directional arrow buttons around a hovered node.
