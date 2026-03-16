@@ -1865,6 +1865,68 @@ impl FlowchartApp {
             self.quick_assign_buf = Some(prefill);
         }
 
+        // Z (no modifier) + nodes selected = snooze: push due date +1 day
+        if !any_text_focused && !self.selection.node_ids.is_empty()
+            && ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.is_none())
+        {
+            let add_days_str = |date_iso: &str, offset: i64| -> Option<String> {
+                let parts: Vec<i64> = date_iso.splitn(3, '-').filter_map(|p| p.parse().ok()).collect();
+                if parts.len() < 3 { return None; }
+                let (y, m, d) = (parts[0], parts[1], parts[2]);
+                // Convert to epoch days (days since 1970-01-01)
+                let days_in_month = [0i64, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+                let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+                let mut day_n = (y - 1970) * 365 + (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400;
+                for mo in 1..m {
+                    day_n += days_in_month[mo as usize];
+                    if mo == 2 && leap { day_n += 1; }
+                }
+                day_n += d - 1 + offset;
+                // Convert back
+                let z = day_n as i32 + 719468;
+                let era = if z >= 0 { z } else { z - 146096 } / 146097;
+                let doe = (z - era * 146097) as u32;
+                let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+                let yr = yoe as i32 + era * 400;
+                let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                let mp = (5 * doy + 2) / 153;
+                let dd = doy - (153 * mp + 2) / 5 + 1;
+                let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+                let yr = if mo <= 2 { yr + 1 } else { yr };
+                Some(format!("{:04}-{:02}-{:02}", yr, mo, dd))
+            };
+            let ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+            let count = ids.len();
+            let mut snoozed = 0u32;
+            for id in &ids {
+                if let Some(n) = self.document.find_node_mut(id) {
+                    let due_line = n.sublabel.lines().find(|l| l.starts_with("📅 ")).map(|l| l.to_string());
+                    if let Some(ref dl) = due_line {
+                        let date_str = dl.trim_start_matches("📅 ").trim();
+                        if let Some(new_date) = add_days_str(date_str, 1) {
+                            let other: Vec<String> = n.sublabel.lines()
+                                .filter(|l| !l.starts_with("📅 ")).map(|l| l.to_string()).collect();
+                            let mut parts: Vec<String> = n.sublabel.lines()
+                                .filter(|l| l.starts_with("👤 ")).map(|l| l.to_string()).collect();
+                            parts.push(format!("📅 {}", new_date));
+                            parts.extend(other.into_iter().filter(|l| !l.starts_with("👤 ")));
+                            parts.retain(|l| !l.is_empty());
+                            n.sublabel = parts.join("\n");
+                            snoozed += 1;
+                        }
+                    }
+                }
+            }
+            if snoozed > 0 {
+                self.history.push(&self.document);
+                self.status_message = Some((
+                    if snoozed == 1 { "💤 Snoozed +1 day".to_string() }
+                    else { format!("💤 Snoozed {} tickets +1 day", snoozed) },
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+
         // Shift+E = Escalate: set Critical priority on selected tickets, move to Triage (section 2)
         if !any_text_focused && !self.selection.node_ids.is_empty()
             && ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.matches_exact(egui::Modifiers { shift: true, ..egui::Modifiers::NONE }))
