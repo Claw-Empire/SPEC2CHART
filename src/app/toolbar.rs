@@ -687,6 +687,7 @@ impl FlowchartApp {
                             ("Support priority", "{p1} {p2} {p3} {p4}  — badge+fill  ·  {escalated}  — Critical+glow"),
                             ("Support severity", "{sev1} {sev2} {sev3}  — same as p1/p2/p3 (SEV naming)"),
                             ("Support owner", "{assigned:Alice}  /  {owner:Bob}  →  sublabel with 👤 prefix"),
+                            ("Support deadline", "{due:2026-03-20}  /  {deadline:Q2}  →  sublabel with 📅 prefix"),
                             ("Node glow", "{glow} / {neon}  — neon border halo on node"),
                             ("Color", "{fill:blue/green/red/yellow/purple/teal/orange/sky/lavender/gray/none}"),
                             ("Color", "{fill:#rrggbb} {border-color:red} {text-color:white}"),

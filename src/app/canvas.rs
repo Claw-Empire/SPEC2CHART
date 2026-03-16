@@ -655,6 +655,17 @@ impl FlowchartApp {
                     if q == "escalated" {
                         return matches!(n.tag, Some(crate::model::NodeTag::Critical)) && n.style.glow;
                     }
+                    if let Some(assignee_q) = q.strip_prefix("assigned:").or_else(|| q.strip_prefix("owner:")) {
+                        // {assigned:Alice} → sublabel starts with "👤 "
+                        let tgt = assignee_q.trim().to_lowercase();
+                        return n.sublabel.to_lowercase().contains(&tgt);
+                    }
+                    if q == "assigned" || q == "has-owner" {
+                        return n.sublabel.starts_with("👤");
+                    }
+                    if q == "unassigned" || q == "no-owner" {
+                        return !n.sublabel.starts_with("👤");
+                    }
                     if q == "linked" {
                         return self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id);
                     }
@@ -3872,7 +3883,7 @@ impl FlowchartApp {
         );
         let resp = ui2.add(
             egui::TextEdit::singleline(&mut self.search_query)
-                .hint_text("Search… status:done · section:name · priority:p1 · linked · orphan")
+                .hint_text("Search… status:done · priority:p1 · assigned:Alice · section:name")
                 .desired_width(w - 60.0)
                 .font(egui::FontId::proportional(14.0))
                 .frame(false),
