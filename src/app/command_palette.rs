@@ -78,6 +78,14 @@ enum PaletteAction {
     LoadTwoByTwoMatrixTemplate,
     LoadDesignSprintTemplate,
     LoadProblemSolutionFitTemplate,
+    // Support Ops templates
+    LoadSupportTicketFlowTemplate,
+    LoadIncidentResponseTemplate,
+    LoadSupportEscalationMatrixTemplate,
+    LoadBugTriageTemplate,
+    LoadKnowledgeBaseStructureTemplate,
+    LoadVoiceOfCustomerTemplate,
+    LoadCustomerOnboardingTemplate,
 }
 
 impl FlowchartApp {
@@ -859,6 +867,55 @@ impl FlowchartApp {
                     }
                 }
             }
+            PaletteAction::LoadSupportTicketFlowTemplate => {
+                let spec = include_str!("../../assets/examples/support_ticket_flow.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Ticket Flow loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
+            PaletteAction::LoadIncidentResponseTemplate => {
+                let spec = include_str!("../../assets/examples/incident_response.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Incident Response Runbook loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
+            PaletteAction::LoadSupportEscalationMatrixTemplate => {
+                let spec = include_str!("../../assets/examples/support_escalation_matrix.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Escalation Matrix loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
+            PaletteAction::LoadBugTriageTemplate => {
+                let spec = include_str!("../../assets/examples/bug_triage.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Bug Triage Process loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
+            PaletteAction::LoadKnowledgeBaseStructureTemplate => {
+                let spec = include_str!("../../assets/examples/knowledge_base_structure.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Knowledge Base Structure loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
+            PaletteAction::LoadVoiceOfCustomerTemplate => {
+                let spec = include_str!("../../assets/examples/voice_of_customer.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Voice of Customer loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
+            PaletteAction::LoadCustomerOnboardingTemplate => {
+                let spec = include_str!("../../assets/examples/customer_onboarding.spec");
+                match crate::specgraph::hrf::parse_hrf(spec) {
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Customer Onboarding Journey loaded".to_string(), std::time::Instant::now())); }
+                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                }
+            }
         }
     }
 }
@@ -931,6 +988,13 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⊞",  label: "Load 2×2 Prioritization Matrix (Impact vs Effort)", category: "Templates", action: PaletteAction::LoadTwoByTwoMatrixTemplate },
         PaletteEntry { icon: "⚡",  label: "Load Design Sprint (5-day Map/Sketch/Decide/Prototype/Test)", category: "Templates", action: PaletteAction::LoadDesignSprintTemplate },
         PaletteEntry { icon: "🎯",  label: "Load Problem/Solution Fit canvas",     category: "Templates", action: PaletteAction::LoadProblemSolutionFitTemplate },
+        PaletteEntry { icon: "🎫",  label: "Load Support Ticket Flow (intake → triage → resolve → close)", category: "Templates", action: PaletteAction::LoadSupportTicketFlowTemplate },
+        PaletteEntry { icon: "🚨",  label: "Load Incident Response Runbook (SEV-1/2/3 playbook)", category: "Templates", action: PaletteAction::LoadIncidentResponseTemplate },
+        PaletteEntry { icon: "📊",  label: "Load Support Escalation Matrix (L1→L4 tiers)",        category: "Templates", action: PaletteAction::LoadSupportEscalationMatrixTemplate },
+        PaletteEntry { icon: "🐛",  label: "Load Bug Triage Process (report → fix → verify)",     category: "Templates", action: PaletteAction::LoadBugTriageTemplate },
+        PaletteEntry { icon: "📚",  label: "Load Knowledge Base Structure (categories + lifecycle)", category: "Templates", action: PaletteAction::LoadKnowledgeBaseStructureTemplate },
+        PaletteEntry { icon: "📣",  label: "Load Voice of Customer (signals → themes → actions)", category: "Templates", action: PaletteAction::LoadVoiceOfCustomerTemplate },
+        PaletteEntry { icon: "🚀",  label: "Load Customer Onboarding Journey (sign-up → aha moment → health)", category: "Templates", action: PaletteAction::LoadCustomerOnboardingTemplate },
         // Search
         PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
         PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
