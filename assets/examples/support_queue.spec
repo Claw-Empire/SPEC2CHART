@@ -2,7 +2,7 @@
 
 Live kanban for active support tickets.
 Use ⇧D/⇧W to set due dates · P key to set priority · S key to cycle status.
-] / [ to advance or demote a ticket through sections · ⌘⇧R for markdown report · ⌘⇧X for CSV export.
+] / [ to advance or demote a ticket · ⌘↩ to mark done · ⌘⇧R for markdown report · ⌘⇧X for CSV export.
 
 ## Config
 flow = LR

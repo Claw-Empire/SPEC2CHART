@@ -1772,6 +1772,27 @@ impl FlowchartApp {
             self.quick_assign_buf = Some(prefill);
         }
 
+        // Cmd+Enter = mark all selected nodes as Done (tag=Ok, progress=1.0)
+        // Great for "close ticket" in a support kanban workflow
+        if !any_text_focused && !self.selection.node_ids.is_empty()
+            && ctx.input(|i| i.key_pressed(Key::Enter) && i.modifiers.matches_exact(cmd))
+        {
+            let ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+            let count = ids.len();
+            for id in &ids {
+                if let Some(n) = self.document.find_node_mut(id) {
+                    n.tag = Some(crate::model::NodeTag::Ok);
+                    n.progress = 1.0;
+                }
+            }
+            self.history.push(&self.document);
+            self.status_message = Some((
+                if count == 1 { "✓ Done".to_string() }
+                else { format!("✓ Done ({} tickets)", count) },
+                std::time::Instant::now(),
+            ));
+        }
+
         // Enter = chain: create a new node connected in the layout direction
         // Shift+Enter = chain in the orthogonal direction
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
