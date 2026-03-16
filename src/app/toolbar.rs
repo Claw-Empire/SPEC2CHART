@@ -722,6 +722,7 @@ impl FlowchartApp {
                             ("## Style", "primary = {fill:blue} {highlight}  →  use {primary}"),
                             ("Quick cards", "⌘⇧E = Experiment card  ·  ⌘⇧T = Support ticket card"),
                             ("Support report", "⌘⇧R = copy status report as Markdown (selection or all)"),
+                            ("Due shortcuts", "⇧D = set due today  ·  ⇧W = set due next week (+7d)"),
                             ("3D cam keys", "1=Iso  2=Top  3=Front  4=Side  (in 3D mode)"),
                             ("3D cam cfg", "camera = iso|top|front|side  (## Config)"),
                             ("3D auto-z", "auto-z = true  (auto-assign z from topology)"),

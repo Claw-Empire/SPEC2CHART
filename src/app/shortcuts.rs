@@ -1386,6 +1386,65 @@ impl FlowchartApp {
             }
         }
 
+        // Shift+D = set due date to TODAY for all selected nodes (preserves assignee)
+        // Shift+W = set due date to one week from today for all selected nodes
+        if !any_text_focused && !self.selection.node_ids.is_empty() {
+            let shift_only = egui::Modifiers { shift: true, ..egui::Modifiers::NONE };
+            let shift_d = ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.matches_exact(shift_only));
+            let shift_w = ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.matches_exact(shift_only));
+            if shift_d || shift_w {
+                let today = super::render::today_iso();
+                // Compute target date: today or +7 days
+                let target_date = if shift_d {
+                    today.clone()
+                } else {
+                    // Add 7 days to today using the same UNIX epoch trick
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let secs = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    let days7 = ((secs / 86400) + 7) as i32;
+                    // civil_from_days for days7
+                    let z = days7 + 719468;
+                    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+                    let doe = (z - era * 146097) as u32;
+                    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+                    let y = yoe as i32 + era * 400;
+                    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                    let mp = (5 * doy + 2) / 153;
+                    let d = doy - (153 * mp + 2) / 5 + 1;
+                    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+                    let y = y + if m <= 2 { 1 } else { 0 };
+                    format!("{:04}-{:02}-{:02}", y, m, d)
+                };
+                let due_part = format!("📅 {}", target_date);
+                let node_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
+                let count = node_ids.len();
+                for id in &node_ids {
+                    if let Some(node) = self.document.find_node_mut(id) {
+                        // Compose: preserve existing 👤 assignee line, replace/add 📅 line
+                        let new_sublabel = {
+                            let lines: Vec<&str> = node.sublabel.lines().collect();
+                            let assignee_line = lines.iter().find(|l| l.starts_with("👤")).copied();
+                            match assignee_line {
+                                Some(a) => format!("{}\n{}", a, due_part),
+                                None => due_part.clone(),
+                            }
+                        };
+                        node.sublabel = new_sublabel;
+                    }
+                }
+                self.history.push(&self.document);
+                let label = if shift_d { "today" } else { "next week" };
+                self.status_message = Some((
+                    if count == 1 { format!("Due: {}", label) }
+                    else { format!("Due: {} ({} nodes)", label, count) },
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+
         // Arrow keys on selected node = navigate to adjacent node by spatial direction
         if !any_text_focused && self.selection.node_ids.len() == 1 && self.selection.edge_ids.is_empty() {
             let sel_id = *self.selection.node_ids.iter().next().unwrap();

@@ -260,6 +260,8 @@ impl FlowchartApp {
                 ("⌘L", "Lock / unlock"),
                 ("S (nodes sel.)", "Cycle status: todo→wip→done→blocked"),
                 ("P (nodes sel.)", "Cycle priority: P1→P2→P3→P4→none"),
+                ("⇧D (nodes sel.)", "Set due date = today"),
+                ("⇧W (nodes sel.)", "Set due date = next week (+7d)"),
                 ("⌘⇧R", "Copy support report as Markdown"),
             ]),
             ("Layout", &[

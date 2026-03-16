@@ -2427,10 +2427,11 @@ impl FlowchartApp {
 
     /// Horizontal pill strip at bottom-center: one pill per section, click to pan there.
     fn draw_section_navigator(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
-        // Collect unique sections with counts and dominant tag color
+        // Collect unique sections with counts, dominant tag color, and overdue count
         use std::collections::BTreeMap;
         #[derive(Default)]
-        struct SecInfo { total: u32, critical: u32, warning: u32, ok: u32, info: u32 }
+        struct SecInfo { total: u32, critical: u32, warning: u32, ok: u32, info: u32, overdue: u32 }
+        let today = super::render::today_iso();
         let mut sec_map: BTreeMap<String, SecInfo> = BTreeMap::new();
         for node in &self.document.nodes {
             if node.section_name.is_empty() { continue; }
@@ -2443,6 +2444,14 @@ impl FlowchartApp {
                 Some(crate::model::NodeTag::Info)      => e.info += 1,
                 None => {}
             }
+            // Count overdue (📅 date in past)
+            let is_overdue = node.sublabel.split('\n').any(|line| {
+                if let Some(ds) = line.strip_prefix("📅 ") {
+                    let d = ds.trim();
+                    d.len() >= 8 && d < today.as_str()
+                } else { false }
+            });
+            if is_overdue { e.overdue += 1; }
         }
         if sec_map.is_empty() { return; }
 
@@ -2454,11 +2463,12 @@ impl FlowchartApp {
         // Compute pill widths
         let sections: Vec<(String, SecInfo)> = sec_map.into_iter().collect();
         let font = FontId::proportional(10.5);
-        // Estimate pill widths (approx 6.5px/char + padding)
+        // Estimate pill widths (approx 6.5px/char + padding); extra width for overdue badge
         let pill_widths: Vec<f32> = sections.iter().map(|(name, info)| {
             let chars = name.chars().count().min(14);
             let count_chars = format!("{}", info.total).len();
-            (chars + count_chars + 2) as f32 * 6.5 + pill_pad_x * 2.0 + 14.0
+            let overdue_extra = if info.overdue > 0 { 26.0 } else { 0.0 };
+            (chars + count_chars + 2) as f32 * 6.5 + pill_pad_x * 2.0 + 14.0 + overdue_extra
         }).collect();
         let total_w: f32 = pill_widths.iter().sum::<f32>() + pill_gap * (sections.len().saturating_sub(1)) as f32;
 
@@ -2499,16 +2509,38 @@ impl FlowchartApp {
             painter.rect(pill_rect, CornerRadius::same(11),
                 bg, Stroke::new(1.0, border_col), StrokeKind::Inside);
 
-            // Label: truncate name
+            // Label: truncate name + total count
             let short: String = name.chars().take(14).collect();
             let trail = if name.chars().count() > 14 { "…" } else { "" };
             let disp = format!("{}{} {}", short, trail, info.total);
             let label_col = if hovered { self.theme.text_primary } else { self.theme.text_secondary };
-            painter.text(
-                pill_rect.center(),
-                Align2::CENTER_CENTER, &disp,
-                font.clone(), label_col,
-            );
+
+            // If there are overdue items, shift label left and draw a red ⚠N badge on right
+            if info.overdue > 0 {
+                let badge_w = 22.0_f32;
+                let badge_h = 14.0_f32;
+                let badge_x = pill_rect.max.x - badge_w - 4.0;
+                let badge_y = pill_rect.center().y - badge_h / 2.0;
+                let badge_rect = Rect::from_min_size(Pos2::new(badge_x, badge_y), Vec2::new(badge_w, badge_h));
+                painter.rect_filled(badge_rect, CornerRadius::same(7),
+                    Color32::from_rgb(185, 50, 70));
+                let badge_text = format!("⚠{}", info.overdue);
+                painter.text(badge_rect.center(), Align2::CENTER_CENTER, &badge_text,
+                    FontId::proportional(8.5), Color32::WHITE);
+                // Label shifted left of badge
+                let label_x = pill_rect.min.x + pill_pad_x + (pill_rect.width() - badge_w - 6.0) / 2.0;
+                painter.text(
+                    Pos2::new(label_x, pill_rect.center().y),
+                    Align2::CENTER_CENTER, &disp,
+                    font.clone(), label_col,
+                );
+            } else {
+                painter.text(
+                    pill_rect.center(),
+                    Align2::CENTER_CENTER, &disp,
+                    font.clone(), label_col,
+                );
+            }
 
             // Pan on click
             if hovered && clicked {

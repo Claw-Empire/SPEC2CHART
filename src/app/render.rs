@@ -269,10 +269,11 @@ impl FlowchartApp {
         }
 
         // Overdue indicator: pulsing red ring when node has a past-due 📅 date
+        let today_str = today_iso();
         let is_overdue = node.sublabel.split('\n').any(|line| {
             if let Some(date_str) = line.strip_prefix("📅 ") {
                 let d = date_str.trim();
-                d.len() >= 8 && d <= "2026-03-16"
+                d.len() >= 8 && d < today_str.as_str()
             } else { false }
         });
         if is_overdue && !node.is_frame {
@@ -411,9 +412,8 @@ impl FlowchartApp {
             let due_date_opt: Option<&str> = node.sublabel.split('\n')
                 .find_map(|line| line.strip_prefix("📅 "));
             if let Some(due_str) = due_date_opt {
-                let today = "2026-03-16";
-                // Simple day delta (works for ISO dates within the same year/decade)
-                let days_remaining = iso_days_remaining(due_str.trim(), today);
+                let today = today_iso();
+                let days_remaining = iso_days_remaining(due_str.trim(), &today);
                 let (badge_text, text_col, bg_col): (&str, egui::Color32, egui::Color32) =
                     if days_remaining < 0 {
                         ("OVERDUE", egui::Color32::WHITE, egui::Color32::from_rgb(185, 50, 70))
@@ -2300,6 +2300,28 @@ impl FlowchartApp {
             );
         }
     }
+}
+
+/// Returns current date as "YYYY-MM-DD" (UTC). Used for SLA countdown badges.
+pub(crate) fn today_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = (secs / 86400) as i32; // days since 1970-01-01 UTC
+    // Howard Hinnant's civil_from_days algorithm
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i32 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = y + if m <= 2 { 1 } else { 0 };
+    format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
 /// Returns days remaining until `due_date` from `today` (ISO YYYY-MM-DD strings).
