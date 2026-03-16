@@ -34,7 +34,7 @@ impl FlowchartApp {
             let mut open = 0u32;
             let mut overdue = 0u32;
             let mut done = 0u32;
-            let mut fire = 0u32; // Critical + overdue
+            let mut fire = 0u32; // P1 (priority==1 or Critical tag) — not done
             for n in &self.document.nodes {
                 if n.is_frame { continue; }
                 let is_done = matches!(n.tag, Some(crate::model::NodeTag::Ok)) || n.progress >= 1.0;
@@ -46,9 +46,10 @@ impl FlowchartApp {
                         d.len() >= 8 && d < today.as_str()
                     } else { false }
                 });
-                if is_overdue {
-                    overdue += 1;
-                    if matches!(n.tag, Some(crate::model::NodeTag::Critical)) { fire += 1; }
+                if is_overdue { overdue += 1; }
+                // P1 = priority field or Critical tag
+                if n.priority == 1 || matches!(n.tag, Some(crate::model::NodeTag::Critical)) {
+                    fire += 1;
                 }
             }
             Some((open, overdue, done, fire))
@@ -247,13 +248,17 @@ impl FlowchartApp {
                             ui.add_space(8.0);
                             separator(ui, surface1);
                             ui.add_space(8.0);
-                            // Show from right: done | overdue | fire | open
+                            // Show from right: done | overdue | P1 | open
                             if done > 0 {
                                 label(ui, &format!("✓{done}"), Color32::from_rgb(166, 227, 161));
                                 ui.add_space(5.0);
                             }
                             if fire > 0 {
-                                label(ui, &format!("🔥{fire}"), Color32::from_rgb(255, 120, 30));
+                                // Pulsing red for P1 tickets
+                                let t = ctx.input(|i| i.time) as f32;
+                                let pulse = (t * std::f32::consts::PI / 1.5).sin() * 0.5 + 0.5;
+                                let r = (220.0 + pulse * 35.0) as u8;
+                                label(ui, &format!("P1:{fire}"), Color32::from_rgb(r, 70, 70));
                                 ui.add_space(4.0);
                             }
                             if overdue > 0 {
