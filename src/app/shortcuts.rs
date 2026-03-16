@@ -937,18 +937,26 @@ impl FlowchartApp {
             } else { "Support Report".to_string() };
             md.push_str(&format!("# {}\n\n", title));
 
+            let today_rpt = super::render::today_iso();
             for (sec, items) in &sections {
                 let header = if sec.is_empty() { "General".to_string() } else { sec.clone() };
                 md.push_str(&format!("## {}\n\n", header));
                 for n in items {
-                    let status = match n.tag {
-                        Some(crate::model::NodeTag::Critical) => "🔴",
-                        Some(crate::model::NodeTag::Warning)  => "🟡",
-                        Some(crate::model::NodeTag::Ok)        => "🟢",
-                        Some(crate::model::NodeTag::Info)      => "🔵",
-                        None => "⚪",
+                    if n.is_frame { continue; }
+                    let status = if n.priority > 0 {
+                        match n.priority { 1 => "🔴", 2 => "🟡", 3 => "🔵", _ => "🟢" }
+                    } else {
+                        match n.tag {
+                            Some(crate::model::NodeTag::Critical) => "🔴",
+                            Some(crate::model::NodeTag::Warning)  => "🟡",
+                            Some(crate::model::NodeTag::Ok)        => "🟢",
+                            Some(crate::model::NodeTag::Info)      => "🔵",
+                            None => "⚪",
+                        }
                     };
                     let label = n.display_label();
+                    let id_part = if !n.hrf_id.is_empty() { format!("[`#{}`] ", n.hrf_id) } else { String::new() };
+                    let prio_part = if n.priority > 0 { format!(" `P{}`", n.priority) } else { String::new() };
                     let desc = match &n.kind {
                         crate::model::NodeKind::Shape { description, .. } if !description.is_empty() => {
                             format!(" — {}", description)
@@ -961,9 +969,18 @@ impl FlowchartApp {
                         .unwrap_or_default();
                     let due = n.sublabel.lines()
                         .find(|l| l.starts_with("📅 "))
-                        .map(|l| format!("  `{}`", l.trim()))
+                        .map(|l| {
+                            let d = l.strip_prefix("📅 ").unwrap_or("").trim();
+                            let days = super::render::iso_days_remaining_pub(d, &today_rpt);
+                            if days < 0 { format!("  `📅 {} ({}d overdue)`", d, -days) }
+                            else if days == 0 { format!("  `📅 {} (TODAY)`", d) }
+                            else { format!("  `📅 {} (+{}d)`", d, days) }
+                        })
                         .unwrap_or_default();
-                    md.push_str(&format!("- {} **{}**{}{}{}\n", status, label, desc, assignee, due));
+                    let comment_part = if !n.comment.is_empty() {
+                        format!("\n  > 💬 {}", n.comment.chars().take(120).collect::<String>())
+                    } else { String::new() };
+                    md.push_str(&format!("- {} {}**{}**{}{}{}{}{}\n", status, id_part, label, prio_part, desc, assignee, due, comment_part));
                 }
                 md.push('\n');
             }
@@ -988,16 +1005,24 @@ impl FlowchartApp {
                     self.document.nodes.iter().collect()
                 };
 
-                let mut csv = String::from("Label,Section,Priority,Status,Assignee,Due Date,URL,Comment\n");
+                let today_csv = super::render::today_iso();
+                let mut csv = String::from("Ticket ID,Label,Section,Priority,Status,Assignee,Due Date,Age (days),URL,Comment\n");
                 for n in &nodes {
+                    if n.is_frame { continue; }
+                    let ticket_id = n.hrf_id.replace('"', "\"\"");
                     let label = n.display_label().replace('"', "\"\"");
                     let section = n.section_name.replace('"', "\"\"");
-                    let priority = match n.tag {
-                        Some(crate::model::NodeTag::Critical) => "P1",
-                        Some(crate::model::NodeTag::Warning)  => "P2",
-                        Some(crate::model::NodeTag::Info)      => "P3",
-                        Some(crate::model::NodeTag::Ok)        => "P4",
-                        None => "",
+                    // Use numeric priority field if set, otherwise derive from tag
+                    let priority = if n.priority > 0 {
+                        match n.priority { 1 => "P1", 2 => "P2", 3 => "P3", _ => "P4" }
+                    } else {
+                        match n.tag {
+                            Some(crate::model::NodeTag::Critical) => "P1",
+                            Some(crate::model::NodeTag::Warning)  => "P2",
+                            Some(crate::model::NodeTag::Info)      => "P3",
+                            Some(crate::model::NodeTag::Ok)        => "P4",
+                            None => "",
+                        }
                     };
                     let status = match (n.tag, n.progress) {
                         (Some(crate::model::NodeTag::Ok), p) if p >= 0.99 => "Done",
@@ -1017,11 +1042,15 @@ impl FlowchartApp {
                         .and_then(|l| l.strip_prefix("📅 "))
                         .unwrap_or("")
                         .replace('"', "\"\"");
+                    let age = if !n.created_date.is_empty() {
+                        let d = -super::render::iso_days_remaining_pub(&n.created_date, &today_csv);
+                        if d >= 0 { d.to_string() } else { String::new() }
+                    } else { String::new() };
                     let url = n.url.replace('"', "\"\"");
                     let comment = n.comment.replace('"', "\"\"").replace('\n', " ");
                     csv.push_str(&format!(
-                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
-                        label, section, priority, status, assignee, due, url, comment
+                        "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"\n",
+                        ticket_id, label, section, priority, status, assignee, due, age, url, comment
                     ));
                 }
 

@@ -719,11 +719,16 @@ impl FlowchartApp {
                         }
                         return false;
                     }
-                    // Default: label / description / section name / URL / sublabel
+                    // #id search: match by hrf_id (e.g. "#t1" → ticket t1)
+                    if let Some(id_q) = q.strip_prefix('#') {
+                        return n.hrf_id.to_lowercase() == id_q.trim() || n.hrf_id.to_lowercase().starts_with(id_q.trim());
+                    }
+                    // Default: label / description / section name / URL / sublabel / hrf_id
                     let label = n.display_label().to_lowercase();
                     let desc = match &n.kind { crate::model::NodeKind::Shape { description, .. } => description.to_lowercase(), _ => String::new() };
                     label.contains(&q) || desc.contains(&q) || n.section_name.to_lowercase().contains(&q)
                         || n.url.to_lowercase().contains(&q) || n.sublabel.to_lowercase().contains(&q)
+                        || (!n.hrf_id.is_empty() && n.hrf_id.to_lowercase().contains(&q))
                 })
                 .map(|n| n.id)
                 .collect()
@@ -2059,7 +2064,19 @@ impl FlowchartApp {
             if !node.section_name.is_empty() {
                 rows.push((format!("§ {}", node.section_name), self.theme.accent.gamma_multiply(0.7)));
             }
-            if let Some(tag) = tag_label {
+            if !node.hrf_id.is_empty() {
+                rows.push((format!("#{}", node.hrf_id), self.theme.text_dim.gamma_multiply(0.7)));
+            }
+            if node.priority > 0 {
+                let plabel = match node.priority { 1 => "P1 — Critical", 2 => "P2 — High", 3 => "P3 — Medium", _ => "P4 — Low" };
+                let pcol = match node.priority {
+                    1 => Color32::from_rgb(243, 139, 168),
+                    2 => Color32::from_rgb(250, 179, 135),
+                    3 => Color32::from_rgb(137, 180, 250),
+                    _ => Color32::from_rgb(166, 227, 161),
+                };
+                rows.push((plabel.to_string(), pcol));
+            } else if let Some(tag) = tag_label {
                 rows.push((format!("Tag: {}", tag), self.theme.text_dim));
             }
             // SLA info: show created + due date analysis
