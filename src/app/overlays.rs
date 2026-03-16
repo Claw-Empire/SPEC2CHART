@@ -480,6 +480,7 @@ impl FlowchartApp {
                 timeline_period: None,
                 timeline_lane: None,
                 section_name: String::new(),
+                created_date: String::new(),
             };
             let id = node.id;
             self.document.nodes.push(node);

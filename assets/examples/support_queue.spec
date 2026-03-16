@@ -10,24 +10,24 @@ spacing = 80
 
 ## Intake
 - [t1] Login page 500 errors {p1} {glow}
-  {assigned:Alice} {due:2026-03-16}
+  {assigned:Alice} {due:2026-03-16} {created:2026-03-14}
   Auth service returning 500 on POST /login
 - [t2] Export feature missing data {p2}
-  {assigned:Bob} {due:2026-03-18}
+  {assigned:Bob} {due:2026-03-18} {created:2026-03-15}
   CSV export omits last column when >500 rows
 - [t3] Dark mode glitch on iOS {p3}
-  {assigned:Carol} {due:2026-03-22}
+  {assigned:Carol} {due:2026-03-22} {created:2026-03-16}
   Background flashes white on navigation
 
 ## Triage
 - [t4] Payment gateway timeout {p1} {urgent}
-  {assigned:Alice} {due:2026-03-16}
+  {assigned:Alice} {due:2026-03-16} {created:2026-03-12}
   Stripe webhook not firing for 3DS payments — 40% checkout failure
 - [t5] Notification spam {p2}
-  {assigned:Bob} {due:2026-03-19}
+  {assigned:Bob} {due:2026-03-19} {created:2026-03-13}
   Users getting duplicate email alerts
 - [t6] Report PDF blank pages {p3}
-  {assigned:Dana} {due:2026-03-24}
+  {assigned:Dana} {due:2026-03-24} {created:2026-03-14}
   Monthly reports intermittently print blank pages
 
 ## In Progress

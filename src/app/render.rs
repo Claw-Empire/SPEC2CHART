@@ -468,6 +468,40 @@ impl FlowchartApp {
             }
         }
 
+        // Ticket age badge: "Xd" or "Xw" in bottom-left when {created:YYYY-MM-DD} is set
+        if !node.created_date.is_empty() && self.viewport.zoom > 0.55 && !node.is_frame {
+            let today = today_iso();
+            let age_days = -iso_days_remaining(&node.created_date, &today); // positive = days since creation
+            if age_days >= 0 {
+                let age_str = if age_days < 7 {
+                    format!("{}d", age_days)
+                } else if age_days < 30 {
+                    format!("{}w", age_days / 7)
+                } else {
+                    format!("{}mo", age_days / 30)
+                };
+                // Color by age: fresh=green, 1-3d=gray, 1-2w=amber, older=red-tinted
+                let (age_text_col, age_bg_col) = if age_days == 0 {
+                    (egui::Color32::from_rgb(30, 40, 20), egui::Color32::from_rgba_unmultiplied(166, 227, 161, 180))
+                } else if age_days <= 3 {
+                    (egui::Color32::from_rgb(160, 170, 180), egui::Color32::from_rgba_unmultiplied(80, 90, 110, 140))
+                } else if age_days <= 14 {
+                    (egui::Color32::from_rgb(50, 35, 10), egui::Color32::from_rgba_unmultiplied(250, 179, 135, 170))
+                } else {
+                    (egui::Color32::WHITE, egui::Color32::from_rgba_unmultiplied(180, 80, 100, 160))
+                };
+                let font_sz = (8.5 * self.viewport.zoom.sqrt()).clamp(7.0, 11.0);
+                let badge_w = age_str.len() as f32 * font_sz * 0.6 + 5.0;
+                let badge_rect = Rect::from_min_size(
+                    Pos2::new(screen_rect.min.x + 2.0, screen_rect.max.y - font_sz - 5.0),
+                    Vec2::new(badge_w, font_sz + 3.0),
+                );
+                painter.rect_filled(badge_rect, CornerRadius::same(3), age_bg_col);
+                painter.text(badge_rect.center(), Align2::CENTER_CENTER, &age_str,
+                    FontId::proportional(font_sz), age_text_col);
+            }
+        }
+
         // Description indicator (small dot in bottom-right when node has a description)
         if self.viewport.zoom > 0.4 {
             let has_desc = match &node.kind {

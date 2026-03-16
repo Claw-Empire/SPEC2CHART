@@ -2354,6 +2354,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut collapsed = false;
     let mut lane_tag: Option<String> = None;
     let mut section_override: Option<String> = None;
+    let mut created_date_tag: Option<String> = None;
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -2645,6 +2646,13 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
                     _ => person_part,
                 });
             }
+        } else if tag.starts_with("created:") || tag.starts_with("opened:") || tag.starts_with("started:") {
+            // {created:YYYY-MM-DD} — ticket creation date for age badge
+            let prefix = if tag.starts_with("created:") { 8 }
+                else if tag.starts_with("opened:") { 7 }
+                else { 8 }; // started:
+            let date = tag[prefix..].trim();
+            if !date.is_empty() { created_date_tag = Some(date.to_string()); }
         } else if tag.starts_with("section:") || tag.starts_with("stage:") || tag.starts_with("board:") || tag.starts_with("col:") || tag.starts_with("column:") {
             // {section:Intake} — assign node to a kanban section inline (overrides header-based section)
             let prefix = if tag.starts_with("section:") { 8 }
@@ -2815,6 +2823,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if let Some(sec) = section_override {
         node.section_name = sec;
     }
+    if let Some(date) = created_date_tag {
+        node.created_date = date;
+    }
 
     Ok((id, node))
 }
@@ -2898,7 +2909,8 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                             | "lane" | "sublabel" | "sub" | "subtitle" | "caption"
                             | "note" | "annotation" | "comment"
                             | "section" | "stage" | "col" | "column" | "board"
-                            | "assigned" | "owner" | "assignee" => {
+                            | "assigned" | "owner" | "assignee"
+                            | "created" | "opened" | "started" | "due" | "deadline" | "by" => {
                                 format!("{}:{}", key, val)
                             }
                             // Preserve fill/color values that start with '#' (hex colors)
