@@ -3398,11 +3398,14 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     format!(" {{frame-color:#{:02x}{:02x}{:02x}}}", fc[0], fc[1], fc[2])
                 } else { String::new() }
             } else { String::new() };
-            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
+            let created_date_tag = if !node.created_date.is_empty() {
+                format!(" {{created:{}}}", node.created_date)
+            } else { String::new() };
+            out.push_str(&format!("- [{}] {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n",
                 id, label, shape_tag, z_tag, tag_tag, pin_tag, fill_tag, icon_tag,
                 gradient_tag, shadow_tag, bold_tag, italic_tag, dashed_border_tag, radius_tag,
                 border_tag, opacity_tag, locked_tag, collapsed_tag, url_tag, align_tag, valign_tag,
-                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag, glow_tag, frame_color_tag));
+                border_color_tag, text_color_tag, font_size_tag, w_tag, h_tag, sublabel_tag, depth_3d_tag, highlight_tag, progress_tag, note_tag, glow_tag, frame_color_tag, created_date_tag));
             if !description.is_empty() {
                 for desc_line in description.lines() {
                     out.push_str(&format!("  {}\n", desc_line));
