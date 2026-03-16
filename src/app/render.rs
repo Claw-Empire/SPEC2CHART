@@ -502,6 +502,51 @@ impl FlowchartApp {
             }
         }
 
+        // SLA time-budget bar: thin stripe across node bottom showing elapsed % of created→due window
+        if !node.created_date.is_empty() && !node.is_frame && self.viewport.zoom > 0.45 {
+            let due_str_opt: Option<&str> = node.sublabel.split('\n')
+                .find_map(|line| line.strip_prefix("📅 "));
+            if let Some(due_str) = due_str_opt {
+                let today = today_iso();
+                let total_days = -iso_days_remaining(&node.created_date, due_str.trim());  // due - created
+                let elapsed_days = -iso_days_remaining(&node.created_date, &today);        // today - created
+                if total_days > 0 && elapsed_days >= 0 {
+                    let frac = (elapsed_days as f32 / total_days as f32).clamp(0.0, 1.0);
+                    // Color: green → amber → red
+                    let bar_col = if frac < 0.5 {
+                        // green → yellow-green
+                        let t = frac / 0.5;
+                        egui::Color32::from_rgba_unmultiplied(
+                            (100.0 + t * 120.0) as u8, (200.0 - t * 30.0) as u8, 60, 200)
+                    } else if frac < 0.8 {
+                        // yellow → amber
+                        let t = (frac - 0.5) / 0.3;
+                        egui::Color32::from_rgba_unmultiplied(
+                            220, (165.0 - t * 60.0) as u8, 30, 200)
+                    } else {
+                        // red (overdue or close)
+                        egui::Color32::from_rgba_unmultiplied(220, 60, 50, 200)
+                    };
+                    let bar_h = (2.5 * self.viewport.zoom.sqrt()).clamp(2.0, 4.0);
+                    let bar_y = screen_rect.max.y - bar_h - 1.0;
+                    let bar_max_w = screen_rect.width() - 4.0;
+                    let filled_w = (bar_max_w * frac).max(bar_h); // at least a nub
+                    let bar_rect = Rect::from_min_size(
+                        egui::Pos2::new(screen_rect.min.x + 2.0, bar_y),
+                        egui::Vec2::new(filled_w, bar_h),
+                    );
+                    // Track background
+                    let track_rect = Rect::from_min_size(
+                        egui::Pos2::new(screen_rect.min.x + 2.0, bar_y),
+                        egui::Vec2::new(bar_max_w, bar_h),
+                    );
+                    painter.rect_filled(track_rect, CornerRadius::same(2),
+                        egui::Color32::from_rgba_unmultiplied(60, 60, 80, 80));
+                    painter.rect_filled(bar_rect, CornerRadius::same(2), bar_col);
+                }
+            }
+        }
+
         // Description indicator (small dot in bottom-right when node has a description)
         if self.viewport.zoom > 0.4 {
             let has_desc = match &node.kind {
