@@ -653,7 +653,23 @@ impl FlowchartApp {
                                         "unassigned" | "no-owner" => !n.sublabel.contains("👤"),
                                         "glow" | "highlighted" => n.style.glow || n.highlight,
                                         "commented" | "has-comment" => !n.comment.is_empty(),
+                                        "stale" | "old" => {
+                                            if n.created_date.is_empty() { false }
+                                            else { (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0i32) >= 7 }
+                                        }
+                                        "fresh" | "new" => {
+                                            if n.created_date.is_empty() { false }
+                                            else { (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0i32) < 2 }
+                                        }
                                         _ => {
+                                            if let Some(age_q) = term.strip_prefix("age:") {
+                                                if n.created_date.is_empty() { return false; }
+                                                let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0);
+                                                if let Some(lt_q) = age_q.strip_prefix('<') {
+                                                    return lt_q.parse::<i32>().map_or(false, |nd| age < nd);
+                                                }
+                                                return age_q.parse::<i32>().map_or(false, |nd| age >= nd);
+                                            }
                                             if let Some(at_q) = term.strip_prefix('@') {
                                                 return n.sublabel.to_lowercase().contains(at_q);
                                             }
@@ -889,6 +905,37 @@ impl FlowchartApp {
                             return date_str.trim() <= today_str.as_str();
                         }
                         return false;
+                    }
+                    // age:N → tickets created N or more days ago (e.g. age:7 = stale tickets)
+                    // age:<N → tickets created less than N days ago (e.g. age:<3 = fresh tickets)
+                    // created:today / created:N (within N days)
+                    if let Some(age_q) = q.strip_prefix("age:") {
+                        if n.created_date.is_empty() { return false; }
+                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                        if let Some(lt_q) = age_q.strip_prefix('<') {
+                            return lt_q.parse::<i32>().map_or(false, |n| age < n);
+                        }
+                        return age_q.parse::<i32>().map_or(false, |n| age >= n);
+                    }
+                    if let Some(created_q) = q.strip_prefix("created:") {
+                        let tgt = created_q.trim();
+                        if tgt == "today" { return n.created_date == today_str.as_str(); }
+                        if tgt == "this-week" {
+                            if n.created_date.is_empty() { return false; }
+                            let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                            return age < 7;
+                        }
+                        return n.created_date.to_lowercase().contains(tgt);
+                    }
+                    if q == "fresh" || q == "new" {
+                        if n.created_date.is_empty() { return false; }
+                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                        return age < 2;
+                    }
+                    if q == "stale" || q == "old" {
+                        if n.created_date.is_empty() { return false; }
+                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                        return age >= 7;
                     }
                     // #id search: match by hrf_id (e.g. "#t1" → ticket t1)
                     if let Some(id_q) = q.strip_prefix('#') {
