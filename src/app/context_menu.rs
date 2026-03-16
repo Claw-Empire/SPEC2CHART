@@ -353,6 +353,109 @@ impl FlowchartApp {
             }
         });
 
+        // Assign to submenu
+        ui.menu_button("👤 Assign to…", |ui| {
+            // Collect assignees already used in this document
+            let existing_assignees: Vec<String> = {
+                let mut seen = std::collections::BTreeSet::new();
+                for n in &self.document.nodes {
+                    if let Some(name) = n.sublabel.strip_prefix("👤 ") {
+                        seen.insert(name.trim().to_string());
+                    }
+                }
+                seen.into_iter().collect()
+            };
+            if !existing_assignees.is_empty() {
+                ui.label(egui::RichText::new("In this document").size(10.0).weak());
+                for name in &existing_assignees {
+                    if ui.button(format!("👤 {name}")).clicked() {
+                        let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
+                            self.selection.node_ids.iter().copied().collect()
+                        } else { vec![node_id] };
+                        for id in &ids {
+                            if let Some(n) = self.document.find_node_mut(id) {
+                                n.sublabel = format!("👤 {}", name);
+                            }
+                        }
+                        self.history.push(&self.document);
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+            }
+            let common: &[&str] = &["Alice", "Bob", "Charlie", "Dana", "Erin", "Frank", "Team", "On-call"];
+            for name in common {
+                if existing_assignees.iter().any(|a| a.as_str() == *name) { continue; }
+                if ui.button(format!("👤 {name}")).clicked() {
+                    let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
+                        self.selection.node_ids.iter().copied().collect()
+                    } else { vec![node_id] };
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.sublabel = format!("👤 {}", name);
+                        }
+                    }
+                    self.history.push(&self.document);
+                    ui.close_menu();
+                }
+            }
+            ui.separator();
+            if ui.button("✕ Clear assignee").clicked() {
+                let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
+                    self.selection.node_ids.iter().copied().collect()
+                } else { vec![node_id] };
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        if n.sublabel.starts_with("👤") { n.sublabel.clear(); }
+                    }
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+        });
+
+        // Due date quick-set submenu
+        ui.menu_button("📅 Set Due Date…", |ui| {
+            let today_str = "2026-03-16";
+            // Pre-compute common relative dates
+            let date_opts: &[(&str, &str)] = &[
+                ("Today (2026-03-16)",        "2026-03-16"),
+                ("Tomorrow (2026-03-17)",     "2026-03-17"),
+                ("This Friday (2026-03-20)",  "2026-03-20"),
+                ("Next Monday (2026-03-23)",  "2026-03-23"),
+                ("End of month (2026-03-31)", "2026-03-31"),
+                ("End of Q2 (2026-06-30)",    "2026-06-30"),
+            ];
+            for (label, date) in date_opts {
+                if ui.button(*label).clicked() {
+                    let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
+                        self.selection.node_ids.iter().copied().collect()
+                    } else { vec![node_id] };
+                    for id in &ids {
+                        if let Some(n) = self.document.find_node_mut(id) {
+                            n.sublabel = format!("📅 {}", date);
+                        }
+                    }
+                    self.history.push(&self.document);
+                    ui.close_menu();
+                }
+            }
+            ui.separator();
+            if ui.button("✕ Clear due date").clicked() {
+                let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
+                    self.selection.node_ids.iter().copied().collect()
+                } else { vec![node_id] };
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        if n.sublabel.starts_with("📅") { n.sublabel.clear(); }
+                    }
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+            let _ = today_str; // used for comment
+        });
+
         // Design Thinking type picker
         ui.menu_button("💡 Design Type…", |ui| {
             // (shape, fill_color, label)
