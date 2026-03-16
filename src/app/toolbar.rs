@@ -725,6 +725,7 @@ impl FlowchartApp {
                             ("Due shortcuts", "⇧D = due today  ·  ⇧W = due +7d  ·  Z = snooze +1d  ·  {created:YYYY-MM-DD} = age badge"),
                             ("Kanban actions", "R = resolve → last col  ·  ⇧E = escalate P1 → Triage  ·  C = comment  ·  A = assign"),
                             ("Kanban move", "⌃1/2/3/4 = jump to column N  ·  ]/[ = advance/demote column"),
+                            ("Kanban sort", "⌥P = sort by priority (P1→P4)  ·  ⌥D = sort by due date (soonest first)"),
                             ("Workload", "⌘⇧W = assignee×column matrix  (click row to filter)"),
                             ("SLA bar", "{created:} + 📅 due → color bar at node bottom (green→amber→red)"),
                             ("Inline section", "{section:Intake} {stage:Triage} {col:Done}  (set kanban column inline)"),

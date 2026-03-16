@@ -350,6 +350,9 @@ pub struct Node {
     /// Set via `{p1}`/`{p2}`/`{p3}`/`{p4}` HRF tags; rendered as "P1" pill on canvas.
     #[serde(default)]
     pub priority: u8,
+    /// User-assigned HRF ID (e.g. "t1" from `[t1]`). Preserved on export for stable references.
+    #[serde(default)]
+    pub hrf_id: String,
 }
 
 impl Node {
@@ -371,7 +374,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
             style: NodeStyle::default(),
         }
     }
@@ -385,7 +388,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -406,7 +409,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -426,7 +429,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -453,7 +456,7 @@ impl Node {
             is_frame: true,
             locked: false,
             comment: String::new(),
-            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0,
+            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
             pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: [89, 91, 118, 0],  // transparent — frame_color is used

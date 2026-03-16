@@ -605,6 +605,21 @@ impl FlowchartApp {
                 FontId::proportional(icon_sz), self.theme.text_dim.gamma_multiply(0.75));
         }
 
+        // HRF ID badge: tiny muted "#t1" at top-left (below the P1 tag pill) for quick ticket reference
+        if !node.hrf_id.is_empty() && !node.is_frame && self.viewport.zoom > 0.6 {
+            let font_sz = (7.5 * self.viewport.zoom.sqrt()).clamp(6.0, 9.5);
+            let id_text = format!("#{}", node.hrf_id);
+            let text_x = screen_rect.min.x + 5.0;
+            let text_y = screen_rect.max.y - 4.0;
+            painter.text(
+                Pos2::new(text_x, text_y),
+                Align2::LEFT_BOTTOM,
+                &id_text,
+                FontId::monospace(font_sz),
+                egui::Color32::from_rgba_unmultiplied(160, 165, 190, 100),
+            );
+        }
+
         // URL indicator (shown as a small 🔗 in bottom-left when node has a URL)
         if !node.url.is_empty() && self.viewport.zoom > 0.5 {
             let icon_pos = Pos2::new(screen_rect.min.x + 4.0, screen_rect.max.y - 4.0);

@@ -482,6 +482,7 @@ impl FlowchartApp {
                 section_name: self.section_for_canvas_x(canvas_pos.x).unwrap_or_default(),
                 created_date: String::new(),
                 priority: 0,
+                hrf_id: String::new(),
             };
             let id = node.id;
             self.document.nodes.push(node);

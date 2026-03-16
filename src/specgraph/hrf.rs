@@ -1476,8 +1476,13 @@ pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, viewport: Option<&Vie
         .iter()
         .enumerate()
         .map(|(i, n)| {
-            let label = n.display_label();
-            let id = slugify(label, i);
+            // Prefer the original HRF ID if set (stable round-trip), else generate from label
+            let id = if !n.hrf_id.is_empty() {
+                n.hrf_id.clone()
+            } else {
+                let label = n.display_label();
+                slugify(label, i)
+            };
             (n.id, id)
         })
         .collect();
@@ -2862,6 +2867,10 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     }
     if priority_tag > 0 {
         node.priority = priority_tag;
+    }
+    // Store the user-assigned HRF ID for stable export and display
+    if !id.is_empty() {
+        node.hrf_id = id.clone();
     }
 
     Ok((id, node))
