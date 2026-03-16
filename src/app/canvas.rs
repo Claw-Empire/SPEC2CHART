@@ -652,10 +652,15 @@ impl FlowchartApp {
                             "p1" | "1" | "critical" => matches!(n.tag, Some(crate::model::NodeTag::Critical)),
                             "p2" | "2" | "high"     => matches!(n.tag, Some(crate::model::NodeTag::Warning)),
                             "p3" | "3" | "medium"   => matches!(n.tag, Some(crate::model::NodeTag::Info)),
-                            "p4" | "4" | "low"      => n.tag.is_none(),
+                            "p4" | "4" | "low"      => n.tag.is_none() || n.priority == 4,
                             _                       => false,
                         };
                     }
+                    // Direct priority shorthand: type "p1" / "p2" / "p3" / "p4" to filter
+                    if q == "p1" { return n.priority == 1 || matches!(n.tag, Some(crate::model::NodeTag::Critical)); }
+                    if q == "p2" { return n.priority == 2 || matches!(n.tag, Some(crate::model::NodeTag::Warning)); }
+                    if q == "p3" { return n.priority == 3 || matches!(n.tag, Some(crate::model::NodeTag::Info)); }
+                    if q == "p4" { return n.priority == 4; }
                     if q == "escalated" {
                         return matches!(n.tag, Some(crate::model::NodeTag::Critical)) && n.style.glow;
                     }

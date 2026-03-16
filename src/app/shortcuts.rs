@@ -634,9 +634,18 @@ impl FlowchartApp {
                 .filter_map(|id| self.document.find_node(id).cloned())
                 .collect();
             self.selection.clear();
+            // Compute max numeric hrf_id suffix before the loop so we can increment per-duplicate
+            let mut max_t_dup: u32 = self.document.nodes.iter()
+                .filter_map(|n| n.hrf_id.strip_prefix('t').and_then(|s| s.parse::<u32>().ok()))
+                .max().unwrap_or(0);
             for template in originals {
                 let mut node = template.clone();
                 node.id = NodeId::new();
+                // Generate a new hrf_id for the duplicate (avoid collisions)
+                if !node.hrf_id.is_empty() {
+                    max_t_dup += 1;
+                    node.hrf_id = format!("t{}", max_t_dup);
+                }
                 // Find a non-overlapping position by nudging by multiples of base_offset
                 let mut candidate = template.pos() + base_offset;
                 let mut attempts = 0;
