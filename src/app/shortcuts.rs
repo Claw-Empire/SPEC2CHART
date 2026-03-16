@@ -419,7 +419,7 @@ impl FlowchartApp {
                 Some(crate::model::NodeShape::Rectangle)
             } else if ctx.input(|i| i.key_pressed(Key::C) && i.modifiers.is_none()) && self.selection.node_ids.is_empty() {
                 Some(crate::model::NodeShape::Circle)
-            } else if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.is_none()) {
+            } else if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.is_none()) && self.selection.node_ids.is_empty() {
                 Some(crate::model::NodeShape::Diamond)
             } else {
                 None
@@ -1211,18 +1211,20 @@ impl FlowchartApp {
                 // P + nodes selected → cycle support priority: None→P1→P2→P3→P4→None
                 let node_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
                 // Determine next priority from first selected node
-                let current_tag = self.document.find_node(node_ids.first().unwrap())
-                    .and_then(|n| n.tag);
-                let (new_tag, new_fill, label) = match current_tag {
-                    None => (Some(crate::model::NodeTag::Critical), Some([243u8, 139, 168, 255]), "P1 — Critical"),
-                    Some(crate::model::NodeTag::Critical) => (Some(crate::model::NodeTag::Warning), Some([250u8, 179, 135, 255]), "P2 — High"),
-                    Some(crate::model::NodeTag::Warning)  => (Some(crate::model::NodeTag::Info),     Some([137u8, 180, 250, 255]), "P3 — Medium"),
-                    Some(crate::model::NodeTag::Info)      => (None,                                   Some([166u8, 227, 161, 255]), "P4 — Low"),
-                    Some(crate::model::NodeTag::Ok)        => (None,                                   None,                         "No priority"),
+                let first = self.document.find_node(node_ids.first().unwrap());
+                let current_prio = first.map(|n| n.priority).unwrap_or(0);
+                let current_tag = first.and_then(|n| n.tag);
+                let (new_tag, new_prio, new_fill, label) = match (current_prio, current_tag) {
+                    (0, None)   | (0, Some(_)) => (Some(crate::model::NodeTag::Critical), 1u8, Some([243u8, 139, 168, 255]), "P1 — Critical"),
+                    (1, _) | (0, Some(crate::model::NodeTag::Critical)) => (Some(crate::model::NodeTag::Warning), 2u8, Some([250u8, 179, 135, 255]), "P2 — High"),
+                    (2, _) | (0, Some(crate::model::NodeTag::Warning))  => (Some(crate::model::NodeTag::Info),    3u8, Some([137u8, 180, 250, 255]), "P3 — Medium"),
+                    (3, _) | (0, Some(crate::model::NodeTag::Info))     => (None,                                 4u8, Some([166u8, 227, 161, 255]), "P4 — Low"),
+                    _                                                    => (None,                                 0u8, None,                         "No priority"),
                 };
                 for id in &node_ids {
                     if let Some(node) = self.document.find_node_mut(id) {
                         node.tag = new_tag;
+                        node.priority = new_prio;
                         if let Some(fc) = new_fill {
                             node.style.fill_color = fc;
                         } else {
@@ -2071,6 +2073,44 @@ impl FlowchartApp {
                 if changed {
                     self.history.push(&self.document);
                     self.status_message = Some(("⬆ Sorted by priority".to_string(), std::time::Instant::now()));
+                }
+            }
+        }
+
+        // Alt+D = sort nodes within each section by due date (soonest first, no-due-date last)
+        {
+            let alt_only = egui::Modifiers { alt: true, ..egui::Modifiers::NONE };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.matches_exact(alt_only)) {
+                let today = super::render::today_iso();
+                // due_rank: days remaining from today; None/missing = very large (sort last)
+                let due_rank = |n: &crate::model::Node| -> i32 {
+                    n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
+                        .map(|d| super::render::iso_days_remaining_pub(d.trim(), &today))
+                        .unwrap_or(i32::MAX)
+                };
+                let mut sections: std::collections::HashMap<String, Vec<(crate::model::NodeId, i32)>> = std::collections::HashMap::new();
+                for n in &self.document.nodes {
+                    if n.section_name.is_empty() || n.is_frame || n.pinned { continue; }
+                    sections.entry(n.section_name.clone()).or_default().push((n.id, due_rank(n)));
+                }
+                let mut changed = false;
+                for (_, group) in &sections {
+                    let mut positioned: Vec<(crate::model::NodeId, i32, f32)> = group.iter().filter_map(|&(id, rank)| {
+                        self.document.find_node(&id).map(|n| (id, rank, n.position[1]))
+                    }).collect();
+                    if positioned.len() < 2 { continue; }
+                    let ys: Vec<f32> = { let mut v: Vec<f32> = positioned.iter().map(|t| t.2).collect(); v.sort_by(|a,b| a.partial_cmp(b).unwrap()); v };
+                    positioned.sort_by_key(|t| t.1);
+                    for (i, &(id, _, _)) in positioned.iter().enumerate() {
+                        if let Some(n) = self.document.find_node_mut(&id) {
+                            n.position[1] = ys[i];
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    self.history.push(&self.document);
+                    self.status_message = Some(("📅 Sorted by due date".to_string(), std::time::Instant::now()));
                 }
             }
         }
