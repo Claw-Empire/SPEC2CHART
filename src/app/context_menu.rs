@@ -270,6 +270,51 @@ impl FlowchartApp {
             }
         }
 
+        // Kanban quick actions (only show when doc has sections — kanban mode)
+        let has_sections = self.document.nodes.iter().any(|n| !n.section_name.is_empty());
+        if has_sections {
+            ui.separator();
+            let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
+                self.selection.node_ids.iter().copied().collect()
+            } else { vec![node_id] };
+            if ui.button("🚨 Escalate (P1 → Triage)").clicked() {
+                let mut seen_sections: Vec<String> = Vec::new();
+                for n in &self.document.nodes {
+                    if !n.section_name.is_empty() && !seen_sections.contains(&n.section_name) {
+                        seen_sections.push(n.section_name.clone());
+                    }
+                }
+                let triage_sec: Option<String> = seen_sections.get(1).cloned();
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        n.tag = Some(crate::model::NodeTag::Critical);
+                        n.style.fill_color = [243, 139, 168, 255];
+                        if let Some(ref sec) = triage_sec { n.section_name = sec.clone(); }
+                    }
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+            if ui.button("✓ Resolve (Done → Resolved)").clicked() {
+                let mut seen_sections: Vec<String> = Vec::new();
+                for n in &self.document.nodes {
+                    if !n.section_name.is_empty() && !seen_sections.contains(&n.section_name) {
+                        seen_sections.push(n.section_name.clone());
+                    }
+                }
+                let resolve_sec: Option<String> = seen_sections.last().cloned();
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        n.tag = Some(crate::model::NodeTag::Ok);
+                        n.progress = 1.0;
+                        if let Some(ref sec) = resolve_sec { n.section_name = sec.clone(); }
+                    }
+                }
+                self.history.push(&self.document);
+                ui.close_menu();
+            }
+        }
+
         if ui.button("🔗 Select Connected").clicked() {
             let connected: Vec<NodeId> = self.document.edges.iter()
                 .filter_map(|e| {
