@@ -3992,9 +3992,41 @@ impl FlowchartApp {
                      else              { Color32::TRANSPARENT };
             ui.painter().rect_filled(row_rect, CornerRadius::ZERO, bg);
 
-            // Truncate label
-            let short: String = label.chars().take(36).collect();
-            let trail = if label.chars().count() > 36 { "…" } else { "" };
+            // Look up node for context (tag + section)
+            let (node_tag, node_section) = self.document.find_node(nid)
+                .map(|n| (n.tag, n.section_name.clone()))
+                .unwrap_or((None, String::new()));
+
+            // Tag dot on the right
+            let tag_color = match node_tag {
+                Some(crate::model::NodeTag::Critical) => Color32::from_rgb(243, 139, 168),
+                Some(crate::model::NodeTag::Warning)  => Color32::from_rgb(250, 179, 135),
+                Some(crate::model::NodeTag::Ok)        => Color32::from_rgb(166, 227, 161),
+                Some(crate::model::NodeTag::Info)      => Color32::from_rgb(137, 180, 250),
+                None => Color32::TRANSPARENT,
+            };
+            if node_tag.is_some() {
+                ui.painter().circle_filled(
+                    Pos2::new(overlay_rect.max.x - 10.0, row_rect.center().y),
+                    4.0, tag_color,
+                );
+            }
+
+            // Section label dim (right-aligned, before the dot)
+            let right_x = if node_tag.is_some() { overlay_rect.max.x - 20.0 } else { overlay_rect.max.x - 8.0 };
+            if !node_section.is_empty() {
+                let sec_short: String = node_section.chars().take(12).collect();
+                ui.painter().text(
+                    Pos2::new(right_x, row_rect.center().y),
+                    Align2::RIGHT_CENTER, &sec_short,
+                    FontId::proportional(9.5), self.theme.text_dim.gamma_multiply(0.6),
+                );
+            }
+
+            // Truncate label (leave room for right-side context)
+            let max_label_chars = if node_section.is_empty() && node_tag.is_none() { 36 } else { 26 };
+            let short: String = label.chars().take(max_label_chars).collect();
+            let trail = if label.chars().count() > max_label_chars { "…" } else { "" };
             let disp = format!("{}{}", short, trail);
             ui.painter().text(
                 Pos2::new(row_rect.min.x + 14.0, row_rect.center().y),

@@ -824,6 +824,66 @@ impl FlowchartApp {
             ));
         }
 
+        // Cmd+Shift+R = copy support status report as Markdown to clipboard
+        let cmd_shift_r = Modifiers { shift: true, ..cmd };
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.matches_exact(cmd_shift_r)) {
+            let nodes: Vec<_> = if !self.selection.node_ids.is_empty() {
+                self.document.nodes.iter()
+                    .filter(|n| self.selection.node_ids.contains(&n.id))
+                    .collect()
+            } else {
+                self.document.nodes.iter().collect()
+            };
+
+            // Group by section
+            let mut sections: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
+            for n in &nodes {
+                sections.entry(n.section_name.clone()).or_default().push(n);
+            }
+
+            let mut md = String::new();
+            let title = if let Some(t) = &self.document.import_hints.project_title {
+                if !t.is_empty() { t.clone() } else { "Support Report".to_string() }
+            } else { "Support Report".to_string() };
+            md.push_str(&format!("# {}\n\n", title));
+
+            for (sec, items) in &sections {
+                let header = if sec.is_empty() { "General".to_string() } else { sec.clone() };
+                md.push_str(&format!("## {}\n\n", header));
+                for n in items {
+                    let status = match n.tag {
+                        Some(crate::model::NodeTag::Critical) => "🔴",
+                        Some(crate::model::NodeTag::Warning)  => "🟡",
+                        Some(crate::model::NodeTag::Ok)        => "🟢",
+                        Some(crate::model::NodeTag::Info)      => "🔵",
+                        None => "⚪",
+                    };
+                    let label = n.display_label();
+                    let desc = match &n.kind {
+                        crate::model::NodeKind::Shape { description, .. } if !description.is_empty() => {
+                            format!(" — {}", description)
+                        }
+                        _ => String::new(),
+                    };
+                    let assignee = if n.sublabel.starts_with("👤") {
+                        format!("  `{}`", n.sublabel.trim())
+                    } else { String::new() };
+                    let due = if n.sublabel.starts_with("📅") {
+                        format!("  `{}`", n.sublabel.trim())
+                    } else { String::new() };
+                    md.push_str(&format!("- {} **{}**{}{}{}\n", status, label, desc, assignee, due));
+                }
+                md.push('\n');
+            }
+
+            ctx.copy_text(md);
+            let count = nodes.len();
+            self.status_message = Some((
+                format!("Support report copied ({} nodes)", count),
+                std::time::Instant::now(),
+            ));
+        }
+
         // ? = toggle shortcuts panel
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F1) || (i.key_pressed(Key::Slash) && i.modifiers.shift)) {
             self.show_shortcuts_panel = !self.show_shortcuts_panel;
