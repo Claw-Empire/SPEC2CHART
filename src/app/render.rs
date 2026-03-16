@@ -605,6 +605,24 @@ impl FlowchartApp {
                 FontId::proportional(icon_sz), self.theme.text_dim.gamma_multiply(0.75));
         }
 
+        // Link count badge: "↔N" to the left of 💬 badge when node has edges
+        if !node.is_frame && self.viewport.zoom > 0.55 {
+            let edge_count = self.document.edges.iter()
+                .filter(|e| e.source.node_id == node.id || e.target.node_id == node.id)
+                .count();
+            if edge_count > 0 {
+                let font_sz = (8.5 * self.viewport.zoom.sqrt()).clamp(6.5, 10.5);
+                let badge_text = format!("↔{}", edge_count);
+                // Place to the left of 💬 badge (or near bottom-right if no comment)
+                let right_offset = if !node.comment.is_empty() { 22.0 } else { 4.0 };
+                let right_offset = right_offset + badge_text.len() as f32 * font_sz * 0.55 + 2.0;
+                let badge_pos = Pos2::new(screen_rect.max.x - right_offset, screen_rect.max.y - 3.0);
+                painter.text(badge_pos, Align2::RIGHT_BOTTOM, &badge_text,
+                    FontId::proportional(font_sz),
+                    egui::Color32::from_rgba_unmultiplied(140, 160, 200, 90));
+            }
+        }
+
         // HRF ID badge: tiny muted "#t1" at top-left (below the P1 tag pill) for quick ticket reference
         if !node.hrf_id.is_empty() && !node.is_frame && self.viewport.zoom > 0.6 {
             let font_sz = (7.5 * self.viewport.zoom.sqrt()).clamp(6.0, 9.5);
