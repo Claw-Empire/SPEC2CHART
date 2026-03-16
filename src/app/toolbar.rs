@@ -723,7 +723,7 @@ impl FlowchartApp {
                             ("Quick cards", "⌘⇧E = Experiment card  ·  ⌘⇧T = Support pipeline  ·  ⌘⇧I = new intake ticket"),
                             ("Support report", "⌘⇧R = copy status report as Markdown (selection or all)"),
                             ("Due shortcuts", "⇧D = due today  ·  ⇧W = due +7d  ·  Z = snooze +1d  ·  {created:YYYY-MM-DD} = age badge"),
-                            ("Search filters", "@alice · due:today · due:3 · due:overdue · comment:text · p1 · #t4 · overdue · orphan"),
+                            ("Search filters", "@alice · due:today · due:3 · not:done · p1 overdue · not:section:Resolved · comment:text"),
                             ("Kanban actions", "R = resolve → last col  ·  ⇧E = escalate P1 → Triage  ·  C = comment  ·  A = assign"),
                             ("Kanban move", "⌃1/2/3/4 = jump to column N  ·  ]/[ = advance/demote column"),
                             ("Kanban sort", "⌥P = sort by priority (P1→P4)  ·  ⌥D = sort by due date (soonest first)"),

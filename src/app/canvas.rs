@@ -694,9 +694,62 @@ impl FlowchartApp {
                                         }
                                     }
                                 };
-                                return tokens.iter().all(|t| match_term(t));
+                                // Support "not:X" tokens in AND chains
+                                return tokens.iter().all(|t| {
+                                    if let Some(inner) = t.strip_prefix("not:") { !match_term(inner) }
+                                    else { match_term(t) }
+                                });
                             }
                         }
+                    }
+                    // ── not:X single-term negation ───────────────────────────────
+                    // "not:done", "not:p4", "not:section:Resolved", "not:@alice"
+                    if let Some(inner_q) = q.strip_prefix("not:") {
+                        let inner = inner_q.trim();
+                        let positive = match inner {
+                            "done" | "resolved" | "complete" =>
+                                matches!(n.tag, Some(crate::model::NodeTag::Ok)) || n.progress >= 1.0,
+                            "p1" | "critical" =>
+                                n.priority == 1 || matches!(n.tag, Some(crate::model::NodeTag::Critical)),
+                            "p2" | "high" =>
+                                n.priority == 2 || matches!(n.tag, Some(crate::model::NodeTag::Warning)),
+                            "p3" | "medium" =>
+                                n.priority == 3 || matches!(n.tag, Some(crate::model::NodeTag::Info)),
+                            "p4" | "low" => n.priority == 4,
+                            "overdue" | "late" | "past-due" =>
+                                n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
+                                    .map_or(false, |d| d.trim() <= today_str.as_str() && d.len() >= 8),
+                            "linked" =>
+                                self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
+                            "orphan" | "unlinked" =>
+                                !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
+                            "assigned" | "has-owner" => n.sublabel.contains("👤"),
+                            "unassigned" | "no-owner" => !n.sublabel.contains("👤"),
+                            "glow" | "highlighted" => n.style.glow || n.highlight,
+                            "commented" | "has-comment" => !n.comment.is_empty(),
+                            _ => {
+                                if let Some(aq) = inner.strip_prefix("section:") {
+                                    n.section_name.to_lowercase().contains(aq)
+                                } else if let Some(aq) = inner.strip_prefix('@') {
+                                    n.sublabel.to_lowercase().contains(aq)
+                                } else if let Some(aq) = inner.strip_prefix("assigned:").or_else(|| inner.strip_prefix("assignee:")) {
+                                    n.sublabel.to_lowercase().contains(aq)
+                                } else if let Some(sq) = inner.strip_prefix("status:") {
+                                    match sq {
+                                        "done" => matches!(n.tag, Some(crate::model::NodeTag::Ok)),
+                                        "blocked" => matches!(n.tag, Some(crate::model::NodeTag::Critical)),
+                                        "wip" => matches!(n.tag, Some(crate::model::NodeTag::Info)),
+                                        "todo" => matches!(n.tag, Some(crate::model::NodeTag::Warning)),
+                                        _ => false,
+                                    }
+                                } else {
+                                    let lbl = n.display_label().to_lowercase();
+                                    lbl.contains(inner) || n.sublabel.to_lowercase().contains(inner)
+                                        || n.section_name.to_lowercase().contains(inner)
+                                }
+                            }
+                        };
+                        return !positive;
                     }
                     // ── Single-term smart filter prefixes ────────────────────────
                     if let Some(status_q) = q.strip_prefix("status:") {
@@ -2454,7 +2507,7 @@ impl FlowchartApp {
                 "ICE Score = Impact × Confidence × Ease → run highest first",
                 "Double Diamond · Hypothesis Canvas · Assumption Map — ⌘K",
                 "⌘⇧E = insert Experiment Card (Hypothesis → Test → Result → Learning)",
-                "⌘F search: p1 · @alice · due:today · due:3 · comment:stripe · section:Triage · orphan",
+                "⌘F search: p1 · @alice · due:3 · not:done · p1 overdue · not:section:Resolved",
                 "SPEC → Import to load a diagram instantly",
                 "Every great theory starts with a single hypothesis",
                 "Press ? for all keyboard shortcuts",
