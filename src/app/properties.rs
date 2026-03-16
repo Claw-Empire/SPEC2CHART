@@ -410,6 +410,53 @@ impl FlowchartApp {
                             .hint_text("e.g. v2.1 · running")
                             .font(FontId::proportional(11.5)),
                     );
+                    // Ticket info: structured Assignee + Due Date fields (parsed from sublabel)
+                    {
+                        let mut assignee_val: String = node.sublabel.lines()
+                            .find(|l| l.starts_with("👤 "))
+                            .and_then(|l| l.strip_prefix("👤 "))
+                            .unwrap_or("")
+                            .to_string();
+                        let mut due_val: String = node.sublabel.lines()
+                            .find(|l| l.starts_with("📅 "))
+                            .and_then(|l| l.strip_prefix("📅 "))
+                            .unwrap_or("")
+                            .to_string();
+                        let prev_a = assignee_val.clone();
+                        let prev_d = due_val.clone();
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("👤 Assignee").size(11.0).color(theme.text_dim));
+                        ui.add_space(2.0);
+                        ui.add(egui::TextEdit::singleline(&mut assignee_val)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("Name")
+                            .font(FontId::proportional(11.5)));
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("📅 Due Date").size(11.0).color(theme.text_dim));
+                        ui.add_space(2.0);
+                        ui.add(egui::TextEdit::singleline(&mut due_val)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("YYYY-MM-DD")
+                            .font(FontId::proportional(11.5)));
+                        if assignee_val != prev_a || due_val != prev_d {
+                            let other_lines: Vec<String> = node.sublabel.lines()
+                                .filter(|l| !l.starts_with("👤 ") && !l.starts_with("📅 "))
+                                .map(|l| l.to_string())
+                                .collect();
+                            let mut parts = Vec::new();
+                            if !assignee_val.trim().is_empty() {
+                                parts.push(format!("👤 {}", assignee_val.trim()));
+                            }
+                            if !due_val.trim().is_empty() {
+                                parts.push(format!("📅 {}", due_val.trim()));
+                            }
+                            parts.extend(other_lines);
+                            // Deduplicate blank lines
+                            parts.retain(|l| !l.is_empty());
+                            node.sublabel = parts.join("\n");
+                        }
+                    }
+
                     // Section (groups node with colored background on canvas)
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Section").size(11.0).color(theme.text_dim));
