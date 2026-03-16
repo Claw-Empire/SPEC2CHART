@@ -634,10 +634,18 @@ impl FlowchartApp {
             self.show_rulers = !self.show_rulers;
         }
 
-        // Cmd+F = search
+        // Cmd+F = search (also clears persistent filter)
         if ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd)) {
-            self.show_search = !self.show_search;
-            if self.show_search { self.search_query.clear(); }
+            if self.persist_search_filter {
+                // Second Cmd+F clears the pinned filter
+                self.persist_search_filter = false;
+                self.search_query.clear();
+                self.show_search = false;
+                self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+            } else {
+                self.show_search = !self.show_search;
+                if self.show_search { self.search_query.clear(); }
+            }
         }
 
         // Cmd+E = live spec editor panel (populate with current HRF on open)

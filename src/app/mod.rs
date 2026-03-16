@@ -131,6 +131,8 @@ pub struct FlowchartApp {
     pub(crate) recent_colors: Vec<[u8; 4]>,
     pub(crate) show_search: bool,
     pub(crate) search_query: String,
+    /// When true, keep search dimming active even when search overlay is closed
+    pub(crate) persist_search_filter: bool,
     pub(crate) show_shortcuts_panel: bool,
     pub(crate) bg_pattern: BgPattern,
     /// When Some, show a floating shape picker at this screen position
@@ -299,6 +301,7 @@ impl FlowchartApp {
             recent_colors: Vec::new(),
             show_search: false,
             search_query: String::new(),
+            persist_search_filter: false,
             show_shortcuts_panel: false,
             bg_pattern: BgPattern::Dots,
             shape_picker: None,

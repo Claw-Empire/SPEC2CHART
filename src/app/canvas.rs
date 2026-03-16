@@ -616,7 +616,7 @@ impl FlowchartApp {
         self.draw_multi_selection_dimensions(&painter);
 
         // Compute search matches (for highlight overlay)
-        let search_matches: std::collections::HashSet<NodeId> = if self.show_search && !self.search_query.is_empty() {
+        let search_matches: std::collections::HashSet<NodeId> = if (self.show_search || self.persist_search_filter) && !self.search_query.is_empty() {
             let q = self.search_query.trim().to_lowercase();
             self.document.nodes.iter()
                 .filter(|n| {
@@ -812,7 +812,7 @@ impl FlowchartApp {
         self.draw_deletion_ghosts(&painter);
 
         // Search dim: when search is active with a query, dim non-matching nodes
-        if self.show_search && !self.search_query.is_empty() {
+        if (self.show_search || self.persist_search_filter) && !self.search_query.is_empty() {
             for node in &self.document.nodes {
                 if search_matches.contains(&node.id) { continue; }
                 let sp = self.viewport.canvas_to_screen(node.pos());
@@ -918,6 +918,7 @@ impl FlowchartApp {
         self.draw_back_to_content(&painter, canvas_rect, ui);
 
         self.draw_tag_filter_pills(&painter, canvas_rect, ui);
+        self.draw_persistent_filter_chip(ui, canvas_rect);
 
         self.draw_project_title(&painter, canvas_rect);
         self.draw_empty_canvas_hint(&painter, canvas_rect);
@@ -4112,15 +4113,16 @@ impl FlowchartApp {
             self.search_cursor -= 1;
         }
 
-        // Close on Escape
+        // Close on Escape (also clears any pinned filter)
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.show_search = false;
             self.search_query.clear();
+            self.persist_search_filter = false;
             self.search_cursor = 0;
             return;
         }
 
-        // Jump to result on Enter; Shift+Enter = select ALL matches
+        // Jump to result on Enter; Shift+Enter = select ALL + pin filter
         if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
             let shift = ctx.input(|i| i.modifiers.shift);
             if shift || total_count == 1 {
@@ -4129,7 +4131,15 @@ impl FlowchartApp {
                 for nid in search_matches { self.selection.node_ids.insert(*nid); }
                 if !search_matches.is_empty() { self.zoom_to_selection(); }
                 if total_count > 1 {
-                    self.status_message = Some((format!("Selected {} nodes", total_count), std::time::Instant::now()));
+                    self.status_message = Some((format!("Selected {} nodes — filter pinned (⌘F to clear)", total_count), std::time::Instant::now()));
+                }
+                // Pin filter so dimming stays active after closing search
+                if shift && total_count > 0 {
+                    self.persist_search_filter = true;
+                    // Keep query for persistent filtering; close overlay only
+                    self.show_search = false;
+                    self.search_cursor = 0;
+                    return;
                 }
             } else if let Some(&(nid, _)) = results.get(self.search_cursor).or_else(|| results.first()) {
                 self.selection.select_node(nid);
@@ -4137,6 +4147,7 @@ impl FlowchartApp {
             }
             self.show_search = false;
             self.search_query.clear();
+            self.persist_search_filter = false;
             self.search_cursor = 0;
             return;
         }
@@ -5188,6 +5199,40 @@ impl FlowchartApp {
     // -----------------------------------------------------------------------
 
     /// Tag filter pills — show at top-right when any tagged nodes exist.
+    /// Shows a dismissible "Filter: <query>" chip at bottom-left when persist_search_filter is active.
+    fn draw_persistent_filter_chip(&mut self, ui: &mut egui::Ui, canvas_rect: Rect) {
+        if !self.persist_search_filter || self.search_query.is_empty() { return; }
+
+        let q = &self.search_query;
+        let short: String = q.chars().take(24).collect();
+        let trail = if q.chars().count() > 24 { "…" } else { "" };
+        let label = format!("🔍 Filter: {}{}  ✕", short, trail);
+
+        let chip_h = 22.0_f32;
+        let approx_w = label.chars().count() as f32 * 7.0 + 12.0;
+        let chip_rect = Rect::from_min_size(
+            Pos2::new(canvas_rect.min.x + 12.0, canvas_rect.max.y - 60.0 - chip_h),
+            Vec2::new(approx_w, chip_h),
+        );
+        let painter = ui.painter();
+        let bg = Color32::from_rgba_unmultiplied(30, 80, 160, 200);
+        let border = self.theme.accent.gamma_multiply(0.7);
+        painter.rect(chip_rect, CornerRadius::same(11), bg, Stroke::new(1.0, border), StrokeKind::Inside);
+        painter.text(chip_rect.center(), Align2::CENTER_CENTER, &label,
+            FontId::proportional(10.5), Color32::from_rgb(200, 220, 255));
+
+        // Click to clear
+        let resp = ui.allocate_rect(chip_rect, egui::Sense::click());
+        if resp.clicked() {
+            self.persist_search_filter = false;
+            self.search_query.clear();
+            self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+        }
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+
     fn draw_tag_filter_pills(&mut self, painter: &egui::Painter, canvas_rect: Rect, ui: &mut egui::Ui) {
         use crate::model::NodeTag;
         let mut tags_used: Vec<NodeTag> = self.document.nodes.iter()
