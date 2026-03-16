@@ -618,6 +618,7 @@ impl FlowchartApp {
         // Compute search matches (for highlight overlay)
         let search_matches: std::collections::HashSet<NodeId> = if (self.show_search || self.persist_search_filter) && !self.search_query.is_empty() {
             let q = self.search_query.trim().to_lowercase();
+            let today_str = super::render::today_iso();
             self.document.nodes.iter()
                 .filter(|n| {
                     // Smart filter prefixes
@@ -657,18 +658,16 @@ impl FlowchartApp {
                     }
                     if q == "overdue" || q == "due:overdue" || q == "past-due" {
                         // Match nodes with a 📅 sublabel whose date is today or in the past
-                        let today = "2026-03-16"; // current date
-                        if let Some(date_str) = n.sublabel.strip_prefix("📅 ") {
+                        if let Some(date_str) = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ")) {
                             let d = date_str.trim();
-                            return d <= today && d.len() >= 8; // ISO date comparison
+                            return d <= today_str.as_str() && d.len() >= 8;
                         }
                         return false;
                     }
                     if q == "upcoming" || q == "due:upcoming" || q == "due:future" {
-                        let today = "2026-03-16";
-                        if let Some(date_str) = n.sublabel.strip_prefix("📅 ") {
+                        if let Some(date_str) = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ")) {
                             let d = date_str.trim();
-                            return d > today;
+                            return d > today_str.as_str();
                         }
                         return false;
                     }
@@ -712,9 +711,8 @@ impl FlowchartApp {
                         return !n.comment.is_empty();
                     }
                     if q == "overdue" || q == "sla-breach" {
-                        // Also check by comment field syntax
                         if let Some(date_str) = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ")) {
-                            return date_str.trim() <= "2026-03-16";
+                            return date_str.trim() <= today_str.as_str();
                         }
                         return false;
                     }
@@ -2992,8 +2990,20 @@ impl FlowchartApp {
             if chars == 0 { 32.0 } else { chars as f32 * 6.5 + 18.0 }
         } else { 0.0 };
         let section_sep_w = if show_status_badge { 4.0 } else { 0.0 };
+        // Assignee chip: show "👤 Name" for single-node if node has an assignee
+        let assignee_str: Option<String> = if show_status_badge {
+            self.selection.node_ids.iter().next()
+                .and_then(|id| self.document.find_node(id))
+                .and_then(|n| n.sublabel.lines().find(|l| l.starts_with("👤 ")).map(|l| l.to_string()))
+        } else { None };
+        let assignee_chip_w: f32 = if let Some(ref a) = assignee_str {
+            let chars = a.chars().count().min(14);
+            chars as f32 * 6.2 + 14.0
+        } else { 0.0 };
+        let assignee_sep_w = if assignee_str.is_some() { 4.0 } else { 0.0 };
         let bar_w = actions.len() as f32 * btn_w + (actions.len() - 1) as f32 * 2.0 + 8.0
-            + status_badge_w + status_sep_w + section_pill_w + section_sep_w;
+            + status_badge_w + status_sep_w + section_pill_w + section_sep_w
+            + assignee_chip_w + assignee_sep_w;
         let bar_rect = Rect::from_center_size(
             egui::Pos2::new(bar_center_x, bar_y + bar_h / 2.0),
             egui::Vec2::new(bar_w, bar_h),
@@ -3087,7 +3097,28 @@ impl FlowchartApp {
                     egui::RichText::new(&sec_label).size(11.0).color(sec_col)
                 ).frame(false)).on_hover_text("Click to cycle section: Intake → Triage → In Progress → Resolved → Escalated → Closed → none");
                 if resp.clicked() { section_clicked = true; }
+                x += section_pill_w; // advance x for assignee chip
             }
+        }
+
+        // Assignee chip: "👤 Name" — clicking activates assignee search filter
+        let mut assignee_filter_clicked = false;
+        if let Some(ref a_str) = assignee_str {
+            // Separator
+            ui.painter().rect_filled(
+                Rect::from_min_size(egui::Pos2::new(x + 1.0, bar_rect.min.y + 4.0), egui::Vec2::new(1.0, bar_h - 8.0)),
+                egui::CornerRadius::ZERO, self.theme.surface1,
+            );
+            x += assignee_sep_w;
+            let short: String = a_str.chars().take(14).collect();
+            let chip_rect = Rect::from_min_size(
+                egui::Pos2::new(x, bar_rect.min.y + 2.0),
+                egui::Vec2::new(assignee_chip_w - 2.0, bar_h - 4.0),
+            );
+            let resp = ui.put(chip_rect, egui::Button::new(
+                egui::RichText::new(&short).size(10.5).color(Color32::from_rgb(180, 210, 255))
+            ).frame(false)).on_hover_text("Click to filter by this assignee");
+            if resp.clicked() { assignee_filter_clicked = true; }
         }
 
         // Handle clicked actions
@@ -3241,6 +3272,21 @@ impl FlowchartApp {
                     self.status_message = Some((msg, std::time::Instant::now()));
                     self.history.push(&self.document);
                 }
+            }
+        }
+
+        // Assignee chip click → activate assignee search filter
+        if assignee_filter_clicked {
+            if let Some(ref a_str) = assignee_str {
+                // Extract the name part after "👤 "
+                let name = a_str.strip_prefix("👤 ").unwrap_or(a_str.as_str()).trim().to_string();
+                self.search_query = format!("assigned:{}", name);
+                self.persist_search_filter = true;
+                self.show_search = false;
+                self.status_message = Some((
+                    format!("Filtering: {}", a_str),
+                    std::time::Instant::now(),
+                ));
             }
         }
 
