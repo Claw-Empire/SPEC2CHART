@@ -2028,6 +2028,53 @@ impl FlowchartApp {
             }
         }
 
+        // Alt+P = sort nodes within each section by priority (P1→P2→P3→P4→Done)
+        {
+            let alt_only = egui::Modifiers { alt: true, ..egui::Modifiers::NONE };
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.matches_exact(alt_only)) {
+                // Priority rank: Critical=0, Warning=1, Info=2, None=3, Ok=4 (done last)
+                let priority_rank = |n: &crate::model::Node| -> i32 {
+                    if n.progress >= 1.0 { return 100; }
+                    match n.tag {
+                        Some(crate::model::NodeTag::Critical) => 0,
+                        Some(crate::model::NodeTag::Warning)  => 1,
+                        Some(crate::model::NodeTag::Info)     => 2,
+                        None                                  => 3,
+                        Some(crate::model::NodeTag::Ok)       => 4,
+                    }
+                };
+                // Group nodes by section, sort each group by priority, reorder Y positions
+                let mut sections: std::collections::HashMap<String, Vec<(crate::model::NodeId, i32)>> = std::collections::HashMap::new();
+                for n in &self.document.nodes {
+                    if n.section_name.is_empty() || n.is_frame || n.pinned { continue; }
+                    let rank = priority_rank(n);
+                    sections.entry(n.section_name.clone()).or_default().push((n.id, rank));
+                }
+                let mut changed = false;
+                for (_, group) in &sections {
+                    // Get current Y positions
+                    let mut positioned: Vec<(crate::model::NodeId, i32, f32)> = group.iter().filter_map(|&(id, rank)| {
+                        self.document.find_node(&id).map(|n| (id, rank, n.position[1]))
+                    }).collect();
+                    if positioned.len() < 2 { continue; }
+                    let ys: Vec<f32> = { let mut v: Vec<f32> = positioned.iter().map(|t| t.2).collect(); v.sort_by(|a,b| a.partial_cmp(b).unwrap()); v };
+                    // Sort by priority rank
+                    positioned.sort_by_key(|t| t.1);
+                    // Assign sorted positions
+                    for (i, &(id, _, _)) in positioned.iter().enumerate() {
+                        if let Some(n) = self.document.find_node_mut(&id) {
+                            n.position[1] = ys[i];
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    self.history.push(&self.document);
+                    self.status_message = Some(("⬆ Sorted by priority".to_string(), std::time::Instant::now()));
+                }
+            }
+        }
+
         // Enter = chain: create a new node connected in the layout direction
         // Shift+Enter = chain in the orthogonal direction
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Enter)) {
