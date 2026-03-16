@@ -1643,6 +1643,73 @@ impl FlowchartApp {
                 }
             }
         });
+
+        // Bulk assignee set
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("👤 Assign all:").size(10.5).color(self.theme.text_dim));
+        });
+        ui.add_space(2.0);
+        if !self.bulk_assign_buf.is_empty() || true {
+            let prev = self.bulk_assign_buf.clone();
+            let r = ui.add(egui::TextEdit::singleline(&mut self.bulk_assign_buf)
+                .desired_width(f32::INFINITY)
+                .hint_text("Name  (Enter to apply)")
+                .font(FontId::proportional(11.0)));
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.bulk_assign_buf.is_empty() {
+                let assignee = self.bulk_assign_buf.trim().to_string();
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        let other: Vec<String> = n.sublabel.lines()
+                            .filter(|l| !l.starts_with("👤 ")).map(|l| l.to_string()).collect();
+                        let mut parts = vec![format!("👤 {}", assignee)];
+                        parts.extend(other);
+                        parts.retain(|l| !l.is_empty());
+                        n.sublabel = parts.join("\n");
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some((format!("Assigned: {} ({} nodes)", assignee, ids.len()), std::time::Instant::now()));
+                self.bulk_assign_buf.clear();
+            } else if prev != self.bulk_assign_buf {
+                // typing — no action
+            }
+        }
+
+        // Bulk due date
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("📅 Due all:").size(10.5).color(self.theme.text_dim));
+        });
+        ui.add_space(2.0);
+        {
+            let prev = self.bulk_due_buf.clone();
+            let r = ui.add(egui::TextEdit::singleline(&mut self.bulk_due_buf)
+                .desired_width(f32::INFINITY)
+                .hint_text("YYYY-MM-DD  (Enter to apply)")
+                .font(FontId::proportional(11.0)));
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.bulk_due_buf.is_empty() {
+                let due = self.bulk_due_buf.trim().to_string();
+                let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                for id in &ids {
+                    if let Some(n) = self.document.find_node_mut(id) {
+                        let other: Vec<String> = n.sublabel.lines()
+                            .filter(|l| !l.starts_with("📅 ")).map(|l| l.to_string()).collect();
+                        let mut parts: Vec<String> = n.sublabel.lines()
+                            .filter(|l| l.starts_with("👤 ")).map(|l| l.to_string()).collect();
+                        parts.push(format!("📅 {}", due));
+                        parts.extend(other.into_iter().filter(|l| !l.starts_with("👤 ")));
+                        parts.retain(|l| !l.is_empty());
+                        n.sublabel = parts.join("\n");
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some((format!("Due: {} ({} nodes)", due, ids.len()), std::time::Instant::now()));
+                self.bulk_due_buf.clear();
+            } else if prev != self.bulk_due_buf { }
+        }
+
         ui.add_space(8.0);
 
         self.draw_section_header(ui, "Batch Color");

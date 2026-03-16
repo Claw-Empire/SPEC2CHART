@@ -251,6 +251,10 @@ pub struct FlowchartApp {
     pub(crate) quick_comment_buf: Option<String>,
     /// Workload summary panel (Cmd+Shift+W)
     pub(crate) show_workload_panel: bool,
+    /// Bulk assignee input in multi-selection properties panel
+    pub(crate) bulk_assign_buf: String,
+    /// Bulk due-date input in multi-selection properties panel
+    pub(crate) bulk_due_buf: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,6 +373,8 @@ impl FlowchartApp {
             quick_assign_buf: None,
             quick_comment_buf: None,
             show_workload_panel: false,
+            bulk_assign_buf: String::new(),
+            bulk_due_buf: String::new(),
         }
     }
 
