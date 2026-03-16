@@ -595,6 +595,16 @@ impl FlowchartApp {
             }
         }
 
+        // Comment indicator 💬 in bottom-right when node has a comment
+        if !node.comment.is_empty() && self.viewport.zoom > 0.45 && !node.is_frame {
+            let icon_sz = (9.5 * self.viewport.zoom.sqrt()).clamp(7.5, 13.0);
+            // Position: bottom-right, offset left from URL icon if also present
+            let x_offset = if !node.url.is_empty() { 18.0 } else { 4.0 };
+            let icon_pos = Pos2::new(screen_rect.max.x - x_offset, screen_rect.max.y - 3.0);
+            painter.text(icon_pos, Align2::RIGHT_BOTTOM, "💬",
+                FontId::proportional(icon_sz), self.theme.text_dim.gamma_multiply(0.75));
+        }
+
         // URL indicator (shown as a small 🔗 in bottom-left when node has a URL)
         if !node.url.is_empty() && self.viewport.zoom > 0.5 {
             let icon_pos = Pos2::new(screen_rect.min.x + 4.0, screen_rect.max.y - 4.0);
