@@ -455,6 +455,32 @@ impl FlowchartApp {
                             parts.retain(|l| !l.is_empty());
                             node.sublabel = parts.join("\n");
                         }
+                        // Created date field
+                        let prev_created = node.created_date.clone();
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("📅 Created").size(11.0).color(theme.text_dim));
+                        ui.add_space(2.0);
+                        ui.add(egui::TextEdit::singleline(&mut node.created_date)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("YYYY-MM-DD  (for age badge + SLA bar)")
+                            .font(FontId::proportional(11.5)));
+                        if node.created_date != prev_created {
+                            // valid only — keep blank or valid ISO date
+                        }
+                        // SLA summary line
+                        if !node.created_date.is_empty() && !due_val.is_empty() {
+                            let today = crate::app::render::today_iso();
+                            let total = -crate::app::render::iso_days_remaining_pub(&node.created_date, &due_val);
+                            let elapsed = -crate::app::render::iso_days_remaining_pub(&node.created_date, &today);
+                            if total > 0 && elapsed >= 0 {
+                                let pct = ((elapsed as f32 / total as f32) * 100.0).clamp(0.0, 999.0) as u32;
+                                let sla_col = if pct < 50 { theme.accent }
+                                    else if pct < 80 { egui::Color32::from_rgb(250, 179, 135) }
+                                    else { egui::Color32::from_rgb(243, 139, 168) };
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new(format!("SLA: {}% elapsed ({}/{} days)", pct, elapsed, total)).size(10.5).color(sla_col));
+                            }
+                        }
                     }
 
                     // Section (groups node with colored background on canvas)
