@@ -3954,6 +3954,7 @@ impl FlowchartApp {
         let mut section_count: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let mut section_done: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let mut section_overdue: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut section_p1: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let today_hdr = super::render::today_iso();
         for n in &self.document.nodes {
             if n.section_name.is_empty() || n.is_frame { continue; }
@@ -3976,6 +3977,10 @@ impl FlowchartApp {
                 } else { false }
             });
             if is_over { *section_overdue.entry(n.section_name.clone()).or_default() += 1; }
+            // Track P1 tickets per section (priority==1 OR Critical tag)
+            if n.priority == 1 || matches!(n.tag, Some(crate::model::NodeTag::Critical)) {
+                *section_p1.entry(n.section_name.clone()).or_default() += 1;
+            }
         }
 
         let header_h = 22.0_f32;
@@ -4016,12 +4021,22 @@ impl FlowchartApp {
                     StrokeKind::Outside);
                 let done = section_done.get(sec).copied().unwrap_or(0);
                 let overdue = section_overdue.get(sec).copied().unwrap_or(0);
+                let p1 = section_p1.get(sec).copied().unwrap_or(0);
                 let done_part = if done > 0 { format!("  ✓{}/{}", done, count) } else { format!("  {}", count) };
+                // P1 badge: 🔥N shown when there are P1 tickets
+                let p1_part = if p1 > 0 { format!("  🔥{}", p1) } else { String::new() };
                 let overdue_part = if overdue > 0 { format!("  ⚠{}", overdue) } else { String::new() };
                 let dismiss = if is_active { "✕ " } else { "" };
-                let label = format!("{}{}{}{}", dismiss, sec, done_part, overdue_part);
+                let label = format!("{}{}{}{}{}", dismiss, sec, done_part, p1_part, overdue_part);
                 let txt_alpha = 230u8;
-                let txt_col = if overdue > 0 {
+                // Color: red-tinted when P1 tickets present, amber when overdue, else neutral
+                let txt_col = if p1 > 0 {
+                    // Pulsing red for P1 alert (slow 1.5s pulse)
+                    let t = ui.ctx().input(|i| i.time) as f32;
+                    let pulse = ((t * std::f32::consts::PI / 1.5).sin() * 0.5 + 0.5) as f32;
+                    let a = (180.0 + pulse * 50.0) as u8;
+                    Color32::from_rgba_unmultiplied(243, 100, 100, a)
+                } else if overdue > 0 {
                     Color32::from_rgba_unmultiplied(243, 139, 168, txt_alpha)
                 } else {
                     Color32::from_rgba_unmultiplied(fill[0].saturating_add(60), fill[1].saturating_add(60), fill[2].saturating_add(60), txt_alpha)
