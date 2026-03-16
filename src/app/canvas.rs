@@ -684,7 +684,7 @@ impl FlowchartApp {
                         }
                         return false;
                     }
-                    if let Some(assignee_q) = q.strip_prefix("assigned:").or_else(|| q.strip_prefix("owner:")) {
+                    if let Some(assignee_q) = q.strip_prefix("assigned:").or_else(|| q.strip_prefix("owner:")).or_else(|| q.strip_prefix("assignee:")) {
                         // {assigned:Alice} → sublabel starts with "👤 "
                         let tgt = assignee_q.trim().to_lowercase();
                         return n.sublabel.to_lowercase().contains(&tgt);
@@ -3631,88 +3631,128 @@ impl FlowchartApp {
             egui::vec2(panel_w, panel_h),
         );
 
-        let painter = ui.painter();
-        painter.rect_filled(panel_rect, CornerRadius::same(8), self.theme.tooltip_bg);
-        painter.rect_stroke(panel_rect, CornerRadius::same(8),
-            Stroke::new(1.2, self.theme.surface1), StrokeKind::Outside);
-
-        // Title
-        painter.text(
-            panel_rect.min + egui::vec2(10.0, 8.0), Align2::LEFT_TOP,
-            "👥 Workload  ⌘⇧W",
-            egui::FontId::proportional(11.0), self.theme.text_secondary,
-        );
-
-        // Column headers: sections
-        let header_y = panel_rect.min.y + header_h - row_h;
-        let mut col_x = panel_rect.min.x + label_w;
-        for sec in &section_order {
-            let short = if sec.len() > 6 { format!("{}…", &sec[..5]) } else { sec.clone() };
+        {
+            let painter = ui.painter();
+            painter.rect_filled(panel_rect, CornerRadius::same(8), self.theme.tooltip_bg);
+            painter.rect_stroke(panel_rect, CornerRadius::same(8),
+                Stroke::new(1.2, self.theme.surface1), StrokeKind::Outside);
+            // Title
             painter.text(
-                egui::pos2(col_x + col_w * 0.5, header_y), Align2::CENTER_BOTTOM,
-                &short, egui::FontId::proportional(9.5), self.theme.text_secondary,
+                panel_rect.min + egui::vec2(10.0, 8.0), Align2::LEFT_TOP,
+                "👥 Workload  ⌘⇧W",
+                egui::FontId::proportional(11.0), self.theme.text_secondary,
             );
-            col_x += col_w;
         }
-        // Total column header
-        painter.text(
-            egui::pos2(col_x + col_w * 0.5, header_y), Align2::CENTER_BOTTOM,
-            "Total", egui::FontId::proportional(9.5), self.theme.text_secondary,
-        );
 
-        // Rows: one per assignee
+        // Pass 1: compute row data and process interactions
+        struct RowData {
+            row_y: f32, short_name: String, name_rect: Rect, is_filtered: bool,
+            is_hovered: bool, clicked: bool,
+            section_cells: Vec<(Rect, Color32, String)>, // (rect, color, text)
+            total: u32, total_x: f32,
+        }
+        let mut rows_data: Vec<RowData> = Vec::new();
         let mut row_y = panel_rect.min.y + header_h;
         for (assignee, section_counts) in &workload {
-            let row_rect = Rect::from_min_size(
-                egui::pos2(panel_rect.min.x, row_y),
-                egui::vec2(panel_w, row_h),
+            let name_rect = Rect::from_min_size(
+                egui::pos2(panel_rect.min.x + 2.0, row_y),
+                egui::vec2(label_w - 4.0, row_h),
             );
-            // Alternate row bg
-            if (row_y as i32 / row_h as i32) % 2 == 0 {
-                painter.rect_filled(row_rect, CornerRadius::ZERO, self.theme.surface0.linear_multiply(0.5));
+            let name_resp = ui.allocate_rect(name_rect, egui::Sense::click());
+            let is_filtered = self.search_query == format!("assignee:{}", assignee);
+            if name_resp.clicked() {
+                let filter = format!("assignee:{}", assignee);
+                if self.search_query == filter {
+                    self.search_query.clear();
+                    self.persist_search_filter = false;
+                    self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+                } else {
+                    self.search_query = filter;
+                    self.persist_search_filter = true;
+                    self.status_message = Some((format!("Showing: {}", assignee), std::time::Instant::now()));
+                }
             }
-            // Assignee label
-            let short_name = if assignee.len() > 11 { format!("{}…", &assignee[..10]) } else { assignee.clone() };
-            painter.text(
-                egui::pos2(panel_rect.min.x + 8.0, row_y + row_h * 0.5), Align2::LEFT_CENTER,
-                &short_name, egui::FontId::proportional(11.0), self.theme.text_primary,
-            );
-            // Section counts
+            let mut section_cells: Vec<(Rect, Color32, String)> = Vec::new();
             let mut col_x2 = panel_rect.min.x + label_w;
             let mut total = 0u32;
             for sec in &section_order {
                 let count = section_counts.get(sec).copied().unwrap_or(0);
                 total += count;
                 if count > 0 {
-                    let count_str = count.to_string();
-                    // Color by section position: later sections (resolved) = green
                     let sec_idx = section_order.iter().position(|s| s == sec).unwrap_or(0);
                     let frac = sec_idx as f32 / section_order.len().max(1) as f32;
                     let cell_color = if frac >= 0.75 {
-                        Color32::from_rgba_unmultiplied(166, 227, 161, 200) // done/resolved
+                        Color32::from_rgba_unmultiplied(166, 227, 161, 200)
                     } else if frac >= 0.5 {
-                        Color32::from_rgba_unmultiplied(137, 180, 250, 200) // in progress
+                        Color32::from_rgba_unmultiplied(137, 180, 250, 200)
                     } else if frac >= 0.25 {
-                        Color32::from_rgba_unmultiplied(250, 179, 135, 200) // triage
+                        Color32::from_rgba_unmultiplied(250, 179, 135, 200)
                     } else {
-                        Color32::from_rgba_unmultiplied(203, 166, 247, 200) // intake
+                        Color32::from_rgba_unmultiplied(203, 166, 247, 200)
                     };
                     let cell_rect = Rect::from_center_size(
                         egui::pos2(col_x2 + col_w * 0.5, row_y + row_h * 0.5),
                         egui::vec2(col_w - 8.0, row_h - 4.0),
                     );
-                    painter.rect_filled(cell_rect, CornerRadius::same(4), cell_color.linear_multiply(0.3));
-                    painter.text(cell_rect.center(), Align2::CENTER_CENTER,
-                        &count_str, egui::FontId::proportional(11.0), cell_color);
+                    section_cells.push((cell_rect, cell_color, count.to_string()));
                 }
                 col_x2 += col_w;
             }
-            // Total
-            painter.text(
-                egui::pos2(col_x2 + col_w * 0.5, row_y + row_h * 0.5), Align2::CENTER_CENTER,
-                &total.to_string(), egui::FontId::proportional(11.0), self.theme.text_secondary,
-            );
+            let short_name = if assignee.len() > 11 { format!("{}…", &assignee[..10]) } else { assignee.clone() };
+            rows_data.push(RowData {
+                row_y, short_name, name_rect, is_filtered,
+                is_hovered: name_resp.hovered(), clicked: name_resp.clicked(),
+                section_cells, total, total_x: col_x2,
+            });
             row_y += row_h;
+        }
+
+        // Pass 2: draw everything
+        {
+            let painter = ui.painter();
+            // Column headers
+            let header_y = panel_rect.min.y + header_h - row_h;
+            let mut col_x = panel_rect.min.x + label_w;
+            for sec in &section_order {
+                let short = if sec.len() > 6 { format!("{}…", &sec[..5]) } else { sec.clone() };
+                painter.text(
+                    egui::pos2(col_x + col_w * 0.5, header_y), Align2::CENTER_BOTTOM,
+                    &short, egui::FontId::proportional(9.5), self.theme.text_secondary,
+                );
+                col_x += col_w;
+            }
+            painter.text(
+                egui::pos2(col_x + col_w * 0.5, header_y), Align2::CENTER_BOTTOM,
+                "Total", egui::FontId::proportional(9.5), self.theme.text_secondary,
+            );
+            // Rows
+            for rd in &rows_data {
+                let row_rect = Rect::from_min_size(
+                    egui::pos2(panel_rect.min.x, rd.row_y),
+                    egui::vec2(panel_w, row_h),
+                );
+                if (rd.row_y as i32 / row_h as i32) % 2 == 0 {
+                    painter.rect_filled(row_rect, CornerRadius::ZERO, self.theme.surface0.linear_multiply(0.5));
+                }
+                if rd.is_hovered {
+                    painter.rect_filled(rd.name_rect, CornerRadius::same(3),
+                        self.theme.accent.linear_multiply(0.15));
+                }
+                let name_col = if rd.is_filtered { self.theme.accent } else { self.theme.text_primary };
+                painter.text(
+                    egui::pos2(panel_rect.min.x + 8.0, rd.row_y + row_h * 0.5), Align2::LEFT_CENTER,
+                    &rd.short_name, egui::FontId::proportional(11.0), name_col,
+                );
+                for (cell_rect, cell_color, count_str) in &rd.section_cells {
+                    painter.rect_filled(*cell_rect, CornerRadius::same(4), cell_color.linear_multiply(0.3));
+                    painter.text(cell_rect.center(), Align2::CENTER_CENTER,
+                        count_str, egui::FontId::proportional(11.0), *cell_color);
+                }
+                painter.text(
+                    egui::pos2(rd.total_x + col_w * 0.5, rd.row_y + row_h * 0.5), Align2::CENTER_CENTER,
+                    &rd.total.to_string(), egui::FontId::proportional(11.0), self.theme.text_secondary,
+                );
+            }
         }
 
         // Close on Escape
