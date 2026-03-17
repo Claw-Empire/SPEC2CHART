@@ -2094,11 +2094,11 @@ impl FlowchartApp {
         if dir.length() < 0.01 {
             return;
         }
-        // Scale arrowhead with zoom and edge width — Figma-style proportions (2:1 length:half-width)
-        let base_scale = self.viewport.zoom.cbrt(); // cube-root keeps size stable across zoom range
-        let width_factor = (1.0 + (width - 1.0) * 0.25).max(1.0); // gentle scaling with thickness
-        let arrow_len = 8.0 * base_scale * width_factor;
-        let arrow_width = 4.0 * base_scale * width_factor;
+        // Fixed-proportion arrowhead — Figma style: size does NOT scale with stroke width.
+        // cube-root zoom keeps the head stable across zoom levels.
+        let base_scale = self.viewport.zoom.cbrt();
+        let arrow_len = 7.0 * base_scale;   // ~7 screen-px at zoom=1
+        let arrow_width = 3.5 * base_scale; // 2:1 ratio, ~30° half-angle
         let perp = Vec2::new(-dir.y, dir.x);
         let tip = to;
 

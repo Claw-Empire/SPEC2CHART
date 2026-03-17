@@ -4387,7 +4387,7 @@ impl FlowchartApp {
         // Implemented as a two-ring mesh: inner ring (radius, transparent) → outer ring (beyond canvas, dark).
         // This is a true gradient — no flat dark overlay, so the canvas content stays readable.
         let center = pointer_pos.unwrap_or(canvas_rect.center());
-        let spotlight_r = (canvas_rect.width().min(canvas_rect.height()) * 0.40).max(200.0);
+        let spotlight_r = (canvas_rect.width().min(canvas_rect.height()) * 0.46).max(220.0);
 
         // Outer ring must reach all four canvas corners
         let outer_r = {
@@ -4400,7 +4400,7 @@ impl FlowchartApp {
 
         use egui::{epaint::{Mesh, Vertex}, Shape};
         let transparent = Color32::TRANSPARENT;
-        let dark = Color32::from_rgba_unmultiplied(0, 0, 0, 110); // lighter than before — 43% opacity
+        let dark = Color32::from_rgba_unmultiplied(0, 0, 0, 75); // subtle vignette — ~29% opacity
 
         let segments = 64usize;
         let mut mesh = Mesh::default();
