@@ -728,7 +728,11 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         }
                         Section::Nodes { default_z: z }
                     } else {
-                        Section::None
+                        // Unknown section name — treat as a Nodes section so user-defined
+                        // sections like "## Strengths", "## Quick Wins", "## Phase 1: Detect"
+                        // all produce visible nodes instead of being silently dropped.
+                        current_section_label = header_raw.to_string();
+                        Section::Nodes { default_z: 0.0 }
                     }
                 }
             };
@@ -4297,8 +4301,8 @@ api -> worker
 
         // Export should collapse the two dashed edges back to multi-target bracket syntax
         let exported = export_hrf(&doc, "Multi Target");
-        // IDs are slugified from display labels: "pg" → "postgresql", "redis" → "redis"
-        assert!(exported.contains("[postgresql, redis]") || exported.contains("[redis, postgresql]"),
+        // Nodes have explicit IDs [pg] and [redis], so those are preserved in export
+        assert!(exported.contains("[pg, redis]") || exported.contains("[redis, pg]"),
             "expected multi-target in export:\n{}", exported);
     }
 
