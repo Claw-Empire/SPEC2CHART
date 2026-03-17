@@ -50,7 +50,8 @@ impl FlowchartApp {
             if let (Some(sn), Some(tn)) = (src_node, tgt_node) {
                 let src = sn.port_position(edge.source.side);
                 let tgt = tn.port_position(edge.target.side);
-                let (cp1, cp2) = control_points_for_side(src, tgt, edge.source.side, 60.0);
+                // Use canvas-space CPs (including overrides) for accurate hit testing
+                let (cp1, cp2) = resolve_edge_cps_canvas(edge, src, tgt);
                 for i in 0..=20 {
                     let t = i as f32 / 20.0;
                     let p = cubic_bezier_point(src, cp1, cp2, tgt, t);
@@ -73,25 +74,69 @@ impl FlowchartApp {
         if edge.style.orthogonal {
             return None;
         }
+        // Only show the midpoint bend handle when no CP overrides are active
+        if edge.style.cp1_override.is_some() || edge.style.cp2_override.is_some() {
+            return None;
+        }
         let src_node = self.document.find_node(&edge.source.node_id)?;
         let tgt_node = self.document.find_node(&edge.target.node_id)?;
         let src = self.viewport.canvas_to_screen(src_node.port_position(edge.source.side));
         let tgt = self.viewport.canvas_to_screen(tgt_node.port_position(edge.target.side));
-        let offset = 60.0 * self.viewport.zoom;
-        let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
-        if edge.style.curve_bend.abs() > 0.1 {
-            let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
-            let perp = Vec2::new(-dir.y, dir.x);
-            let bend_screen = edge.style.curve_bend * self.viewport.zoom;
-            cp1 = cp1 + perp * bend_screen;
-            cp2 = cp2 + perp * bend_screen;
-        }
+        let (cp1, cp2) = self.resolve_edge_cps_screen(edge, src, tgt);
         let handle_pos = super::interaction::cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
         if (screen_pos - handle_pos).length() < 12.0 {
             Some(edge_id)
         } else {
             None
         }
+    }
+
+    /// Returns `(edge_id, which)` if `screen_pos` is near a bezier CP handle of a selected edge.
+    /// `which` 0 = cp1 (near source), 1 = cp2 (near target).
+    pub(crate) fn hit_test_cp_handle(&self, screen_pos: Pos2) -> Option<(EdgeId, u8)> {
+        if self.selection.edge_ids.len() != 1 {
+            return None;
+        }
+        let edge_id = *self.selection.edge_ids.iter().next()?;
+        let edge = self.document.find_edge(&edge_id)?;
+        if edge.style.orthogonal {
+            return None;
+        }
+        let src_node = self.document.find_node(&edge.source.node_id)?;
+        let tgt_node = self.document.find_node(&edge.target.node_id)?;
+        let src = self.viewport.canvas_to_screen(src_node.port_position(edge.source.side));
+        let tgt = self.viewport.canvas_to_screen(tgt_node.port_position(edge.target.side));
+        let (cp1, cp2) = self.resolve_edge_cps_screen(edge, src, tgt);
+        let hit_r = 12.0;
+        if (screen_pos - cp1).length() < hit_r {
+            return Some((edge_id, 0));
+        }
+        if (screen_pos - cp2).length() < hit_r {
+            return Some((edge_id, 1));
+        }
+        None
+    }
+
+    /// Compute screen-space bezier control points for an edge, respecting overrides.
+    pub(crate) fn resolve_edge_cps_screen(&self, edge: &Edge, src_screen: Pos2, tgt_screen: Pos2) -> (Pos2, Pos2) {
+        let offset = 60.0 * self.viewport.zoom;
+        let (mut cp1, mut cp2) = control_points_for_side(src_screen, tgt_screen, edge.source.side, offset);
+        if edge.style.curve_bend.abs() > 0.02 {
+            let dir = if (tgt_screen - src_screen).length() > 1.0 {
+                (tgt_screen - src_screen).normalized()
+            } else { Vec2::X };
+            let perp = Vec2::new(-dir.y, dir.x);
+            let bend_screen = edge.style.curve_bend * self.viewport.zoom;
+            cp1 = cp1 + perp * bend_screen;
+            cp2 = cp2 + perp * bend_screen;
+        }
+        if let Some(o) = edge.style.cp1_override {
+            cp1 = self.viewport.canvas_to_screen(Pos2::new(o[0], o[1]));
+        }
+        if let Some(o) = edge.style.cp2_override {
+            cp2 = self.viewport.canvas_to_screen(Pos2::new(o[0], o[1]));
+        }
+        (cp1, cp2)
     }
 
     pub(crate) fn hit_test_resize_handle(
@@ -440,6 +485,26 @@ impl FlowchartApp {
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------
+
+/// Compute canvas-space (world) bezier control points for an edge, respecting cp_overrides.
+/// Used by hit_test_edge so clicks land on the visually correct curve.
+pub fn resolve_edge_cps_canvas(edge: &Edge, src: Pos2, tgt: Pos2) -> (Pos2, Pos2) {
+    let offset = 60.0_f32;
+    let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+    if edge.style.curve_bend.abs() > 0.02 {
+        let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
+        let perp = Vec2::new(-dir.y, dir.x);
+        cp1 = cp1 + perp * edge.style.curve_bend;
+        cp2 = cp2 + perp * edge.style.curve_bend;
+    }
+    if let Some(o) = edge.style.cp1_override {
+        cp1 = Pos2::new(o[0], o[1]);
+    }
+    if let Some(o) = edge.style.cp2_override {
+        cp2 = Pos2::new(o[0], o[1]);
+    }
+    (cp1, cp2)
+}
 
 pub fn control_points_for_side(
     src: Pos2,

@@ -87,6 +87,14 @@ pub enum DragState {
         start_bend: f32,
         start_mouse: Pos2,
     },
+    /// Dragging one of the two independent bezier control-point handles of a selected edge.
+    /// `which`: 0 = cp1 (near source), 1 = cp2 (near target).
+    DraggingEdgeCP {
+        edge_id: EdgeId,
+        which: u8,
+        start_mouse_canvas: Pos2,
+        start_cp_canvas: Pos2,
+    },
 }
 
 // ---------------------------------------------------------------------------

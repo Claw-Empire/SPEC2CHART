@@ -576,6 +576,13 @@ pub struct EdgeStyle {
     /// When true, animate the dash pattern to show flow direction
     #[serde(default)]
     pub animated: bool,
+    /// Independent bezier control-point overrides in canvas (world) space.
+    /// When Some, replaces the auto-computed cp1/cp2 from port direction + curve_bend.
+    /// None = auto. Set by dragging the CP handles when the edge is selected.
+    #[serde(default)]
+    pub cp1_override: Option<[f32; 2]>,
+    #[serde(default)]
+    pub cp2_override: Option<[f32; 2]>,
 }
 
 impl Default for EdgeStyle {
@@ -589,6 +596,8 @@ impl Default for EdgeStyle {
             curve_bend: 0.0,
             glow: false,
             animated: false,
+            cp1_override: None,
+            cp2_override: None,
         }
     }
 }

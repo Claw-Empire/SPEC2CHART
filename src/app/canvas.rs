@@ -340,6 +340,14 @@ impl FlowchartApp {
         // Double-click to focus label editing, or create new node on empty space
         if response.double_clicked() {
             if let Some(mouse) = pointer_pos {
+                // Double-click on a CP handle → reset that override (return to auto)
+                if let Some((edge_id, which)) = self.hit_test_cp_handle(mouse) {
+                    if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+                        if which == 0 { edge.style.cp1_override = None; }
+                        else          { edge.style.cp2_override = None; }
+                    }
+                    self.history.push(&self.document);
+                }
                 let canvas_pos = self.viewport.screen_to_canvas(mouse);
                 if let Some(node_id) = self.document.node_at_pos(canvas_pos) {
                     self.selection.select_node(node_id);
@@ -1327,6 +1335,28 @@ impl FlowchartApp {
                         start_mouse: canvas_pos,
                     };
                 }
+            } else if let Some((edge_id, which)) = self.hit_test_cp_handle(mouse) {
+                // Drag an independent bezier CP handle
+                let start_cp_canvas = {
+                    let edge = self.document.find_edge(&edge_id);
+                    let src_node = edge.and_then(|e| self.document.find_node(&e.source.node_id));
+                    let tgt_node = edge.and_then(|e| self.document.find_node(&e.target.node_id));
+                    if let (Some(e), Some(sn), Some(tn)) = (edge, src_node, tgt_node) {
+                        let src_s = self.viewport.canvas_to_screen(sn.port_position(e.source.side));
+                        let tgt_s = self.viewport.canvas_to_screen(tn.port_position(e.target.side));
+                        let (cp1_s, cp2_s) = self.resolve_edge_cps_screen(e, src_s, tgt_s);
+                        let cp_s = if which == 0 { cp1_s } else { cp2_s };
+                        self.viewport.screen_to_canvas(cp_s)
+                    } else {
+                        canvas_pos
+                    }
+                };
+                self.drag = DragState::DraggingEdgeCP {
+                    edge_id,
+                    which,
+                    start_mouse_canvas: canvas_pos,
+                    start_cp_canvas,
+                };
             } else if let Some(edge_id) = self.hit_test_bend_handle(mouse) {
                 // Drag the curve bend handle of a selected edge
                 let bend = self.document.find_edge(&edge_id)
@@ -1529,6 +1559,21 @@ impl FlowchartApp {
                     }
                 }
             }
+            DragState::DraggingEdgeCP { edge_id, which, start_mouse_canvas, start_cp_canvas } => {
+                let canvas_mouse = self.viewport.screen_to_canvas(mouse);
+                let edge_id = *edge_id;
+                let which = *which;
+                let start_mouse_canvas = *start_mouse_canvas;
+                let start_cp_canvas = *start_cp_canvas;
+                let new_cp = start_cp_canvas + (canvas_mouse - start_mouse_canvas);
+                if let Some(edge) = self.document.find_edge_mut(&edge_id) {
+                    if which == 0 {
+                        edge.style.cp1_override = Some([new_cp.x, new_cp.y]);
+                    } else {
+                        edge.style.cp2_override = Some([new_cp.x, new_cp.y]);
+                    }
+                }
+            }
             DragState::BoxSelect { .. } | DragState::None => {}
         }
     }
@@ -1547,7 +1592,8 @@ impl FlowchartApp {
             match &self.drag {
                 DragState::DraggingNode { .. }
                 | DragState::ResizingNode { .. }
-                | DragState::DraggingEdgeBend { .. } => {
+                | DragState::DraggingEdgeBend { .. }
+                | DragState::DraggingEdgeCP { .. } => {
                     // After drag: auto-reassign section for moved nodes
                     if matches!(self.drag, DragState::DraggingNode { .. }) {
                         let moved_ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
@@ -1677,6 +1723,7 @@ impl FlowchartApp {
             }
             DragState::ResizingNode { handle, .. } => Self::resize_cursor(*handle),
             DragState::DraggingEdgeBend { .. } => egui::CursorIcon::ResizeNeSw,
+            DragState::DraggingEdgeCP { .. } => egui::CursorIcon::Grab,
             DragState::None => {
                 if self.space_held {
                     egui::CursorIcon::Grab

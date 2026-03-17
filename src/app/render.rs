@@ -1548,15 +1548,18 @@ impl FlowchartApp {
         let is_selected = self.selection.contains_edge(&edge.id);
 
         // Control points (used for both hover detection and drawing)
-        let offset = 60.0 * self.viewport.zoom;
-        let (mut cp1, mut cp2) = control_points_for_side(src, tgt, edge.source.side, offset);
+        // Base: port direction + curve_bend; then apply per-cp overrides if set.
+        let (mut cp1, mut cp2) = self.resolve_edge_cps_screen(edge, src, tgt);
 
-        // Apply curve bend (user-defined) plus extra_bend (parallel-edge auto-offset)
-        let total_bend = edge.style.curve_bend + extra_bend;
-        if total_bend.abs() > 0.02 {
+        // extra_bend (parallel-edge auto-offset) is applied on top of the resolved CPs
+        // only when no manual overrides are active.
+        if extra_bend.abs() > 0.02
+            && edge.style.cp1_override.is_none()
+            && edge.style.cp2_override.is_none()
+        {
             let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
             let perp = Vec2::new(-dir.y, dir.x);
-            let bend_screen = total_bend * self.viewport.zoom;
+            let bend_screen = extra_bend * self.viewport.zoom;
             cp1 = cp1 + perp * bend_screen;
             cp2 = cp2 + perp * bend_screen;
         }
@@ -1938,13 +1941,46 @@ impl FlowchartApp {
             }
         }
 
-        // Curve bend drag handle (shown on selected non-orthogonal edges)
+        // Bezier handles (shown on selected non-orthogonal edges)
         if is_selected && !edge.style.orthogonal {
-            let handle_pos = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
-            let r = 5.0_f32;
-            painter.circle_filled(handle_pos, r + 2.0, self.theme.accent_glow);
-            painter.circle_filled(handle_pos, r, self.theme.accent);
-            painter.circle_stroke(handle_pos, r, Stroke::new(1.5, self.theme.text_primary));
+            let has_overrides = edge.style.cp1_override.is_some() || edge.style.cp2_override.is_some();
+
+            // Always show handle-lines and diamond handles when selected (Figma style)
+            let handle_line_color = egui::Color32::from_rgba_unmultiplied(137, 180, 250, 70);
+            let handle_line_stroke = Stroke::new(1.0, handle_line_color);
+            painter.line_segment([src, cp1], handle_line_stroke);
+            painter.line_segment([tgt, cp2], handle_line_stroke);
+
+            let draw_diamond = |p: Pos2, overridden: bool| {
+                let r = 5.0_f32;
+                let fill = if overridden {
+                    self.theme.accent
+                } else {
+                    egui::Color32::from_rgba_unmultiplied(100, 130, 200, 160)
+                };
+                let verts = vec![
+                    Pos2::new(p.x,     p.y - r),
+                    Pos2::new(p.x + r, p.y    ),
+                    Pos2::new(p.x,     p.y + r),
+                    Pos2::new(p.x - r, p.y    ),
+                ];
+                painter.add(egui::Shape::convex_polygon(
+                    verts,
+                    fill,
+                    Stroke::new(1.5, self.theme.text_primary),
+                ));
+            };
+            draw_diamond(cp1, edge.style.cp1_override.is_some());
+            draw_diamond(cp2, edge.style.cp2_override.is_some());
+
+            if !has_overrides {
+                // Also show the symmetric midpoint handle when in auto mode
+                let handle_pos = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
+                let r = 5.0_f32;
+                painter.circle_filled(handle_pos, r + 2.0, self.theme.accent_glow);
+                painter.circle_filled(handle_pos, r, self.theme.accent);
+                painter.circle_stroke(handle_pos, r, Stroke::new(1.5, self.theme.text_primary));
+            }
         }
 
         // Source/target text labels
