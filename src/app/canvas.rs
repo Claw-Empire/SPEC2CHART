@@ -3407,6 +3407,8 @@ impl FlowchartApp {
             actions.push((7, glow_icon, glow_tip));
             actions.push((3, "⊕", "Spawn child →"));
         }
+        // Quick fill color — always shown (opens popup)
+        actions.push((20, "🎨", "Fill color"));
         // Alignment buttons — multi-select only
         if num_selected >= 2 {
             actions.push((10, "◧", "Align left edges"));
@@ -3673,6 +3675,9 @@ impl FlowchartApp {
                         self.history.push(&self.document);
                     }
                 }
+                20 => { // Open fill color picker
+                    self.fab_color_picker_open = !self.fab_color_picker_open;
+                }
                 10 => { // Align left edges
                     let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
                     let min_x = ids.iter().filter_map(|id| self.document.find_node(id))
@@ -3843,6 +3848,64 @@ impl FlowchartApp {
                     std::time::Instant::now(),
                 ));
             }
+        }
+
+        // Quick fill color picker popup
+        if self.fab_color_picker_open && !self.selection.node_ids.is_empty() {
+            use crate::app::theme::{NODE_COLORS, to_color32};
+            // Position the popup below the floating bar
+            let popup_cols = 5usize;
+            let swatch_sz = 22.0_f32;
+            let swatch_gap = 3.0_f32;
+            let pad2 = 6.0_f32;
+            let popup_w = popup_cols as f32 * swatch_sz + (popup_cols - 1) as f32 * swatch_gap + pad2 * 2.0;
+            let popup_rows = (NODE_COLORS.len() + popup_cols - 1) / popup_cols;
+            let popup_h = popup_rows as f32 * swatch_sz + (popup_rows.saturating_sub(1)) as f32 * swatch_gap + pad2 * 2.0;
+            let popup_rect = Rect::from_min_size(
+                egui::Pos2::new(bar_center_x - popup_w / 2.0, bar_rect.max.y + 6.0),
+                egui::Vec2::new(popup_w, popup_h),
+            );
+            // Close if clicked outside
+            let pointer_pos = ui.input(|i| i.pointer.latest_pos());
+            if ui.input(|i| i.pointer.any_pressed()) {
+                if let Some(pp) = pointer_pos {
+                    if !popup_rect.contains(pp) && !bar_rect.contains(pp) {
+                        self.fab_color_picker_open = false;
+                    }
+                }
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.fab_color_picker_open = false;
+            }
+            // Draw popup background
+            let painter_cp = ui.painter();
+            painter_cp.rect_filled(popup_rect, CornerRadius::same(8), self.theme.tooltip_bg);
+            painter_cp.rect_stroke(popup_rect, CornerRadius::same(8), Stroke::new(1.0, self.theme.surface1), StrokeKind::Outside);
+            // Draw swatches
+            let mut color_applied = false;
+            for (ci, (rgba, name)) in NODE_COLORS.iter().enumerate() {
+                let col = ci % popup_cols;
+                let row = ci / popup_cols;
+                let sx = popup_rect.min.x + pad2 + col as f32 * (swatch_sz + swatch_gap);
+                let sy = popup_rect.min.y + pad2 + row as f32 * (swatch_sz + swatch_gap);
+                let sw_rect = Rect::from_min_size(egui::Pos2::new(sx, sy), egui::Vec2::splat(swatch_sz));
+                let color = to_color32(*rgba);
+                let resp = ui.put(sw_rect, egui::Button::new("").fill(color).frame(true))
+                    .on_hover_text(*name);
+                if resp.clicked() {
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    for id in &ids {
+                        if let Some(node) = self.document.find_node_mut(&id) {
+                            node.style.fill_color = *rgba;
+                        }
+                    }
+                    self.history.push(&self.document);
+                    self.status_message = Some((format!("Fill: {}", name), std::time::Instant::now()));
+                    self.fab_color_picker_open = false;
+                    color_applied = true;
+                }
+            }
+            let _ = color_applied;
         }
 
         // Multi-select alignment bar (only when 2+ nodes selected)

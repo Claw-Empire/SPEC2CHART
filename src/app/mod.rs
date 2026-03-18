@@ -263,6 +263,8 @@ pub struct FlowchartApp {
     pub(crate) bulk_assign_buf: String,
     /// Bulk due-date input in multi-selection properties panel
     pub(crate) bulk_due_buf: String,
+    /// Floating action bar quick-fill color picker open
+    pub(crate) fab_color_picker_open: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,6 +385,7 @@ impl FlowchartApp {
             show_workload_panel: false,
             bulk_assign_buf: String::new(),
             bulk_due_buf: String::new(),
+            fab_color_picker_open: false,
         }
     }
 
