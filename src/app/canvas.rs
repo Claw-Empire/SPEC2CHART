@@ -3372,17 +3372,40 @@ impl FlowchartApp {
         let bar_y = (bb.min.y - bar_h - bar_margin).max(canvas_rect.min.y + 4.0);
         let bar_center_x = bb.center().x.clamp(canvas_rect.min.x + 80.0, canvas_rect.max.x - 80.0);
 
-        // Build the bar as a horizontal layout
-        let actions: &[(&str, &str)] = &[
-            ("✏", "Edit label"),
-            ("⎘", "Duplicate (⌘D)"),
-            ("📋", "Copy style (⌘⇧C)"),
-            ("→", "Spawn connected child node"),
-            ("🗑", "Delete"),
-        ];
         let btn_w = 28.0;
-        // For single-node selection, include status badge + section pill at the end
         let show_status_badge = self.selection.node_ids.len() == 1;
+
+        // Context-sensitive dynamic action list (action_id, icon, tooltip)
+        let has_style_in_clipboard = self.style_clipboard.is_some();
+        let all_locked = self.selection.node_ids.iter()
+            .all(|id| self.document.find_node(id).map(|n| n.locked).unwrap_or(false));
+        let has_glow = show_status_badge && self.selection.node_ids.iter().next()
+            .and_then(|id| self.document.find_node(id))
+            .map(|n| n.style.glow)
+            .unwrap_or(false);
+
+        // Build the bar as a horizontal layout
+        let mut actions: Vec<(usize, &str, &str)> = vec![
+            (0, "✏", "Edit label"),
+            (1, "⎘", "Duplicate (⌘D)"),
+            (2, "📋", "Copy style (⌘⇧C)"),
+        ];
+        // Paste style — only shown when style clipboard is filled
+        if has_style_in_clipboard {
+            actions.push((5, "🖌", "Paste style (⌘⇧V)"));
+        }
+        // Lock/unlock toggle
+        let (lock_icon, lock_tip) = if all_locked { ("🔓", "Unlock (⌘L)") } else { ("🔒", "Lock (⌘L)") };
+        actions.push((6, lock_icon, lock_tip));
+        // Glow toggle — single-node only
+        if show_status_badge {
+            let (glow_icon, glow_tip) = if has_glow { ("✦", "Remove glow") } else { ("✧", "Add glow") };
+            actions.push((7, glow_icon, glow_tip));
+        }
+        actions.push((3, "⊕", "Spawn child →"));
+        actions.push((4, "🗑", "Delete"));
+
+        // For single-node selection, include status badge + section pill at the end
         let status_badge_w = if show_status_badge { 38.0 } else { 0.0 };
         let status_sep_w   = if show_status_badge { 6.0  } else { 0.0 };
         // Section pill width: depends on section name length (capped at 12 chars)
@@ -3423,7 +3446,7 @@ impl FlowchartApp {
         let pad = 4.0;
         let mut x = bar_rect.min.x + pad;
         let mut clicked_action: Option<usize> = None;
-        for (i, (icon, tooltip)) in actions.iter().enumerate() {
+        for (action_id, icon, tooltip) in actions.iter() {
             let btn_rect = Rect::from_min_size(
                 egui::Pos2::new(x, bar_rect.min.y + 2.0),
                 egui::Vec2::new(btn_w, bar_h - 4.0),
@@ -3431,7 +3454,7 @@ impl FlowchartApp {
             let resp = ui.put(btn_rect, egui::Button::new(
                 egui::RichText::new(*icon).size(13.0)
             ).frame(false)).on_hover_text(*tooltip);
-            if resp.clicked() { clicked_action = Some(i); }
+            if resp.clicked() { clicked_action = Some(*action_id); }
             x += btn_w + 2.0;
         }
 
@@ -3602,6 +3625,38 @@ impl FlowchartApp {
                     for id in &ids { self.document.remove_node(id); }
                     self.selection.clear();
                     self.history.push(&self.document);
+                }
+                5 => { // Paste style
+                    if let Some(style) = self.style_clipboard.clone() {
+                        let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                        for id in &ids {
+                            if let Some(node) = self.document.find_node_mut(&id) {
+                                node.style = style.clone();
+                            }
+                        }
+                        self.history.push(&self.document);
+                        self.status_message = Some(("Style pasted".to_string(), std::time::Instant::now()));
+                    }
+                }
+                6 => { // Lock / unlock toggle
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    let new_locked = !all_locked;
+                    for id in &ids {
+                        if let Some(node) = self.document.find_node_mut(&id) {
+                            node.locked = new_locked;
+                        }
+                    }
+                    self.history.push(&self.document);
+                    let msg = if new_locked { "Locked" } else { "Unlocked" };
+                    self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                }
+                7 => { // Glow toggle (single-node)
+                    if let Some(&sel_id) = self.selection.node_ids.iter().next() {
+                        if let Some(node) = self.document.find_node_mut(&sel_id) {
+                            node.style.glow = !node.style.glow;
+                        }
+                        self.history.push(&self.document);
+                    }
                 }
                 _ => {}
             }
