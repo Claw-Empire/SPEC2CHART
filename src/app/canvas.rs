@@ -3930,6 +3930,9 @@ impl FlowchartApp {
                 ("⬗", "Align bottom edges"),
                 ("↔", "Distribute H (⇧H)"),
                 ("↕", "Distribute V (⇧V)"),
+                ("⇔", "Match widths"),
+                ("⇕", "Match heights"),
+                ("⊞", "Match sizes"),
             ];
             let _ = align_actions;
             let abtn_w = 24.0_f32;
@@ -4033,6 +4036,28 @@ impl FlowchartApp {
                             for (id, _, s) in &sorted {
                                 if let Some(n) = self.document.find_node_mut(id) { let x = n.pos().x; n.set_pos(Pos2::new(x, cy)); }
                                 cy += s.y + gap;
+                            }
+                        }
+                    }
+                    8 => { // Match widths — all nodes get the width of the widest
+                        let max_w = positions.iter().map(|(_,_,s)| s.x).fold(f32::MIN, f32::max);
+                        for (id, _, _) in &positions {
+                            if let Some(n) = self.document.find_node_mut(id) { n.size[0] = max_w; }
+                        }
+                    }
+                    9 => { // Match heights — all nodes get the height of the tallest
+                        let max_h = positions.iter().map(|(_,_,s)| s.y).fold(f32::MIN, f32::max);
+                        for (id, _, _) in &positions {
+                            if let Some(n) = self.document.find_node_mut(id) { n.size[1] = max_h; }
+                        }
+                    }
+                    10 => { // Match sizes — all nodes become as wide and tall as the largest
+                        let max_w = positions.iter().map(|(_,_,s)| s.x).fold(f32::MIN, f32::max);
+                        let max_h = positions.iter().map(|(_,_,s)| s.y).fold(f32::MIN, f32::max);
+                        for (id, _, _) in &positions {
+                            if let Some(n) = self.document.find_node_mut(id) {
+                                n.size[0] = max_w;
+                                n.size[1] = max_h;
                             }
                         }
                     }
