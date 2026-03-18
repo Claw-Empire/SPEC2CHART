@@ -3384,12 +3384,16 @@ impl FlowchartApp {
             .map(|n| n.style.glow)
             .unwrap_or(false);
 
+        let num_selected = self.selection.node_ids.len();
+
         // Build the bar as a horizontal layout
-        let mut actions: Vec<(usize, &str, &str)> = vec![
-            (0, "✏", "Edit label"),
-            (1, "⎘", "Duplicate (⌘D)"),
-            (2, "📋", "Copy style (⌘⇧C)"),
-        ];
+        let mut actions: Vec<(usize, &str, &str)> = vec![];
+        // Edit label — single-node only
+        if show_status_badge {
+            actions.push((0, "✏", "Edit label"));
+        }
+        actions.push((1, "⎘", "Duplicate (⌘D)"));
+        actions.push((2, "📋", "Copy style (⌘⇧C)"));
         // Paste style — only shown when style clipboard is filled
         if has_style_in_clipboard {
             actions.push((5, "🖌", "Paste style (⌘⇧V)"));
@@ -3401,8 +3405,19 @@ impl FlowchartApp {
         if show_status_badge {
             let (glow_icon, glow_tip) = if has_glow { ("✦", "Remove glow") } else { ("✧", "Add glow") };
             actions.push((7, glow_icon, glow_tip));
+            actions.push((3, "⊕", "Spawn child →"));
         }
-        actions.push((3, "⊕", "Spawn child →"));
+        // Alignment buttons — multi-select only
+        if num_selected >= 2 {
+            actions.push((10, "◧", "Align left edges"));
+            actions.push((11, "◨", "Align right edges"));
+            actions.push((12, "⬒", "Align top edges"));
+            actions.push((13, "⬓", "Align bottom edges"));
+            if num_selected >= 3 {
+                actions.push((16, "↔", "Distribute horizontally"));
+                actions.push((17, "↕", "Distribute vertically"));
+            }
+        }
         actions.push((4, "🗑", "Delete"));
 
         // For single-node selection, include status badge + section pill at the end
@@ -3654,6 +3669,86 @@ impl FlowchartApp {
                     if let Some(&sel_id) = self.selection.node_ids.iter().next() {
                         if let Some(node) = self.document.find_node_mut(&sel_id) {
                             node.style.glow = !node.style.glow;
+                        }
+                        self.history.push(&self.document);
+                    }
+                }
+                10 => { // Align left edges
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    let min_x = ids.iter().filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.position[0]).fold(f32::MAX, f32::min);
+                    for id in &ids {
+                        if let Some(node) = self.document.find_node_mut(id) { node.position[0] = min_x; }
+                    }
+                    self.history.push(&self.document);
+                }
+                11 => { // Align right edges
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    let max_r = ids.iter().filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.position[0] + n.size[0]).fold(f32::MIN, f32::max);
+                    for id in &ids {
+                        if let Some(node) = self.document.find_node_mut(id) { node.position[0] = max_r - node.size[0]; }
+                    }
+                    self.history.push(&self.document);
+                }
+                12 => { // Align top edges
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    let min_y = ids.iter().filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.position[1]).fold(f32::MAX, f32::min);
+                    for id in &ids {
+                        if let Some(node) = self.document.find_node_mut(id) { node.position[1] = min_y; }
+                    }
+                    self.history.push(&self.document);
+                }
+                13 => { // Align bottom edges
+                    let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    let max_b = ids.iter().filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.position[1] + n.size[1]).fold(f32::MIN, f32::max);
+                    for id in &ids {
+                        if let Some(node) = self.document.find_node_mut(id) { node.position[1] = max_b - node.size[1]; }
+                    }
+                    self.history.push(&self.document);
+                }
+                16 => { // Distribute horizontally
+                    let mut ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    ids.sort_by(|a, b| {
+                        let ax = self.document.find_node(a).map(|n| n.position[0]).unwrap_or(0.0);
+                        let bx = self.document.find_node(b).map(|n| n.position[0]).unwrap_or(0.0);
+                        ax.partial_cmp(&bx).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if ids.len() >= 3 {
+                        let min_x = self.document.find_node(&ids[0]).map(|n| n.position[0]).unwrap_or(0.0);
+                        let last_id = *ids.last().unwrap();
+                        let max_r = self.document.find_node(&last_id).map(|n| n.position[0] + n.size[0]).unwrap_or(0.0);
+                        let total_w: f32 = ids.iter().filter_map(|id| self.document.find_node(id)).map(|n| n.size[0]).sum();
+                        let gap = (max_r - min_x - total_w) / (ids.len() - 1) as f32;
+                        let mut cur_x = min_x;
+                        for id in &ids {
+                            let w = self.document.find_node(id).map(|n| n.size[0]).unwrap_or(0.0);
+                            if let Some(node) = self.document.find_node_mut(id) { node.position[0] = cur_x; }
+                            cur_x += w + gap;
+                        }
+                        self.history.push(&self.document);
+                    }
+                }
+                17 => { // Distribute vertically
+                    let mut ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+                    ids.sort_by(|a, b| {
+                        let ay = self.document.find_node(a).map(|n| n.position[1]).unwrap_or(0.0);
+                        let by_ = self.document.find_node(b).map(|n| n.position[1]).unwrap_or(0.0);
+                        ay.partial_cmp(&by_).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if ids.len() >= 3 {
+                        let min_y = self.document.find_node(&ids[0]).map(|n| n.position[1]).unwrap_or(0.0);
+                        let last_id = *ids.last().unwrap();
+                        let max_b = self.document.find_node(&last_id).map(|n| n.position[1] + n.size[1]).unwrap_or(0.0);
+                        let total_h: f32 = ids.iter().filter_map(|id| self.document.find_node(id)).map(|n| n.size[1]).sum();
+                        let gap = (max_b - min_y - total_h) / (ids.len() - 1) as f32;
+                        let mut cur_y = min_y;
+                        for id in &ids {
+                            let h = self.document.find_node(id).map(|n| n.size[1]).unwrap_or(0.0);
+                            if let Some(node) = self.document.find_node_mut(id) { node.position[1] = cur_y; }
+                            cur_y += h + gap;
                         }
                         self.history.push(&self.document);
                     }
