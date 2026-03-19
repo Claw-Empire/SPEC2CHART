@@ -16,6 +16,9 @@ printpdf = "0.7"
 rfd = "0.15"
 serde_yaml = "0.9"
 petgraph = "0.6"
+clap = { version = "4", features = ["derive"] }
+tiny_http = "0.12"
+notify = "6"
 
 [profile.release]
 opt-level = 3
