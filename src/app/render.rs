@@ -2948,6 +2948,206 @@ impl FlowchartApp {
             );
         }
     }
+
+    /// Draw semi-transparent colored bands behind groups of nodes that share the same
+    /// `timeline_period`.  Only rendered when `layout_mode == Timeline` or `timeline_mode == true`,
+    /// and only in 2D view.
+    pub(crate) fn draw_phase_bands(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
+        use std::collections::HashMap;
+        use egui::{Align2, Color32, CornerRadius, FontId, Rect};
+
+        // Only active in timeline contexts
+        let is_timeline = self.document.layout_mode == crate::model::LayoutMode::Timeline
+            || self.document.timeline_mode;
+        if !is_timeline { return; }
+        if matches!(self.view_mode, super::ViewMode::ThreeD) { return; }
+
+        // Palette of soft phase colors (RGBA, low alpha for overlay)
+        const PHASE_COLORS: &[[u8; 4]] = &[
+            [99,  179, 237, 40],  // soft blue
+            [154, 205,  50, 40],  // soft green
+            [255, 165,   0, 40],  // soft orange
+            [238, 130, 238, 40],  // soft violet
+            [255, 105, 180, 40],  // hot pink
+            [64,  224, 208, 40],  // turquoise
+        ];
+
+        // Collect bounding boxes per phase (screen space)
+        let mut phase_order: Vec<String> = Vec::new();
+        let mut phase_bounds: HashMap<String, Rect> = HashMap::new();
+
+        for node in &self.document.nodes {
+            let period = match &node.timeline_period {
+                Some(p) if !p.is_empty() => p.clone(),
+                _ => continue,
+            };
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(node.pos()),
+                node.size_vec() * self.viewport.zoom,
+            );
+            // Skip nodes that are entirely outside the visible canvas (with generous margin)
+            if !sr.expand(300.0).intersects(canvas_rect) { continue; }
+
+            if !phase_bounds.contains_key(&period) {
+                phase_order.push(period.clone());
+                phase_bounds.insert(period.clone(), sr);
+            } else if let Some(b) = phase_bounds.get_mut(&period) {
+                *b = b.union(sr);
+            }
+        }
+
+        if phase_order.is_empty() { return; }
+
+        // Expand padding (world-space 20 px, scaled to screen)
+        let pad = (20.0 * self.viewport.zoom).clamp(8.0, 40.0);
+        let font = FontId::proportional((12.0 * self.viewport.zoom.sqrt()).clamp(10.0, 16.0));
+
+        for (i, phase) in phase_order.iter().enumerate() {
+            let Some(&bounds) = phase_bounds.get(phase.as_str()) else { continue };
+            let padded = bounds.expand(pad);
+            if !padded.intersects(canvas_rect) { continue; }
+
+            let c = PHASE_COLORS[i % PHASE_COLORS.len()];
+            let fill = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
+            let border = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 70);
+
+            painter.rect(
+                padded,
+                CornerRadius::same(8),
+                fill,
+                egui::Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            );
+
+            // Phase label at top-left corner of the band
+            let label_pos = egui::pos2(padded.min.x + 6.0, padded.min.y + 4.0);
+            painter.text(
+                label_pos,
+                Align2::LEFT_TOP,
+                phase.as_str(),
+                font.clone(),
+                Color32::from_rgba_unmultiplied(c[0], c[1], c[2], 200),
+            );
+        }
+    }
+
+    /// Draw horizontal lane dividers between swimlanes when `layout_mode == Swimlane`.
+    /// Each lane gets a faint full-width separator line and a bold pill label on the left margin.
+    pub(crate) fn draw_lane_dividers(&self, painter: &egui::Painter, canvas_rect: egui::Rect) {
+        use std::collections::HashMap;
+        use egui::{Align2, Color32, CornerRadius, FontId, Rect, Stroke};
+
+        if self.document.layout_mode != crate::model::LayoutMode::Swimlane { return; }
+        if matches!(self.view_mode, super::ViewMode::ThreeD) { return; }
+
+        // Determine canonical lane order from doc, falling back to discovery order
+        let canonical_lanes = &self.document.timeline_lanes;
+
+        // Collect screen-space Y bounds per lane
+        let mut lane_order: Vec<String> = Vec::new();
+        let mut lane_y_min: HashMap<String, f32> = HashMap::new();
+        let mut lane_y_max: HashMap<String, f32> = HashMap::new();
+
+        for node in &self.document.nodes {
+            let lane = match &node.timeline_lane {
+                Some(l) if !l.is_empty() => l.clone(),
+                _ => continue,
+            };
+            let sr = Rect::from_min_size(
+                self.viewport.canvas_to_screen(node.pos()),
+                node.size_vec() * self.viewport.zoom,
+            );
+            if !sr.expand(300.0).intersects(canvas_rect) { continue; }
+
+            let entry_min = lane_y_min.entry(lane.clone()).or_insert(f32::MAX);
+            *entry_min = entry_min.min(sr.min.y);
+            let entry_max = lane_y_max.entry(lane.clone()).or_insert(f32::MIN);
+            *entry_max = entry_max.max(sr.max.y);
+
+            if !lane_order.contains(&lane) {
+                lane_order.push(lane);
+            }
+        }
+
+        if lane_order.is_empty() { return; }
+
+        // Respect canonical order if available
+        let ordered: Vec<&String> = if !canonical_lanes.is_empty() {
+            let mut v: Vec<&String> = canonical_lanes
+                .iter()
+                .filter(|l| lane_y_min.contains_key(l.as_str()))
+                .collect();
+            // Append any discovered lanes not in the canonical list
+            for l in &lane_order {
+                if !canonical_lanes.contains(l) {
+                    v.push(l);
+                }
+            }
+            v
+        } else {
+            lane_order.iter().collect()
+        };
+
+        let divider_color = Color32::from_rgba_unmultiplied(150, 150, 150, 60);
+        let divider_stroke = Stroke::new(1.0, divider_color);
+        let label_font = FontId::proportional((12.0 * self.viewport.zoom.sqrt()).clamp(10.0, 15.0));
+        let label_bg = Color32::from_rgba_unmultiplied(30, 32, 48, 200);
+        let label_fg = Color32::from_rgba_unmultiplied(180, 190, 220, 255);
+
+        // Left margin X for the lane label pill
+        let label_margin_x = canvas_rect.min.x + 8.0;
+
+        for (i, lane) in ordered.iter().enumerate() {
+            let y_min = match lane_y_min.get(lane.as_str()) { Some(&v) => v, None => continue };
+            let y_max = match lane_y_max.get(lane.as_str()) { Some(&v) => v, None => continue };
+            let y_center = (y_min + y_max) * 0.5;
+
+            // Draw divider line at the top of this lane's band (skip the very first lane)
+            if i > 0 {
+                // Line runs full canvas width at the midpoint between this lane top and the
+                // previous lane bottom (approximated as y_min with a little breathing room)
+                let line_y = y_min - (8.0 * self.viewport.zoom).clamp(4.0, 16.0);
+                let p0 = egui::pos2(canvas_rect.min.x, line_y);
+                let p1 = egui::pos2(canvas_rect.max.x, line_y);
+                painter.line_segment([p0, p1], divider_stroke);
+            }
+
+            // Pill label at the left margin, vertically centered on the lane
+            let label_text = lane.as_str();
+            // Measure text to size the pill
+            let galley = painter.layout_no_wrap(
+                label_text.to_string(),
+                label_font.clone(),
+                label_fg,
+            );
+            let text_w = galley.size().x;
+            let text_h = galley.size().y;
+            let pill_pad_x = 6.0;
+            let pill_pad_y = 3.0;
+            let pill_w = text_w + pill_pad_x * 2.0;
+            let pill_h = text_h + pill_pad_y * 2.0;
+            let pill_rect = Rect::from_min_size(
+                egui::pos2(label_margin_x, y_center - pill_h * 0.5),
+                egui::vec2(pill_w, pill_h),
+            );
+            if pill_rect.intersects(canvas_rect) {
+                painter.rect_filled(pill_rect, CornerRadius::same(4), label_bg);
+                painter.rect_stroke(
+                    pill_rect,
+                    CornerRadius::same(4),
+                    Stroke::new(1.0, divider_color),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    pill_rect.center(),
+                    Align2::CENTER_CENTER,
+                    label_text,
+                    label_font.clone(),
+                    label_fg,
+                );
+            }
+        }
+    }
 }
 
 /// Returns current date as "YYYY-MM-DD" (UTC). Used for SLA countdown badges.

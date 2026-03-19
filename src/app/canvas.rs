@@ -512,6 +512,12 @@ impl FlowchartApp {
             }
         }
 
+        // Phase band backgrounds: colored semi-transparent rects behind timeline phase groups
+        self.draw_phase_bands(&painter, canvas_rect);
+
+        // Swimlane dividers: horizontal separator lines + lane labels
+        self.draw_lane_dividers(&painter, canvas_rect);
+
         // Edges (visible only)
         for edge in &self.document.edges {
             let src_visible = node_idx
