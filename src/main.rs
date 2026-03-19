@@ -197,19 +197,104 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     }
 }
 
-fn cli_generate(_template: &str) {
-    eprintln!("generate: not yet implemented (coming in Task 5.3)");
-    std::process::exit(1);
+fn cli_generate(template: &str) {
+    let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| {
+        eprintln!("Error: ANTHROPIC_API_KEY environment variable not set.\nSet it with: export ANTHROPIC_API_KEY=your-key");
+        std::process::exit(1);
+    });
+    let mut prose = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut prose).unwrap();
+    match crate::specgraph::llm::prose_to_hrf(&prose, template, &api_key) {
+        Ok(hrf) => print!("{}", hrf),
+        Err(e) => {
+            eprintln!("LLM error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
-fn cli_watch(_directory: PathBuf, _out: PathBuf, _template: &str) {
-    eprintln!("watch: not yet implemented (coming in Task 5.3)");
-    std::process::exit(1);
+fn cli_watch(directory: PathBuf, out: PathBuf, template: &str) {
+    use notify::{Watcher, RecursiveMode, Event};
+    use std::sync::mpsc::channel;
+
+    println!("Watching {:?} → {:?}", directory, out);
+    let (tx, rx) = channel::<notify::Result<Event>>();
+    let mut watcher = notify::recommended_watcher(tx).unwrap();
+    watcher.watch(&directory, RecursiveMode::Recursive).unwrap();
+
+    // Initial render
+    regenerate_watch(&directory, &out, template);
+
+    for res in rx {
+        if let Ok(event) = res {
+            if event.paths.iter().any(|p| p.extension().map_or(false, |e| e == "spec")) {
+                println!("Change detected — regenerating...");
+                regenerate_watch(&directory, &out, template);
+            }
+        }
+    }
 }
 
-fn cli_serve(_port: u16) {
-    eprintln!("serve: not yet implemented (coming in Task 5.3)");
-    std::process::exit(1);
+fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &str) {
+    if let Some(spec_path) = std::fs::read_dir(dir)
+        .ok()
+        .and_then(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .find(|e| e.path().extension().map_or(false, |x| x == "spec"))
+        })
+        .map(|e| e.path())
+    {
+        cli_render(spec_path, out.to_path_buf());
+    }
+}
+
+fn cli_serve(port: u16) {
+    use tiny_http::{Server, Response, Header};
+    let addr = format!("0.0.0.0:{}", port);
+    let server = Server::http(&addr).unwrap_or_else(|e| {
+        eprintln!("Failed to start server on {}: {}", addr, e);
+        std::process::exit(1);
+    });
+    println!("light-figma render server listening on http://localhost:{}", port);
+    println!("POST /render with HRF spec body → returns SVG");
+
+    for request in server.incoming_requests() {
+        if request.url() != "/render" || request.method().as_str() != "POST" {
+            let _ = request.respond(Response::from_string("POST /render only").with_status_code(404));
+            continue;
+        }
+        let mut body = String::new();
+        let mut r = request;
+        let _ = std::io::Read::read_to_string(r.as_reader(), &mut body);
+
+        match crate::specgraph::hrf::parse_hrf(&body) {
+            Ok(mut doc) => {
+                crate::specgraph::layout::auto_layout(&mut doc);
+                let tmp = std::env::temp_dir().join("lf_serve_tmp.svg");
+                match crate::export::export_svg(&doc, &tmp) {
+                    Ok(()) => {
+                        let svg = std::fs::read_to_string(&tmp).unwrap_or_default();
+                        let response = Response::from_string(svg).with_header(
+                            Header::from_bytes("Content-Type", "image/svg+xml").unwrap(),
+                        );
+                        let _ = r.respond(response);
+                    }
+                    Err(e) => {
+                        let _ = r.respond(
+                            Response::from_string(format!("Export error: {}", e))
+                                .with_status_code(500),
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = r.respond(
+                    Response::from_string(format!("Parse error: {}", e)).with_status_code(400),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
