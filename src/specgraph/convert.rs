@@ -409,6 +409,13 @@ fn str_to_shape(s: &str) -> Result<NodeShape, String> {
         "connector" => Ok(NodeShape::Connector),
         "triangle" => Ok(NodeShape::Triangle),
         "callout" => Ok(NodeShape::Callout),
+        "person" => Ok(NodeShape::Person),
+        "screen" => Ok(NodeShape::Screen),
+        "cylinder" => Ok(NodeShape::Cylinder),
+        "cloud" => Ok(NodeShape::Cloud),
+        "document" => Ok(NodeShape::Document),
+        "channel" => Ok(NodeShape::Channel),
+        "segment" => Ok(NodeShape::Segment),
         other => Err(format!("Unknown shape: '{}'", other)),
     }
 }
