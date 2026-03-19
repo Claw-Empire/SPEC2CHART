@@ -4,6 +4,7 @@ mod history;
 mod io;
 mod model;
 mod specgraph;
+mod templates;
 
 use eframe::egui;
 
