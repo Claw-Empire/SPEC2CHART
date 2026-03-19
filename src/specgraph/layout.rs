@@ -246,6 +246,9 @@ pub fn orgtree_layout(doc: &mut FlowchartDocument) {
         }
     }
 
+    // Note: nodes in a cycle are never enqueued (visited remains false, depth stays 0).
+    // They will be placed at the root row (y=0). This is intentional silent handling —
+    // OrgTree specs are expected to be DAGs.
     let max_depth = depth.iter().copied().max().unwrap_or(0);
     let gap_y = doc.layout_gap_main.max(120.0);
     let gap_x = doc.layout_gap_cross.max(160.0);

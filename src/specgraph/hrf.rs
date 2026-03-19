@@ -525,6 +525,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             // and ## Kanban arms immediately set them back if needed.
             current_swimlane = None;
             current_kanban_col = None;
+            orgtree_parent_stack.clear();
             // Preserve original case for layer names, lowercase only for matching
             let header_raw = trimmed[3..].trim();
             let header = header_raw.to_lowercase();
