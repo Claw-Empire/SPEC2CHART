@@ -875,6 +875,85 @@ impl FlowchartApp {
             }
         }
 
+        // Metric badge: small dark pill pinned to the bottom-right of the node
+        // Shown when node.metric is set (e.g. "$2.4M ARR" from {metric:...} HRF tag)
+        if let Some(metric_text) = &node.metric {
+            if !node.is_frame && self.viewport.zoom > 0.4 {
+                let font_sz = (10.0 * self.viewport.zoom.sqrt()).clamp(7.5, 13.0);
+                let galley = painter.layout_no_wrap(
+                    metric_text.clone(),
+                    FontId::proportional(font_sz),
+                    Color32::WHITE,
+                );
+                let text_size = galley.size();
+                let pad_x = 4.0;
+                let pad_y = 2.0;
+                let badge_w = text_size.x + pad_x * 2.0;
+                let badge_h = text_size.y + pad_y * 2.0;
+                // Pin to bottom-right corner, slightly inset from edge
+                let badge_rect = Rect::from_min_size(
+                    Pos2::new(
+                        screen_rect.max.x - badge_w - 4.0,
+                        screen_rect.max.y - badge_h - 4.0,
+                    ),
+                    Vec2::new(badge_w, badge_h),
+                );
+                painter.rect_filled(
+                    badge_rect,
+                    CornerRadius::same(3),
+                    Color32::from_rgba_unmultiplied(30, 30, 30, 200),
+                );
+                painter.text(
+                    badge_rect.center(),
+                    Align2::CENTER_CENTER,
+                    metric_text,
+                    FontId::proportional(font_sz),
+                    Color32::WHITE,
+                );
+            }
+        }
+
+        // Owner avatar: small circle with initials pinned to top-right of the node
+        // Shown when node.owner is set (e.g. "@alice" from {owner:...} HRF tag)
+        if let Some(owner_text) = &node.owner {
+            if !node.is_frame && self.viewport.zoom > 0.4 {
+                let r = (10.0 * self.viewport.zoom.sqrt()).clamp(7.0, 14.0);
+                // Strip leading '@' for display
+                let name = owner_text.strip_prefix('@').unwrap_or(owner_text.as_str());
+                // Initials: first 1-2 chars uppercased
+                let initials: String = name
+                    .split(|c: char| c == '_' || c == '-' || c == '.' || c.is_whitespace())
+                    .filter(|s| !s.is_empty())
+                    .filter_map(|word| word.chars().next())
+                    .take(2)
+                    .collect::<String>()
+                    .to_uppercase();
+                let initials = if initials.is_empty() {
+                    name.chars().take(1).collect::<String>().to_uppercase()
+                } else {
+                    initials
+                };
+                // Place at top-right, slightly overlapping the edge
+                let cx = screen_rect.max.x - r - 2.0;
+                let cy = screen_rect.min.y + r + 2.0;
+                let center = Pos2::new(cx, cy);
+                painter.circle_filled(center, r, Color32::from_rgb(59, 130, 246));
+                painter.circle_stroke(
+                    center,
+                    r,
+                    Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 255, 255, 80)),
+                );
+                let init_font_sz = (r * 0.85).clamp(5.5, 10.0);
+                painter.text(
+                    center,
+                    Align2::CENTER_CENTER,
+                    &initials,
+                    FontId::proportional(init_font_sz),
+                    Color32::WHITE,
+                );
+            }
+        }
+
         // Ports
         // Port hit area scales with zoom so it feels consistent across zoom levels
         let port_hit = (30.0 / self.viewport.zoom.sqrt()).clamp(15.0, 60.0);
