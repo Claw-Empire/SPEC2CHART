@@ -531,12 +531,207 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                             tail_pts, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
                         ));
                     }
-                    // New shapes — fall back to rounded rect until dedicated SVG renderers are added (Task 3.4)
-                    _ => {
+                    NodeShape::Person => {
+                        let cx = nx + nw / 2.0;
+                        let head_r = nh * 0.22;
+                        let neck_y = ny + head_r * 2.0;
+                        let bottom = ny + nh;
+                        // Head circle
                         svg.push_str(&format!(
-                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="10" ry="10" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
-                            nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                            r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            cx, ny + head_r, head_r, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
                         ));
+                        svg.push('\n');
+                        // Body trapezoid
+                        let pts = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            cx - nw * 0.28, neck_y,
+                            cx + nw * 0.28, neck_y,
+                            cx + nw * 0.18, bottom,
+                            cx - nw * 0.18, bottom,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            pts, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Screen => {
+                        let cx = nx + nw / 2.0;
+                        // Darker fill for chrome details (clamp to avoid underflow)
+                        let dr = (node.style.fill_color[0] as i32 - 30).clamp(0, 255) as u8;
+                        let dg = (node.style.fill_color[1] as i32 - 30).clamp(0, 255) as u8;
+                        let db = (node.style.fill_color[2] as i32 - 30).clamp(0, 255) as u8;
+                        let darker = format!("#{:02x}{:02x}{:02x}", dr, dg, db);
+                        // Main bezel
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="4" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny, nw, nh * 0.75, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                        svg.push('\n');
+                        // Chrome bar at top
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="4" fill="{}" fill-opacity="{:.2}" stroke="none"/>"#,
+                            nx, ny, nw, nh * 0.1, darker, fill_opacity,
+                        ));
+                        svg.push('\n');
+                        // Stand
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="none"/>"#,
+                            cx - nw * 0.06, ny + nh * 0.75, nw * 0.12, nh * 0.15, fill, fill_opacity,
+                        ));
+                        svg.push('\n');
+                        // Base
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="2" fill="{}" fill-opacity="{:.2}" stroke="none"/>"#,
+                            cx - nw * 0.2, ny + nh * 0.9, nw * 0.4, nh * 0.1, fill, fill_opacity,
+                        ));
+                    }
+                    NodeShape::Cylinder => {
+                        let cx = nx + nw / 2.0;
+                        let ell_h = nh * 0.18;
+                        let dr = (node.style.fill_color[0] as i32 - 25).clamp(0, 255) as u8;
+                        let dg = (node.style.fill_color[1] as i32 - 25).clamp(0, 255) as u8;
+                        let db = (node.style.fill_color[2] as i32 - 25).clamp(0, 255) as u8;
+                        let darker = format!("#{:02x}{:02x}{:02x}", dr, dg, db);
+                        // Body rect (no stroke so edges are covered by ellipses/lines)
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="none"/>"#,
+                            nx, ny + ell_h / 2.0, nw, nh - ell_h, fill, fill_opacity,
+                        ));
+                        svg.push('\n');
+                        // Bottom ellipse
+                        svg.push_str(&format!(
+                            r#"<ellipse cx="{:.1}" cy="{:.1}" rx="{:.1}" ry="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            cx, ny + nh - ell_h / 2.0, nw / 2.0, ell_h / 2.0, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                        svg.push('\n');
+                        // Top ellipse (slightly darker)
+                        svg.push_str(&format!(
+                            r#"<ellipse cx="{:.1}" cy="{:.1}" rx="{:.1}" ry="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            cx, ny + ell_h / 2.0, nw / 2.0, ell_h / 2.0, darker, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                        svg.push('\n');
+                        // Left side stroke line
+                        svg.push_str(&format!(
+                            r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny + ell_h / 2.0, nx, ny + nh - ell_h / 2.0, stroke, stroke_opacity, stroke_width,
+                        ));
+                        svg.push('\n');
+                        // Right side stroke line
+                        svg.push_str(&format!(
+                            r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx + nw, ny + ell_h / 2.0, nx + nw, ny + nh - ell_h / 2.0, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Cloud => {
+                        // Base rounded rect (no stroke — bumps provide the outline)
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="none"/>"#,
+                            nx + nw * 0.1, ny + nh * 0.3, nw * 0.8, nh * 0.7, nh * 0.2, fill, fill_opacity,
+                        ));
+                        svg.push('\n');
+                        // Four bump circles
+                        for (bx, by, br) in [
+                            (nx + nw * 0.2, ny + nh * 0.3, nh * 0.2),
+                            (nx + nw * 0.4, ny + nh * 0.15, nh * 0.22),
+                            (nx + nw * 0.6, ny + nh * 0.2, nh * 0.2),
+                            (nx + nw * 0.8, ny + nh * 0.3, nh * 0.18),
+                        ] {
+                            svg.push_str(&format!(
+                                r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="none"/>"#,
+                                bx, by, br, fill, fill_opacity,
+                            ));
+                            svg.push('\n');
+                        }
+                        // Outline stroke on base rect
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="{:.1}" fill="none" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx + nw * 0.1, ny + nh * 0.3, nw * 0.8, nh * 0.7, nh * 0.2, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Document => {
+                        let fold = nw.min(nh) * 0.2;
+                        // Main body (5-point polygon with folded corner)
+                        let pts = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            nx,           ny,
+                            nx + nw - fold, ny,
+                            nx + nw,      ny + fold,
+                            nx + nw,      ny + nh,
+                            nx,           ny + nh,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            pts, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                        svg.push('\n');
+                        // Fold triangle (slightly darker)
+                        let dr = (node.style.fill_color[0] as i32 - 20).clamp(0, 255) as u8;
+                        let dg = (node.style.fill_color[1] as i32 - 20).clamp(0, 255) as u8;
+                        let db = (node.style.fill_color[2] as i32 - 20).clamp(0, 255) as u8;
+                        let darker = format!("#{:02x}{:02x}{:02x}", dr, dg, db);
+                        let fold_pts = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            nx + nw - fold, ny,
+                            nx + nw,        ny + fold,
+                            nx + nw - fold, ny + fold,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            fold_pts, darker, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Channel => {
+                        // Funnel / trapezoid
+                        let pts = format!(
+                            "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                            nx,             ny,
+                            nx + nw,        ny,
+                            nx + nw * 0.72, ny + nh,
+                            nx + nw * 0.28, ny + nh,
+                        );
+                        svg.push_str(&format!(
+                            r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            pts, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
+                    NodeShape::Segment => {
+                        // Two overlapping person shapes: background (82% scale, offset left)
+                        // then foreground (full scale, shifted right).
+                        let draw_person = |svg: &mut String, ox: f32, scale: f32, fi: &str, fo: f32, st: &str, so: f32, sw: f32| {
+                            let pw = nw * scale;
+                            let ph = nh * scale;
+                            let pcx = ox + pw / 2.0;
+                            let py = ny + (nh - ph); // align to bottom
+                            let head_r = ph * 0.22;
+                            let neck_y = py + head_r * 2.0;
+                            let bottom = py + ph;
+                            svg.push_str(&format!(
+                                r#"<circle cx="{:.1}" cy="{:.1}" r="{:.1}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                                pcx, py + head_r, head_r, fi, fo, st, so, sw,
+                            ));
+                            svg.push('\n');
+                            let pts = format!(
+                                "{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+                                pcx - pw * 0.28, neck_y,
+                                pcx + pw * 0.28, neck_y,
+                                pcx + pw * 0.18, bottom,
+                                pcx - pw * 0.18, bottom,
+                            );
+                            svg.push_str(&format!(
+                                r#"<polygon points="{}" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                                pts, fi, fo, st, so, sw,
+                            ));
+                            svg.push('\n');
+                        };
+                        // Background person: 82% scale, offset to the left quarter
+                        let dr = (node.style.fill_color[0] as i32 - 20).clamp(0, 255) as u8;
+                        let dg = (node.style.fill_color[1] as i32 - 20).clamp(0, 255) as u8;
+                        let db = (node.style.fill_color[2] as i32 - 20).clamp(0, 255) as u8;
+                        let darker = format!("#{:02x}{:02x}{:02x}", dr, dg, db);
+                        draw_person(&mut svg, nx + nw * 0.0, 0.82, &darker, fill_opacity * 0.85, &stroke, stroke_opacity, stroke_width);
+                        // Foreground person: full scale, shifted right
+                        draw_person(&mut svg, nx + nw * 0.18, 1.0, &fill, fill_opacity, &stroke, stroke_opacity, stroke_width);
                     }
                 }
                 svg.push('\n');
