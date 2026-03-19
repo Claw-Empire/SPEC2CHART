@@ -56,6 +56,8 @@ One language. Every role. Every diagram type. All existing `.spec` files remain 
 
 Multiple layout sections can coexist in one spec. A GTM diagram can combine `## Swimlane: Channel` with `## Timeline`.
 
+**Layout coexistence rules:** When multiple layout sections appear in one spec, the layout engine processes them sequentially. Each section owns the nodes declared inside it. A node appearing in `## Swimlane: Awareness` gets its Y position from swimlane_layout and its X position from left-to-right flow within the lane. If a node also carries `{phase:Q1}`, timeline_layout further constrains its X position to the Q1 band — swimlane provides the row, timeline provides the column. Nodes that belong to no layout section are placed by the existing `hierarchical_layout()` in a separate zone below all layout sections. The first-declared layout section is considered primary for tie-breaking if a node is somehow claimed by two sections of the same type.
+
 ### New Data Decorators
 
 ```
@@ -66,6 +68,9 @@ Multiple layout sections can coexist in one spec. A GTM diagram can combine `## 
 {owner:@alice}           → avatar circle + name pinned to top-right
 {milestone}              → diamond shape shorthand on timeline axis
 {dep:nodeId}             → auto-generates dashed dependency edge, no Flow entry needed
+                           (resolved as a post-pass after the full id_map and label_map
+                           are populated; the nodeId must match an explicit [id] in id_map
+                           or a slugified label in label_map)
 ```
 
 ### New Shape Tags
@@ -91,6 +96,8 @@ Multiple layout sections can coexist in one spec. A GTM diagram can combine `## 
 {risk}                   → warning triangle badge
 {opportunity}            → star badge overlay
 ```
+
+Note: The GTM example also uses `{star}` and `{hexagon}` — these are existing `NodeKind` shape values already supported by the parser and renderer. No new implementation needed for those.
 
 ### Template Bundles (Config key)
 
@@ -169,7 +176,7 @@ New layout functions added to `layout.rs`, all assign `Node.position` before ren
 - Cross-lane edges render as curved arcs
 
 ### `orgtree_layout()`
-- Forces Reingold-Tilford top-down tree layout
+- Forces top-down tree layout using a simplified Reingold-Tilford-style algorithm: topological sort via `petgraph` crate (not currently in `Cargo.toml` — add `petgraph = "0.6"` as a dependency in Phase 2), then assign x by centering each parent over its children, y by depth level. This avoids subtree overlap without needing a full RT implementation.
 - Ignores `flow =` config, always TB
 - Nodes with `{shape:person}` get avatar styling
 - `{metric:}` badge shows headcount / capacity
@@ -233,12 +240,14 @@ templates/
   org/
     org-chart.spec
     team-topology.spec
+    raci-matrix.spec
   ops/
     incident-map.spec
     runbook.spec
+    on-call-tree.spec
 ```
 
-Templates bundled via `include_str!()` at compile time — zero file I/O at runtime. Each template is valid HRF with placeholder content, fully editable after loading.
+Templates bundled via `include_str!()` at compile time — zero file I/O at runtime. The `templates/` directory lives under `src/` (e.g., `src/templates/strategy/roadmap.spec`) so `include_str!()` macro paths are relative to the source file that declares them, not the binary location. Each template is valid HRF with placeholder content, fully editable after loading.
 
 ### LLM Fast-Path
 
@@ -254,7 +263,7 @@ Each template card includes a plain-English input field:
 └────────────────────────────────────────────────┘
 ```
 
-User types plain English → LLM generates valid HRF using template vocabulary → canvas loads. Reuses existing `llm.rs` pipeline with template-specific system prompt injection. Zero-friction entry for PM, Businessman, AI Agent.
+User types plain English → LLM generates valid HRF using template vocabulary → canvas loads. Reuses existing `llm.rs` pipeline with template-specific system prompt injection. Zero-friction entry for PM, Businessman, AI Agent. The CLI `generate` subcommand follows the same pattern — requires `ANTHROPIC_API_KEY` (or equivalent) in the environment; exits with a clear error message if not set, enabling graceful failure in unattended CI environments.
 
 ---
 
@@ -284,9 +293,19 @@ light-figma validate arch.spec
 light-figma schema --template roadmap
 ```
 
+**Headless rendering approach:** The `render` subcommand must produce SVG without launching an eframe window. The existing `src/export.rs` SVG export operates on a `FlowchartApp` inside a live eframe loop. For headless use, Phase 5 adds a standalone render path: parse HRF → run layout engine → call SVG export directly on the resulting `FlowchartDocument`, bypassing eframe entirely. The SVG export logic in `export.rs` is already document-driven; it does not require a running event loop. eframe is not initialized in CLI mode. The `main.rs` entry point checks for CLI subcommands before calling `eframe::run_native()`.
+
+**`watch` subcommand:** Uses the `notify` crate (add to `Cargo.toml`) for cross-platform filesystem event polling. On file change, re-runs the same parse → layout → SVG export pipeline as `render`.
+
 ### Embed API
 
-REST endpoint for embedding use case:
+The Embed API is exposed via a `light-figma serve` subcommand that starts a local HTTP server using the `tiny_http` crate (lightweight, no async runtime needed):
+
+```
+light-figma serve --port 8080
+```
+
+REST endpoint:
 ```
 POST /render
 Content-Type: text/plain
@@ -295,7 +314,7 @@ Body: <HRF spec text>
 Response: image/svg+xml
 ```
 
-Enables Notion/Confluence embeds, CI/CD PR comment rendering, documentation pipelines.
+The server uses the same headless render path as the `render` subcommand — no eframe, no GUI. Enables Notion/Confluence embeds, CI/CD PR comment rendering, documentation pipelines.
 
 ### CI/CD Use Case
 
@@ -337,11 +356,15 @@ On every PR:
 - `Cmd+N` shortcut
 
 ### Phase 5 — CLI / Headless (main.rs)
+- Standalone headless render path in `export.rs` (parse → layout → SVG, no eframe)
 - `render` subcommand
 - `generate` subcommand
 - `diff` subcommand
 - `validate` subcommand
 - `schema` subcommand
+- `serve` subcommand (local HTTP server via `tiny_http` crate)
+- `watch` subcommand (filesystem events via `notify` crate)
+- New dependencies: `tiny_http`, `notify` (add to `Cargo.toml`)
 
 ---
 
