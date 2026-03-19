@@ -755,6 +755,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                             doc.timeline_lanes.push(label.clone());
                         }
                         current_swimlane = Some(label.clone());
+                        doc.layout_mode = LayoutMode::Swimlane;
                         Section::Nodes { default_z: 0.0 }
                     // "## OrgTree" — sets layout mode to OrgTree.
                     } else if header == "orgtree" || header == "org-tree" || header == "org tree"

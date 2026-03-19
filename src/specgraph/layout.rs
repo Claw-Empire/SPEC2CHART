@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use crate::model::{FlowchartDocument, NodeId};
+use crate::model::{FlowchartDocument, LayoutMode, NodeId};
 
 /// Timeline grid layout.
 ///
@@ -9,7 +9,6 @@ use crate::model::{FlowchartDocument, NodeId};
 pub fn timeline_layout(doc: &mut FlowchartDocument) {
     const CELL_PAD: f32 = 16.0;   // padding inside each cell
     const HEADER_H: f32 = 36.0;   // period header height (LR mode)
-    const HEADER_W: f32 = 120.0;  // lane label width (LR mode)
     const CELL_GAP: f32 = 12.0;   // gap between nodes in same cell
     const ORIGIN_X: f32 = 140.0;  // canvas left margin (LR: reserves lane label column)
     const ORIGIN_Y: f32 = 60.0;   // canvas top margin (LR: reserves period header row)
@@ -128,6 +127,11 @@ pub fn timeline_layout(doc: &mut FlowchartDocument) {
     }
 }
 
+/// Bucket key for nodes that have no `timeline_lane` assignment.
+/// Using a double-underscore-wrapped key prevents accidental collision with
+/// user-defined lane names and avoids the sentinel being rendered as a label.
+const UNLANED_KEY: &str = "__unlaned__";
+
 /// Swimlane layout — positions nodes in horizontal rows, one row per lane.
 ///
 /// Nodes belonging to the same `timeline_lane` are grouped on the same Y band.
@@ -168,7 +172,7 @@ pub fn swimlane_layout(doc: &mut FlowchartDocument) {
         ordered_lanes.push((name, indices));
     }
     if !unlaned.is_empty() {
-        ordered_lanes.push(("(unlaned)".to_string(), unlaned));
+        ordered_lanes.push((UNLANED_KEY.to_string(), unlaned));
     }
 
     // Pre-compute band heights (separate read pass to avoid borrow conflict).
@@ -200,14 +204,26 @@ pub fn swimlane_layout(doc: &mut FlowchartDocument) {
 /// Dispatch helper — calls the appropriate layout function based on doc state.
 ///
 /// Priority:
-/// 1. `timeline_mode = true`  → timeline_layout (period × lane grid)
-/// 2. non-empty `timeline_lanes` without periods → swimlane_layout (lane rows only)
+/// 1. `layout_mode` field (set by parser) — OrgTree, Kanban, Swimlane each route directly.
+/// 2. `timeline_mode = true` or non-empty periods → timeline_layout (period × lane grid)
 /// 3. otherwise → hierarchical_layout
 pub fn auto_layout(doc: &mut FlowchartDocument) {
-    if doc.timeline_mode {
-        timeline_layout(doc);
-    } else if !doc.timeline_lanes.is_empty() && doc.timeline_periods.is_empty() {
+    if doc.layout_mode == LayoutMode::OrgTree {
+        // Dedicated org-tree layout implemented in Task 2.2; fall back to hierarchical for now.
+        hierarchical_layout(doc);
+        return;
+    }
+    if doc.layout_mode == LayoutMode::Kanban {
+        // Dedicated kanban layout implemented in Task 2.3; fall back to hierarchical for now.
+        hierarchical_layout(doc);
+        return;
+    }
+    if doc.layout_mode == LayoutMode::Swimlane {
         swimlane_layout(doc);
+        return;
+    }
+    if doc.timeline_mode || !doc.timeline_lanes.is_empty() {
+        timeline_layout(doc);
     } else {
         hierarchical_layout(doc);
     }
