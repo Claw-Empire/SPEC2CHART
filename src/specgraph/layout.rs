@@ -128,10 +128,86 @@ pub fn timeline_layout(doc: &mut FlowchartDocument) {
     }
 }
 
-/// Dispatch helper — calls timeline_layout or hierarchical_layout based on doc.timeline_mode.
+/// Swimlane layout — positions nodes in horizontal rows, one row per lane.
+///
+/// Nodes belonging to the same `timeline_lane` are grouped on the same Y band.
+/// Lane order follows `doc.timeline_lanes`; nodes not assigned to a lane are
+/// placed below all named lanes. Within each lane nodes are stacked left-to-right.
+pub fn swimlane_layout(doc: &mut FlowchartDocument) {
+    const LANE_PAD: f32 = 16.0;   // padding inside each lane band
+    const NODE_GAP: f32 = 20.0;   // horizontal gap between nodes in same lane
+    const LANE_GAP: f32 = 32.0;   // vertical gap between lane bands
+    const ORIGIN_X: f32 = 160.0;  // left margin (reserves space for lane label)
+    const ORIGIN_Y: f32 = 60.0;   // top margin
+    const MIN_LANE_H: f32 = 80.0; // minimum height of a lane band
+
+    let lanes = doc.timeline_lanes.clone();
+
+    // Group node indices by lane name, preserving doc order within each lane.
+    // Unlaned nodes go to a catch-all bucket at the end.
+    let mut lane_map: std::collections::HashMap<String, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut unlaned: Vec<usize> = Vec::new();
+
+    for (ni, node) in doc.nodes.iter().enumerate() {
+        match &node.timeline_lane {
+            Some(l) => lane_map.entry(l.clone()).or_default().push(ni),
+            None    => unlaned.push(ni),
+        }
+    }
+
+    // Walk lanes in declared order, then unlaned at the bottom.
+    let mut ordered_lanes: Vec<(String, Vec<usize>)> = lanes
+        .iter()
+        .filter_map(|name| {
+            lane_map.remove(name.as_str()).map(|v| (name.clone(), v))
+        })
+        .collect();
+    // Any lanes discovered but not in doc.timeline_lanes (shouldn't happen, but be safe).
+    for (name, indices) in lane_map {
+        ordered_lanes.push((name, indices));
+    }
+    if !unlaned.is_empty() {
+        ordered_lanes.push(("(unlaned)".to_string(), unlaned));
+    }
+
+    // Pre-compute band heights (separate read pass to avoid borrow conflict).
+    let band_heights: Vec<f32> = ordered_lanes
+        .iter()
+        .map(|(_, indices)| {
+            let max_h = indices
+                .iter()
+                .map(|&i| doc.nodes[i].size[1])
+                .fold(0.0_f32, f32::max);
+            (max_h + LANE_PAD * 2.0).max(MIN_LANE_H)
+        })
+        .collect();
+
+    // Assign Y positions per band, then X positions within each band.
+    let mut y = ORIGIN_Y;
+    for ((_, indices), &bh) in ordered_lanes.iter().zip(band_heights.iter()) {
+        let mut x = ORIGIN_X;
+        for &ni in indices {
+            let node_h = doc.nodes[ni].size[1];
+            let y_center = y + LANE_PAD + (bh - LANE_PAD * 2.0 - node_h) / 2.0;
+            doc.nodes[ni].position = [x, y_center.max(y + LANE_PAD)];
+            x += doc.nodes[ni].size[0] + NODE_GAP;
+        }
+        y += bh + LANE_GAP;
+    }
+}
+
+/// Dispatch helper — calls the appropriate layout function based on doc state.
+///
+/// Priority:
+/// 1. `timeline_mode = true`  → timeline_layout (period × lane grid)
+/// 2. non-empty `timeline_lanes` without periods → swimlane_layout (lane rows only)
+/// 3. otherwise → hierarchical_layout
 pub fn auto_layout(doc: &mut FlowchartDocument) {
     if doc.timeline_mode {
         timeline_layout(doc);
+    } else if !doc.timeline_lanes.is_empty() && doc.timeline_periods.is_empty() {
+        swimlane_layout(doc);
     } else {
         hierarchical_layout(doc);
     }
@@ -300,5 +376,39 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
             }
             y += max_h + GAP_MAIN;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_swimlane_layout_positions_nodes_in_rows() {
+        use crate::specgraph::hrf::parse_hrf;
+        let spec = "## Swimlane: Awareness\n- [a] Alpha\n\n## Swimlane: Revenue\n- [b] Beta\n";
+        let mut doc = parse_hrf(spec).unwrap();
+        auto_layout(&mut doc);
+        // find nodes by label
+        let alpha = doc.nodes.iter().find(|n| {
+            if let crate::model::NodeKind::Shape { label, .. } = &n.kind {
+                label == "Alpha"
+            } else {
+                false
+            }
+        }).unwrap();
+        let beta = doc.nodes.iter().find(|n| {
+            if let crate::model::NodeKind::Shape { label, .. } = &n.kind {
+                label == "Beta"
+            } else {
+                false
+            }
+        }).unwrap();
+        assert!(
+            (alpha.position[1] - beta.position[1]).abs() > 50.0,
+            "lanes should have different Y positions: alpha_y={}, beta_y={}",
+            alpha.position[1],
+            beta.position[1]
+        );
     }
 }
