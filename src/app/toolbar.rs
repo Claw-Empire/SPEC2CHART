@@ -108,6 +108,20 @@ impl FlowchartApp {
                 ui.add_space(8.0);
                 self.draw_section_header(ui, "File");
                 ui.add_space(4.0);
+
+                // New Diagram from template gallery (Cmd+N)
+                if ui
+                    .add_sized(
+                        egui::vec2(f32::INFINITY, 30.0),
+                        egui::Button::new(egui::RichText::new("⊞ New Diagram").size(12.0)),
+                    )
+                    .on_hover_text("New diagram from template (Cmd+N)")
+                    .clicked()
+                {
+                    self.show_template_gallery = true;
+                }
+                ui.add_space(4.0);
+
                 ui.horizontal(|ui| {
                     let btn_size = egui::vec2(84.0, 32.0);
                     if ui

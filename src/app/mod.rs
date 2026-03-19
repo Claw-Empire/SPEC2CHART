@@ -9,6 +9,7 @@ mod statusbar;
 mod command_palette;
 mod context_menu;
 mod overlays;
+mod template_gallery;
 pub(crate) mod export_mermaid;
 pub(crate) mod camera;
 pub(crate) mod interaction;
@@ -265,6 +266,8 @@ pub struct FlowchartApp {
     pub(crate) bulk_due_buf: String,
     /// Floating action bar quick-fill color picker open
     pub(crate) fab_color_picker_open: bool,
+    /// Template gallery overlay open (Cmd+N)
+    pub(crate) show_template_gallery: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,6 +389,7 @@ impl FlowchartApp {
             bulk_assign_buf: String::new(),
             bulk_due_buf: String::new(),
             fab_color_picker_open: false,
+            show_template_gallery: false,
         }
     }
 
@@ -535,6 +539,31 @@ impl eframe::App for FlowchartApp {
         self.draw_status_bar(ctx);
         self.draw_command_palette(ctx);
         self.draw_goto_overlay(ctx);
+
+        // Template gallery: loads and parses the selected template
+        if let Some(content) = self.draw_template_gallery(ctx) {
+            if !content.is_empty() {
+                match crate::specgraph::hrf::parse_hrf(&content) {
+                    Ok(mut doc) => {
+                        crate::specgraph::layout::auto_layout(&mut doc);
+                        self.document = doc;
+                        self.selection.clear();
+                        self.history.push(&self.document);
+                        self.pending_fit = true;
+                        self.status_message = Some(("Template loaded".to_string(), std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some((format!("Template error: {}", e), std::time::Instant::now()));
+                    }
+                }
+            } else {
+                // Empty canvas
+                self.document = crate::model::FlowchartDocument::default();
+                self.selection.clear();
+                self.history.push(&self.document);
+                self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
+            }
+        }
 
         self.draw_zoom_indicator(ctx);
 

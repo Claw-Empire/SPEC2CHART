@@ -698,6 +698,11 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+N = open template gallery
+        if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.matches_exact(cmd)) {
+            self.show_template_gallery = !self.show_template_gallery;
+        }
+
         // Cmd+E = live spec editor panel (populate with current HRF on open)
         if ctx.input(|i| i.key_pressed(Key::E) && i.modifiers.matches_exact(cmd)) {
             self.show_spec_editor = !self.show_spec_editor;
