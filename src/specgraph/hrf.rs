@@ -460,6 +460,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Created when "- [id] Label → target1, target2" is found in ## Nodes sections.
     let mut deferred_inline_edges: Vec<(String, String, Vec<String>)> = Vec::new();
 
+    // {dep:target} decorators: (from_node_id, target_str_id)
+    // Resolved in a post-pass after all nodes are parsed.
+    let mut node_deps: Vec<(NodeId, String)> = Vec::new();
+
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
         // Strip inline `//` comments: only strip when `//` appears OUTSIDE of {} tags
@@ -759,12 +763,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     let stripped = &trimmed[2..];
                     // Split on → or -> (outside braces) for inline edges
                     let (node_part, inline_targets) = split_inline_edges(stripped);
-                    let (id, mut node) = parse_node_line(node_part, line_num)?;
+                    let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
                     // Apply section default z if node doesn't have an explicit {z:N} tag
                     if node.z_offset == 0.0 && default_z != 0.0 {
                         node.z_offset = default_z;
                     }
                     last_node_id = Some(node.id);
+                    for dep in deps { node_deps.push((node.id, dep)); }
                     id_map.insert(id.clone(), node.id);
                     label_map.insert(slugify(node.display_label(), 0), node.id);
                     // Detect {group:name} tag for inline group assignment
@@ -999,12 +1004,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 if trimmed.starts_with("- ") {
                     let stripped = &trimmed[2..];
                     let (node_part, inline_targets) = split_inline_edges(stripped);
-                    let (id, mut node) = parse_node_line(node_part, line_num)?;
+                    let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
                     if node.z_offset == 0.0 && default_z != 0.0 {
                         node.z_offset = default_z;
                     }
                     last_node_id = Some(node.id);
                     let nid = node.id;
+                    for dep in deps { node_deps.push((nid, dep)); }
                     id_map.insert(id.clone(), nid);
                     label_map.insert(slugify(node.display_label(), 0), nid);
                     for (target_id, edge_tags) in inline_targets {
@@ -1021,7 +1027,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 if trimmed.starts_with("- ") {
                     let stripped = &trimmed[2..];
                     let (node_part, inline_targets) = split_inline_edges(stripped);
-                    let (id, mut node) = parse_node_line(node_part, line_num)?;
+                    let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
                     node.timeline_period = current_period.clone();
                     if let Some(ref lane) = node.timeline_lane.clone() {
                         if !doc.timeline_lanes.contains(lane) {
@@ -1029,6 +1035,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         }
                     }
                     last_node_id = Some(node.id);
+                    for dep in deps { node_deps.push((node.id, dep)); }
                     id_map.insert(id.clone(), node.id);
                     label_map.insert(slugify(node.display_label(), 0), node.id);
                     for (target_id, edge_tags) in inline_targets {
@@ -1447,6 +1454,27 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         if distinct_z.len() >= 2 {
             doc.import_hints.view_3d = Some(true);
             doc.import_hints.auto_fit = true;
+        }
+    }
+
+    // Resolve {dep:target} decorators into dashed dependency edges.
+    // id_map and label_map are fully populated by this point.
+    for (from_id, dep_target) in node_deps {
+        let target_node_id = id_map.get(dep_target.as_str())
+            .or_else(|| {
+                let slug = slugify(&dep_target, 0);
+                label_map.get(&slug)
+            })
+            .copied();
+        if let Some(to_id) = target_node_id {
+            let edge = Edge::new(
+                Port { node_id: from_id, side: PortSide::Bottom },
+                Port { node_id: to_id, side: PortSide::Top },
+            );
+            // Dep edges are dashed by convention: visually distinct from data-flow edges
+            let mut edge = edge;
+            edge.style.dashed = true;
+            doc.edges.push(edge);
         }
     }
 
@@ -2352,7 +2380,7 @@ fn parse_flow_line_chain(
 }
 
 /// Parse: `[id] Label text {shape} {z:50}`
-fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String> {
+fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<String>), String> {
     let id_start = line.find('[').ok_or_else(|| {
         format!("Line {}: expected [id] in node definition", line_num + 1)
     })?;
@@ -2407,6 +2435,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     let mut section_override: Option<String> = None;
     let mut created_date_tag: Option<String> = None;
     let mut priority_tag: u8 = 0;
+    let mut metric_value: Option<String> = None;
+    let mut owner_value: Option<String> = None;
+    let mut dep_targets: Vec<String> = Vec::new();
     for tag in &tags {
         if tag.starts_with("z:") {
             if let Ok(z) = tag[2..].trim().parse::<f32>() {
@@ -2691,11 +2722,13 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             }
         } else if tag.starts_with("assigned:") || tag.starts_with("owner:") || tag.starts_with("assignee:") {
             // {assigned:Alice} / {owner:Bob} → sublabel "👤 name" (compose with existing due date)
+            // Also stored in node.owner for programmatic access
             let prefix = if tag.starts_with("assigned:") { 9 }
                 else if tag.starts_with("owner:") { 6 }
                 else { 9 }; // assignee:
             let name = tag[prefix..].trim();
             if !name.is_empty() {
+                owner_value = Some(name.to_string());
                 let person_part = format!("👤 {name}");
                 sublabel_text = Some(match &sublabel_text {
                     Some(existing) if existing.starts_with("📅") => format!("{}\n{}", person_part, existing),
@@ -2759,6 +2792,14 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
             if fill_color.is_none() {
                 fill_color = Some(preset_color);
             }
+        } else if let Some(val) = tag.strip_prefix("metric:") {
+            // {metric:$2.4M ARR} — business metric badge shown on the node
+            metric_value = Some(val.to_string());
+        } else if let Some(val) = tag.strip_prefix("dep:") {
+            // {dep:target} — declares a dependency edge from this node to target
+            // Targets can be hrf_ids or natural-language labels; resolved in a post-pass
+            let dep = val.trim().to_string();
+            if !dep.is_empty() { dep_targets.push(dep); }
         } else if is_emoji_only(tag) {
             // {🔒} / {⚡} / {🗄️} — bare emoji shorthand: treated as {icon:emoji}
             if icon.is_none() {
@@ -2889,8 +2930,14 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node), String
     if !id.is_empty() {
         node.hrf_id = id.clone();
     }
+    if let Some(mv) = metric_value {
+        node.metric = Some(mv);
+    }
+    if let Some(ov) = owner_value {
+        node.owner = Some(ov);
+    }
 
-    Ok((id, node))
+    Ok((id, node, dep_targets))
 }
 
 /// Extract `{tag}` blocks from a string, returning the cleaned label and list of tags.
@@ -2973,7 +3020,8 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                             | "note" | "annotation" | "comment"
                             | "section" | "stage" | "col" | "column" | "board"
                             | "assigned" | "owner" | "assignee"
-                            | "created" | "opened" | "started" | "due" | "deadline" | "by" => {
+                            | "created" | "opened" | "started" | "due" | "deadline" | "by"
+                            | "metric" | "dep" => {
                                 format!("{}:{}", key, val)
                             }
                             // Preserve fill/color values that start with '#' (hex colors)
@@ -5014,5 +5062,30 @@ e1 --> h1: supports
 
         let t3 = doc.nodes.iter().find(|n| n.display_label() == "Crash on login").expect("t3");
         assert_eq!(t3.section_name, "In Progress", "stage: tag should set section_name");
+    }
+
+    #[test]
+    fn test_metric_decorator() {
+        let spec = "## Nodes\n- [a] Alpha {metric:$2.4M ARR}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.nodes[0].metric, Some("$2.4M ARR".to_string()));
+    }
+
+    #[test]
+    fn test_owner_decorator() {
+        let spec = "## Nodes\n- [a] Alpha {owner:@alice}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.nodes[0].owner, Some("@alice".to_string()));
+    }
+
+    #[test]
+    fn test_dep_generates_edge() {
+        let spec = "## Nodes\n- [a] Alpha\n- [b] Beta {dep:a}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.edges.len(), 1);
+        // edge goes FROM b TO a (dep means "depends on")
+        let edge = &doc.edges[0];
+        assert_eq!(doc.nodes.iter().find(|n| n.id == edge.source.node_id).unwrap().hrf_id, "b");
+        assert_eq!(doc.nodes.iter().find(|n| n.id == edge.target.node_id).unwrap().hrf_id, "a");
     }
 }
