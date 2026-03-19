@@ -2786,6 +2786,26 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             italic = true;
         } else if tag == "dashed-border" || tag == "dashed_border" || tag == "border-dashed" {
             dashed_border = true;
+        } else if tag == "milestone" {
+            // {milestone} — marks a key milestone; renders as a Diamond shape
+            shape = NodeShape::Diamond;
+        } else if tag == "revenue" {
+            // {revenue} — green fill to highlight revenue-generating nodes
+            if fill_color.is_none() { fill_color = Some([166, 227, 161, 255]); } // green
+        } else if tag == "cost" {
+            // {cost} — red fill to highlight cost / spend nodes
+            if fill_color.is_none() { fill_color = Some([243, 139, 168, 255]); } // red
+        } else if tag == "growth" {
+            // {growth} — yellow fill + upward arrow sublabel for growth metrics
+            if fill_color.is_none() { fill_color = Some([249, 226, 175, 255]); } // yellow
+            if sublabel_text.is_none() { sublabel_text = Some("↑".to_string()); }
+        } else if tag == "opportunity" {
+            // {opportunity} — blue fill + star sublabel for market / product opportunities
+            if fill_color.is_none() { fill_color = Some([137, 180, 250, 255]); } // blue
+            if sublabel_text.is_none() { sublabel_text = Some("★".to_string()); }
+        } else if tag == "risk" {
+            // {risk} — Warning node tag to surface risk items in the status bar
+            if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
         } else if let Some((preset_shape, preset_color)) = tag_to_preset(tag) {
             // Semantic preset: sets shape AND fill color at once
             shape = preset_shape;
@@ -3263,6 +3283,20 @@ fn tag_to_shape(tag: &str) -> NodeShape {
         "triangle" | "pyramid" | "hierarchy" | "peak" | "apex" => NodeShape::Triangle,
         // Callout / speech bubble
         "callout" | "speech" | "speech-bubble" | "balloon" => NodeShape::Callout,
+        // Person / actor — human silhouette for user-facing diagrams
+        "person" | "user" | "actor" | "human" | "stick-figure" => NodeShape::Person,
+        // Screen / UI — rounded rect with top chrome bar for mockups
+        "screen" | "ui" | "mockup" | "wireframe" | "page" | "view" => NodeShape::Screen,
+        // Cylinder / database drum
+        "cylinder" | "db" | "database" | "storage" | "drum" => NodeShape::Cylinder,
+        // Cloud — blob outline for SaaS / cloud infrastructure
+        "cloud" | "saas" | "aws" | "gcp" | "azure" | "infra" => NodeShape::Cloud,
+        // Document — rectangle with folded corner
+        "document" | "doc" | "file" | "report" | "spec" => NodeShape::Document,
+        // Channel / funnel — pipeline or funnel shapes
+        "channel" | "funnel" | "pipeline" | "flow-channel" => NodeShape::Channel,
+        // Segment / group — person-group shape for cohorts or teams
+        "segment" | "group" | "audience" | "cohort" | "team" => NodeShape::Segment,
         // Default
         _ => NodeShape::RoundedRect,
     }
@@ -5087,5 +5121,37 @@ e1 --> h1: supports
         let edge = &doc.edges[0];
         assert_eq!(doc.nodes.iter().find(|n| n.id == edge.source.node_id).unwrap().hrf_id, "b");
         assert_eq!(doc.nodes.iter().find(|n| n.id == edge.target.node_id).unwrap().hrf_id, "a");
+    }
+
+    #[test]
+    fn test_shape_person() {
+        let spec = "## Nodes\n- [alice] Alice {shape:person}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Person);
+    }
+
+    #[test]
+    fn test_shape_screen() {
+        let spec = "## Nodes\n- [ls] Login Screen {shape:screen}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Screen);
+    }
+
+    #[test]
+    fn test_business_tag_revenue() {
+        let spec = "## Nodes\n- [pp] Pro Plan {revenue}\n";
+        let doc = parse_hrf(spec).unwrap();
+        // {revenue} applies green fill preset — green channel (index 1) should be high
+        assert!(doc.nodes[0].style.fill_color[1] > 150, "revenue should set green fill");
+    }
+
+    #[test]
+    fn test_milestone_tag() {
+        let spec = "## Nodes\n- [launch] Launch {milestone}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Diamond);
     }
 }
