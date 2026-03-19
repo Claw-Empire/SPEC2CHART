@@ -2806,6 +2806,30 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag == "risk" {
             // {risk} — Warning node tag to surface risk items in the status bar
             if node_tag.is_none() { node_tag = Some(NodeTag::Warning); }
+        } else if matches!(tag.as_str(), "cloud" | "saas" | "aws" | "gcp" | "azure") {
+            // Bare cloud/SaaS shape aliases — must come before tag_to_preset to avoid
+            // the old Hexagon mapping overriding the new NodeShape::Cloud
+            shape = NodeShape::Cloud;
+        } else if matches!(tag.as_str(), "person" | "user" | "actor" | "human" | "stick-figure") {
+            // Bare person/actor shape aliases — must come before tag_to_preset to avoid
+            // the old Circle mapping overriding the new NodeShape::Person
+            shape = NodeShape::Person;
+        } else if matches!(tag.as_str(), "cylinder" | "db" | "database" | "storage" | "drum") {
+            // Bare cylinder/database shape aliases — must come before tag_to_preset to avoid
+            // the old Circle mapping overriding the new NodeShape::Cylinder
+            shape = NodeShape::Cylinder;
+        } else if matches!(tag.as_str(), "screen" | "ui" | "mockup" | "wireframe" | "page" | "view") {
+            // Bare screen/UI shape aliases
+            shape = NodeShape::Screen;
+        } else if matches!(tag.as_str(), "document" | "doc" | "file" | "report") {
+            // Bare document shape aliases (exclude "spec" which is a section keyword)
+            shape = NodeShape::Document;
+        } else if matches!(tag.as_str(), "channel" | "funnel" | "flow-channel") {
+            // Bare channel/funnel shape aliases
+            shape = NodeShape::Channel;
+        } else if matches!(tag.as_str(), "segment" | "group" | "audience" | "cohort" | "team") {
+            // Bare segment/group shape aliases
+            shape = NodeShape::Segment;
         } else if let Some((preset_shape, preset_color)) = tag_to_preset(tag) {
             // Semantic preset: sets shape AND fill color at once
             shape = preset_shape;
@@ -3320,11 +3344,9 @@ fn tag_to_preset(tag: &str) -> Option<(NodeShape, [u8; 4])> {
     match tag {
         // Infrastructure
         "server"    => Some((NodeShape::Rectangle,   [243, 139, 168, 255])), // red
-        "database"  | "db" | "storage"
-                    => Some((NodeShape::Circle,      [137, 180, 250, 255])), // blue
-        "cloud"     => Some((NodeShape::Hexagon,     [148, 226, 213, 255])), // teal
-        "user"      | "actor" | "person"
-                    => Some((NodeShape::Circle,      [203, 166, 247, 255])), // purple
+        // NOTE: "database"/"db"/"storage", "cloud", and "user"/"actor"/"person" are now
+        // handled by the explicit bare-tag shape aliases in the dispatch chain above
+        // (before tag_to_preset is called), so they are intentionally absent here.
         "service"   | "microservice"
                     => Some((NodeShape::RoundedRect, [166, 227, 161, 255])), // green
         "queue"     | "mq" | "broker"
@@ -5153,5 +5175,41 @@ e1 --> h1: supports
         let doc = parse_hrf(spec).unwrap();
         let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
         assert_eq!(*shape, crate::model::NodeShape::Diamond);
+    }
+
+    #[test]
+    fn test_bare_cloud_tag_uses_cloud_shape() {
+        // Bare {cloud} must use NodeShape::Cloud, not the old Hexagon preset
+        let spec = "## Nodes\n- [aws] AWS Infra {cloud}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Cloud);
+    }
+
+    #[test]
+    fn test_bare_person_tag_uses_person_shape() {
+        // Bare {person} must use NodeShape::Person, not the old Circle preset
+        let spec = "## Nodes\n- [alice] Alice {person}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Person);
+    }
+
+    #[test]
+    fn test_bare_db_tag_uses_cylinder_shape() {
+        // Bare {db} must use NodeShape::Cylinder, not the old Circle preset
+        let spec = "## Nodes\n- [pg] Postgres {db}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Cylinder);
+    }
+
+    #[test]
+    fn test_bare_user_tag_uses_person_shape() {
+        // Bare {user} alias must also map to NodeShape::Person
+        let spec = "## Nodes\n- [eu] End User {user}\n";
+        let doc = parse_hrf(spec).unwrap();
+        let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
+        assert_eq!(*shape, crate::model::NodeShape::Person);
     }
 }
