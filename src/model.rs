@@ -35,6 +35,24 @@ pub enum NodeShape {
     /// Speech bubble callout — rounded rect with a small triangular tail at the bottom-left.
     /// Used for user quotes, observations, and verbatim remarks in empathy maps.
     Callout,
+    // New shapes for multi-role diagrams
+    Person,     // circle head + body silhouette
+    Screen,     // rounded rect + top chrome bar
+    Cylinder,   // database drum with top ellipse
+    Cloud,      // cloud blob outline
+    Document,   // rectangle with folded corner
+    Channel,    // funnel shape
+    Segment,    // person-group shape
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum LayoutMode {
+    #[default]
+    Hierarchical,
+    Timeline,
+    OrgTree,
+    Kanban,
+    Swimlane,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -353,6 +371,12 @@ pub struct Node {
     /// User-assigned HRF ID (e.g. "t1" from `[t1]`). Preserved on export for stable references.
     #[serde(default)]
     pub hrf_id: String,
+    /// Optional metric value badge (e.g. "$1.2M", "99.9%"). Set via `{metric:...}` HRF tag.
+    #[serde(default)]
+    pub metric: Option<String>,
+    /// Optional owner/assignee identifier. Set via `{owner:...}` HRF tag.
+    #[serde(default)]
+    pub owner: Option<String>,
 }
 
 impl Node {
@@ -363,6 +387,13 @@ impl Node {
             NodeShape::Diamond => [120.0, 100.0],
             NodeShape::Connector => [110.0, 34.0],
             NodeShape::Callout => [160.0, 70.0],
+            NodeShape::Person    => [70.0,  90.0],
+            NodeShape::Screen    => [140.0, 100.0],
+            NodeShape::Cylinder  => [100.0, 80.0],
+            NodeShape::Cloud     => [140.0, 80.0],
+            NodeShape::Document  => [130.0, 90.0],
+            NodeShape::Channel   => [90.0,  80.0],
+            NodeShape::Segment   => [110.0, 80.0],
             _ => [140.0, 60.0],
         };
         Self {
@@ -374,7 +405,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
             style: NodeStyle::default(),
         }
     }
@@ -388,7 +419,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -409,7 +440,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -429,7 +460,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -456,7 +487,7 @@ impl Node {
             is_frame: true,
             locked: false,
             comment: String::new(),
-            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(),
+            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
             pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: [89, 91, 118, 0],  // transparent — frame_color is used
@@ -784,6 +815,12 @@ pub struct FlowchartDocument {
     /// Defaults to [1, 3, 7, 14]. Used to compute due dates for new intake tickets.
     #[serde(default = "default_sla_days")]
     pub sla_days: [u32; 4],
+    /// Layout mode for this document (hierarchical, timeline, org-tree, kanban, swimlane).
+    #[serde(default)]
+    pub layout_mode: LayoutMode,
+    /// Column labels for Kanban layout mode.
+    #[serde(default)]
+    pub kanban_columns: Vec<String>,
 }
 
 fn default_sla_days() -> [u32; 4] {

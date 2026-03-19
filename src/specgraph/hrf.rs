@@ -3333,6 +3333,13 @@ fn export_node_to_hrf(node: &Node, id: &str, z_tag: &str, out: &mut String) {
                     NodeShape::Connector => " {connector}",
                     NodeShape::Triangle => " {triangle}",
                     NodeShape::Callout => " {callout}",
+                    NodeShape::Person => " {person}",
+                    NodeShape::Screen => " {screen}",
+                    NodeShape::Cylinder => " {cylinder}",
+                    NodeShape::Cloud => " {cloud}",
+                    NodeShape::Document => " {document}",
+                    NodeShape::Channel => " {channel}",
+                    NodeShape::Segment => " {segment}",
                 }
             };
             // Prefer {p1}/{p2}/{p3}/{p4} over generic tag names when priority is set

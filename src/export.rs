@@ -531,6 +531,13 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                             tail_pts, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
                         ));
                     }
+                    // New shapes — fall back to rounded rect until dedicated SVG renderers are added (Task 3.4)
+                    _ => {
+                        svg.push_str(&format!(
+                            r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="10" ry="10" fill="{}" fill-opacity="{:.2}" stroke="{}" stroke-opacity="{:.2}" stroke-width="{:.1}"/>"#,
+                            nx, ny, nw, nh, fill, fill_opacity, stroke, stroke_opacity, stroke_width,
+                        ));
+                    }
                 }
                 svg.push('\n');
 
@@ -927,6 +934,13 @@ fn draw_pdf_node(
                 // Draw body as a rectangle (PDF export approximation)
                 let rect = printpdf::Rect::new(
                     Mm(nx), Mm(bottom_y + nh * 0.25), Mm(nx + nw), Mm(top_y)
+                ).with_mode(PaintMode::FillStroke);
+                layer.add_rect(rect);
+            }
+            // New shapes — fall back to rounded rectangle for PDF until Task 3.4
+            _ => {
+                let rect = printpdf::Rect::new(
+                    Mm(nx), Mm(bottom_y), Mm(nx + nw), Mm(top_y)
                 ).with_mode(PaintMode::FillStroke);
                 layer.add_rect(rect);
             }

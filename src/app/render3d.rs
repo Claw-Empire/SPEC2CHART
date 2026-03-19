@@ -1826,6 +1826,12 @@ impl FlowchartApp {
                     Self::draw_depth_faces(painter, screen_rect, extrude, shade_color(fill, 0.8), 0.5, shade_color(fill, 0.55));
                     painter.rect(screen_rect, CornerRadius::same(8), fill, stroke, egui::StrokeKind::Middle);
                 }
+                // New shapes — fall back to rounded rect until dedicated 3D renderers are added (Task 3.1)
+                _ => {
+                    Self::draw_depth_faces(painter, screen_rect, extrude, fill, border_width, border_color);
+                    painter.rect_filled(screen_rect, CornerRadius::same(8), fill);
+                    painter.rect_stroke(screen_rect, CornerRadius::same(8), stroke, StrokeKind::Outside);
+                }
             },
             NodeKind::StickyNote { .. } => {
                 // --- 3D STICKY NOTE ---

@@ -1123,6 +1123,20 @@ impl FlowchartApp {
                 ];
                 painter.add(egui::Shape::convex_polygon(tail_pts, fill, stroke));
             }
+            // New shapes — fall back to rounded rect until dedicated renderers are added (Task 3.1)
+            _ => {
+                let r = (10.0 * self.viewport.zoom).max(style.corner_radius * self.viewport.zoom.sqrt()) as u8;
+                if style.gradient {
+                    paint_gradient_rect_angle(painter, screen_rect, fill, darken(fill, 0.35), style.gradient_angle);
+                } else {
+                    painter.rect_filled(screen_rect, CornerRadius::same(r), fill);
+                }
+                if style.border_dashed {
+                    draw_dashed_rect(painter, screen_rect, stroke);
+                } else {
+                    painter.rect_stroke(screen_rect, CornerRadius::same(r), stroke, StrokeKind::Outside);
+                }
+            }
         }
 
         // Semantic watermark icon — drawn behind label text at low opacity

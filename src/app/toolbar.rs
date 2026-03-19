@@ -1379,6 +1379,12 @@ impl FlowchartApp {
                 ];
                 painter.add(egui::Shape::convex_polygon(tail, shape_fill, shape_stroke));
             }
+            _ => {
+                // Fallback preview for new shapes: rounded rect
+                let r = egui::Rect::from_center_size(preview_center, egui::vec2(pw, ph));
+                painter.rect_filled(r, CornerRadius::same(4), shape_fill);
+                painter.rect_stroke(r, CornerRadius::same(4), shape_stroke, StrokeKind::Outside);
+            }
         }
 
         painter.text(

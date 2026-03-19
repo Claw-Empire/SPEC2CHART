@@ -388,6 +388,13 @@ fn shape_to_str(s: &NodeShape) -> &'static str {
         NodeShape::Connector => "connector",
         NodeShape::Triangle => "triangle",
         NodeShape::Callout => "callout",
+        NodeShape::Person => "person",
+        NodeShape::Screen => "screen",
+        NodeShape::Cylinder => "cylinder",
+        NodeShape::Cloud => "cloud",
+        NodeShape::Document => "document",
+        NodeShape::Channel => "channel",
+        NodeShape::Segment => "segment",
     }
 }
 

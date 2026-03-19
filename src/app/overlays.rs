@@ -483,6 +483,8 @@ impl FlowchartApp {
                 created_date: String::new(),
                 priority: 0,
                 hrf_id: String::new(),
+                metric: None,
+                owner: None,
             };
             let id = node.id;
             self.document.nodes.push(node);
