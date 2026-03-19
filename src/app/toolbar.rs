@@ -112,7 +112,7 @@ impl FlowchartApp {
                 // New Diagram from template gallery (Cmd+N)
                 if ui
                     .add_sized(
-                        egui::vec2(f32::INFINITY, 30.0),
+                        egui::vec2(ui.available_width(), 30.0),
                         egui::Button::new(egui::RichText::new("⊞ New Diagram").size(12.0)),
                     )
                     .on_hover_text("New diagram from template (Cmd+N)")
