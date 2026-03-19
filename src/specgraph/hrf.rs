@@ -517,6 +517,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     pending_grid_groups.push((nodes.clone(), *cols));
                 }
             }
+            // Clear lane/column state on every section transition; the ## Swimlane
+            // and ## Kanban arms immediately set them back if needed.
+            current_swimlane = None;
+            current_kanban_col = None;
             // Preserve original case for layer names, lowercase only for matching
             let header_raw = trimmed[3..].trim();
             let header = header_raw.to_lowercase();
@@ -5307,6 +5311,10 @@ e1 --> h1: supports
         let doc = parse_hrf(spec).unwrap();
         assert!(doc.kanban_columns.contains(&"Todo".to_string()));
         assert_eq!(doc.layout_mode, crate::model::LayoutMode::Kanban);
+        // Nodes inside the Kanban section should inherit the column as their lane.
+        let node = doc.nodes.iter().find(|n| n.hrf_id == "ta").unwrap();
+        assert_eq!(node.timeline_lane, Some("Todo".to_string()),
+            "node inside ## Kanban should inherit the column as timeline_lane");
     }
 
     #[test]
@@ -5321,5 +5329,23 @@ e1 --> h1: supports
         let spec = "## Nodes\n- [a] Alpha {lane:Sales}\n";
         let doc = parse_hrf(spec).unwrap();
         assert_eq!(doc.nodes[0].timeline_lane, Some("Sales".to_string()));
+    }
+
+    #[test]
+    fn test_swimlane_does_not_leak_into_next_section() {
+        let input = "## Swimlane: Marketing\n- [a] Campaign A\n\n## Nodes\n- [b] Other Node\n";
+        let doc = parse_hrf(input).unwrap();
+        let node_b = doc.nodes.iter().find(|n| n.hrf_id == "b").unwrap();
+        assert_eq!(node_b.timeline_lane, None,
+            "node in ## Nodes after ## Swimlane should not inherit the previous lane");
+    }
+
+    #[test]
+    fn test_kanban_does_not_leak_into_next_section() {
+        let input = "## Kanban: Todo\n- [a] Card A\n\n## Nodes\n- [b] Regular Node\n";
+        let doc = parse_hrf(input).unwrap();
+        let node_b = doc.nodes.iter().find(|n| n.hrf_id == "b").unwrap();
+        assert_eq!(node_b.timeline_lane, None,
+            "node in ## Nodes after ## Kanban should not inherit the previous kanban column");
     }
 }
