@@ -266,6 +266,44 @@ pub fn orgtree_layout(doc: &mut FlowchartDocument) {
     }
 }
 
+/// Kanban layout — positions cards in vertical columns, one column per `doc.kanban_columns` entry.
+///
+/// Nodes with `timeline_lane == Some(col_name)` are placed in the matching column,
+/// stacked top-to-bottom. Column order follows `doc.kanban_columns`. Nodes with no
+/// lane assignment are placed in a row below all columns.
+pub fn kanban_layout(doc: &mut FlowchartDocument) {
+    let col_width = 200.0f32;
+    let card_height = 80.0f32;
+    let gap_y = 20.0f32;
+    let col_gap = 40.0f32;
+    let padding_top = 60.0f32; // space for column header label
+
+    for (col_idx, col_name) in doc.kanban_columns.clone().iter().enumerate() {
+        let col_x = col_idx as f32 * (col_width + col_gap);
+        let mut row = 0usize;
+        for node in doc.nodes.iter_mut() {
+            if node.timeline_lane.as_deref() == Some(col_name.as_str()) {
+                node.position = [
+                    col_x,
+                    padding_top + row as f32 * (card_height + gap_y),
+                ];
+                node.size = [col_width - 20.0, card_height];
+                row += 1;
+            }
+        }
+    }
+
+    // Nodes without a column: place below all columns
+    let unassigned_y = doc.kanban_columns.len() as f32 * 200.0 + 40.0;
+    let mut unassigned_x = 0.0f32;
+    for node in doc.nodes.iter_mut() {
+        if node.timeline_lane.is_none() {
+            node.position = [unassigned_x, unassigned_y];
+            unassigned_x += col_width + col_gap;
+        }
+    }
+}
+
 /// Dispatch helper — calls the appropriate layout function based on doc state.
 ///
 /// Priority:
@@ -278,8 +316,7 @@ pub fn auto_layout(doc: &mut FlowchartDocument) {
         return;
     }
     if doc.layout_mode == LayoutMode::Kanban {
-        // Dedicated kanban layout implemented in Task 2.3; fall back to hierarchical for now.
-        hierarchical_layout(doc);
+        kanban_layout(doc);
         return;
     }
     if doc.layout_mode == LayoutMode::Swimlane {
@@ -478,6 +515,23 @@ mod tests {
         // CTO and COO are siblings — same depth → same Y
         assert!((cto.position[1] - coo.position[1]).abs() < 5.0,
             "siblings should share Y: cto.y={}, coo.y={}", cto.position[1], coo.position[1]);
+    }
+
+    #[test]
+    fn test_kanban_layout_columns_side_by_side() {
+        use crate::specgraph::hrf::parse_hrf;
+        let spec = "## Kanban: Todo\n- [ta] Task A\n- [tb] Task B\n\n## Kanban: Done\n- [tc] Task C\n";
+        let mut doc = parse_hrf(spec).unwrap();
+        crate::specgraph::layout::auto_layout(&mut doc);
+        let a = doc.nodes.iter().find(|n| n.hrf_id == "ta").unwrap();
+        let b = doc.nodes.iter().find(|n| n.hrf_id == "tb").unwrap();
+        let c = doc.nodes.iter().find(|n| n.hrf_id == "tc").unwrap();
+        // Todo column should be left of Done column
+        assert!(a.position[0] < c.position[0],
+            "Todo column should be left of Done: a.x={}, c.x={}", a.position[0], c.position[0]);
+        // Task A and Task B in same column should stack vertically
+        assert!((a.position[1] - b.position[1]).abs() > 40.0,
+            "cards in same column should stack: a.y={}, b.y={}", a.position[1], b.position[1]);
     }
 
     #[test]
