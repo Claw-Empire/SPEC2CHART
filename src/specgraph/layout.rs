@@ -201,6 +201,68 @@ pub fn swimlane_layout(doc: &mut FlowchartDocument) {
     }
 }
 
+/// Org-tree (top-down tree) layout using BFS depth assignment.
+///
+/// Finds all root nodes (in-degree 0), assigns each node a depth level via BFS,
+/// then positions nodes in rows: depth 0 at top, increasing depth downward.
+/// Within each depth row, nodes are spread evenly and centred.
+pub fn orgtree_layout(doc: &mut FlowchartDocument) {
+    let node_count = doc.nodes.len();
+    if node_count == 0 { return; }
+
+    // Map NodeId -> index in doc.nodes
+    let id_to_idx: HashMap<_, _> = doc.nodes.iter()
+        .enumerate()
+        .map(|(i, n)| (n.id, i))
+        .collect();
+
+    // Compute in-degrees to find roots
+    let mut in_degree = vec![0u32; node_count];
+    for edge in &doc.edges {
+        if let Some(&tgt_i) = id_to_idx.get(&edge.target.node_id) {
+            in_degree[tgt_i] += 1;
+        }
+    }
+
+    // BFS to assign depth level
+    let mut depth = vec![0usize; node_count];
+    let roots: Vec<usize> = (0..node_count).filter(|&i| in_degree[i] == 0).collect();
+    let mut queue = VecDeque::from(roots.clone());
+    let mut visited = vec![false; node_count];
+    for &r in &roots { visited[r] = true; }
+
+    while let Some(i) = queue.pop_front() {
+        let node_id = doc.nodes[i].id;
+        for edge in &doc.edges {
+            if edge.source.node_id == node_id {
+                if let Some(&tgt_i) = id_to_idx.get(&edge.target.node_id) {
+                    if !visited[tgt_i] {
+                        depth[tgt_i] = depth[i] + 1;
+                        visited[tgt_i] = true;
+                        queue.push_back(tgt_i);
+                    }
+                }
+            }
+        }
+    }
+
+    let max_depth = depth.iter().copied().max().unwrap_or(0);
+    let gap_y = doc.layout_gap_main.max(120.0);
+    let gap_x = doc.layout_gap_cross.max(160.0);
+
+    for d in 0..=max_depth {
+        let at_depth: Vec<usize> = (0..node_count).filter(|&i| depth[i] == d).collect();
+        let count = at_depth.len() as f32;
+        let start_x = -(count - 1.0) * gap_x / 2.0;
+        for (j, &i) in at_depth.iter().enumerate() {
+            doc.nodes[i].position = [
+                start_x + j as f32 * gap_x,
+                d as f32 * gap_y,
+            ];
+        }
+    }
+}
+
 /// Dispatch helper — calls the appropriate layout function based on doc state.
 ///
 /// Priority:
@@ -209,8 +271,7 @@ pub fn swimlane_layout(doc: &mut FlowchartDocument) {
 /// 3. otherwise → hierarchical_layout
 pub fn auto_layout(doc: &mut FlowchartDocument) {
     if doc.layout_mode == LayoutMode::OrgTree {
-        // Dedicated org-tree layout implemented in Task 2.2; fall back to hierarchical for now.
-        hierarchical_layout(doc);
+        orgtree_layout(doc);
         return;
     }
     if doc.layout_mode == LayoutMode::Kanban {
@@ -398,6 +459,23 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_orgtree_layout_root_at_top() {
+        use crate::specgraph::hrf::parse_hrf;
+        let spec = "## OrgTree\n- [ceo] CEO\n  - [cto] CTO\n  - [coo] COO\n";
+        let mut doc = parse_hrf(spec).unwrap();
+        crate::specgraph::layout::auto_layout(&mut doc);
+        let ceo = doc.nodes.iter().find(|n| n.hrf_id == "ceo").unwrap();
+        let cto = doc.nodes.iter().find(|n| n.hrf_id == "cto").unwrap();
+        let coo = doc.nodes.iter().find(|n| n.hrf_id == "coo").unwrap();
+        // CEO (root, depth 0) should be above CTO and COO (depth 1)
+        assert!(ceo.position[1] < cto.position[1],
+            "root should have smaller Y: ceo.y={}, cto.y={}", ceo.position[1], cto.position[1]);
+        // CTO and COO are siblings — same depth → same Y
+        assert!((cto.position[1] - coo.position[1]).abs() < 5.0,
+            "siblings should share Y: cto.y={}, coo.y={}", cto.position[1], coo.position[1]);
+    }
 
     #[test]
     fn test_swimlane_layout_positions_nodes_in_rows() {

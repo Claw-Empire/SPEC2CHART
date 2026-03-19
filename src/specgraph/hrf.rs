@@ -470,6 +470,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Resolved in a post-pass after all nodes are parsed.
     let mut node_deps: Vec<(NodeId, String)> = Vec::new();
 
+    // OrgTree indented-child support: stack of (indent_len, NodeId) tracking the parent
+    // at each indentation level so that `  - child` lines become edges parent → child.
+    let mut orgtree_parent_stack: Vec<(usize, NodeId)> = Vec::new();
+
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
         // Strip inline `//` comments: only strip when `//` appears OUTSIDE of {} tags
@@ -804,8 +808,45 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
         match section {
             Section::Nodes { default_z } => {
-                if trimmed.starts_with("- ") {
-                    // New node definition — may have inline edges: "- [id] Label → target1, target2 {tags}"
+                // Compute indentation level: number of leading whitespace chars.
+                let indent_len = line.len() - trimmed.len();
+                // OrgTree: indented `  - child` lines become new nodes with parent→child edges.
+                // Must be checked BEFORE the top-level `trimmed.starts_with("- ")` branch since
+                // both indented and unindented lines share the same trimmed prefix `"- "`.
+                let handled_as_orgtree_child =
+                    doc.layout_mode == crate::model::LayoutMode::OrgTree
+                    && indent_len > 0
+                    && trimmed.starts_with("- ");
+                if handled_as_orgtree_child {
+                    let stripped = &trimmed[2..];
+                    let (node_part, inline_targets) = split_inline_edges(stripped);
+                    let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
+                    if node.z_offset == 0.0 && default_z != 0.0 {
+                        node.z_offset = default_z;
+                    }
+                    let child_id = node.id;
+                    for dep in deps { node_deps.push((child_id, dep)); }
+                    id_map.insert(id.clone(), child_id);
+                    label_map.insert(slugify(node.display_label(), 0), child_id);
+                    for (target_id, edge_tags) in inline_targets {
+                        deferred_inline_edges.push((id.clone(), target_id, edge_tags));
+                    }
+                    // Find the parent: pop stack entries that are at same or deeper indent
+                    while orgtree_parent_stack.last().map_or(false, |&(d, _)| d >= indent_len) {
+                        orgtree_parent_stack.pop();
+                    }
+                    if let Some(&(_, parent_id)) = orgtree_parent_stack.last() {
+                        let e = Edge::new(
+                            Port { node_id: parent_id, side: PortSide::Bottom },
+                            Port { node_id: child_id, side: PortSide::Top },
+                        );
+                        doc.edges.push(e);
+                    }
+                    orgtree_parent_stack.push((indent_len, child_id));
+                    last_node_id = Some(child_id);
+                    doc.nodes.push(node);
+                } else if trimmed.starts_with("- ") {
+                    // New top-level node definition — may have inline edges: "- [id] Label → target1, target2 {tags}"
                     let stripped = &trimmed[2..];
                     // Split on → or -> (outside braces) for inline edges
                     let (node_part, inline_targets) = split_inline_edges(stripped);
@@ -815,6 +856,11 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         node.z_offset = default_z;
                     }
                     last_node_id = Some(node.id);
+                    // OrgTree: top-level `- ` nodes (indent 0) seed the parent stack as depth-0 roots.
+                    if doc.layout_mode == crate::model::LayoutMode::OrgTree {
+                        orgtree_parent_stack.clear();
+                        orgtree_parent_stack.push((0, node.id));
+                    }
                     for dep in deps { node_deps.push((node.id, dep)); }
                     id_map.insert(id.clone(), node.id);
                     label_map.insert(slugify(node.display_label(), 0), node.id);
