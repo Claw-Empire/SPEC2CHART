@@ -451,6 +451,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // ## Period sections: current period label for nodes parsed below
     let mut current_period: Option<String> = None;
 
+    // ## Swimlane / ## Kanban: current lane name for nodes parsed below
+    let mut current_swimlane: Option<String> = None;
+
+    // ## Kanban: current column name (reuses timeline_lane field on Node)
+    let mut current_kanban_col: Option<String> = None;
+
     // Current section display label (original case, e.g. "Hypotheses", "Evidence")
     let mut current_section_label: String = String::new();
 
@@ -613,10 +619,14 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 | "phases" | "phase" | "stages" | "stage"
                 | "roadmap" | "milestones" | "milestone"
                 | "journey" | "checklist" | "todo" | "plan" => Section::Steps { default_z: 0.0, last_step_id: None, step_count: 0 },
-                // "## Timeline" is now a reserved section type — emit warning, treat as None.
+                // "## Timeline" — enables timeline layout mode and timeline_mode flag.
                 "timeline" => {
-                    // Emit parse warning via setting a note in doc (non-fatal)
-                    Section::None
+                    doc.timeline_mode = true;
+                    doc.layout_mode = LayoutMode::Timeline;
+                    current_period = None;
+                    current_swimlane = None;
+                    current_kanban_col = None;
+                    Section::Nodes { default_z: 0.0 }
                 }
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
                     // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
@@ -731,6 +741,43 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                             }
                         }
                         Section::Nodes { default_z: z }
+                    // "## Swimlane: Name" — declares a swim-lane; nodes below inherit that lane.
+                    } else if header.starts_with("swimlane") {
+                        let after_raw = header_raw[8..].trim().trim_start_matches(':').trim();
+                        let label = if after_raw.is_empty() {
+                            format!("Lane {}", doc.timeline_lanes.len() + 1)
+                        } else {
+                            after_raw.to_string()
+                        };
+                        if !doc.timeline_lanes.contains(&label) {
+                            doc.timeline_lanes.push(label.clone());
+                        }
+                        current_swimlane = Some(label.clone());
+                        current_kanban_col = None;
+                        Section::Nodes { default_z: 0.0 }
+                    // "## OrgTree" — sets layout mode to OrgTree.
+                    } else if header == "orgtree" || header == "org-tree" || header == "org tree"
+                            || header == "org_tree" || header == "org chart" || header == "orgchart"
+                            || header == "org-chart" {
+                        doc.layout_mode = LayoutMode::OrgTree;
+                        current_swimlane = None;
+                        current_kanban_col = None;
+                        Section::Nodes { default_z: 0.0 }
+                    // "## Kanban: Name" — adds a kanban column; nodes below belong to that column.
+                    } else if header.starts_with("kanban") {
+                        let after_raw = header_raw[6..].trim().trim_start_matches(':').trim();
+                        let label = if after_raw.is_empty() {
+                            format!("Column {}", doc.kanban_columns.len() + 1)
+                        } else {
+                            after_raw.to_string()
+                        };
+                        if !doc.kanban_columns.contains(&label) {
+                            doc.kanban_columns.push(label.clone());
+                        }
+                        doc.layout_mode = LayoutMode::Kanban;
+                        current_kanban_col = Some(label.clone());
+                        current_swimlane = None;
+                        Section::Nodes { default_z: 0.0 }
                     } else {
                         // Unknown section name — treat as a Nodes section so user-defined
                         // sections like "## Strengths", "## Quick Wins", "## Phase 1: Detect"
@@ -795,6 +842,15 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     // Record the section this node belongs to
                     if node.section_name.is_empty() && !current_section_label.is_empty() {
                         node.section_name = current_section_label.clone();
+                    }
+                    // Inherit swimlane context from ## Swimlane: Name section
+                    if node.timeline_lane.is_none() {
+                        if let Some(ref lane) = current_swimlane {
+                            node.timeline_lane = Some(lane.clone());
+                        } else if let Some(ref col) = current_kanban_col {
+                            // Kanban columns reuse timeline_lane for column membership
+                            node.timeline_lane = Some(col.clone());
+                        }
                     }
                     // Auto-discover lane in doc.timeline_lanes
                     if let Some(ref lane) = node.timeline_lane.clone() {
@@ -2432,6 +2488,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     let mut frame_color_override: Option<[u8; 4]> = None;
     let mut collapsed = false;
     let mut lane_tag: Option<String> = None;
+    let mut period_tag: Option<String> = None;
     let mut section_override: Option<String> = None;
     let mut created_date_tag: Option<String> = None;
     let mut priority_tag: u8 = 0;
@@ -2704,6 +2761,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             if !lane_name.is_empty() {
                 lane_tag = Some(lane_name);
             }
+        } else if tag.starts_with("phase:") {
+            // {phase:Label} — assign node to a named timeline period/phase
+            let phase_name = tag[6..].trim().to_string();
+            if !phase_name.is_empty() {
+                period_tag = Some(phase_name);
+            }
         } else if tag.starts_with("tooltip:") || tag.starts_with("tip:") || tag.starts_with("desc:") {
             let prefix = if tag.starts_with("tooltip:") { 8 } else if tag.starts_with("tip:") { 4 } else { 5 };
             tooltip_text = Some(tag[prefix..].trim().to_string());
@@ -2961,6 +3024,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     if let Some(lane) = lane_tag {
         node.timeline_lane = Some(lane);
     }
+    if let Some(period) = period_tag {
+        node.timeline_period = Some(period);
+    }
     if let Some(sec) = section_override {
         node.section_name = sec;
     }
@@ -3060,7 +3126,7 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
                             // Preserve original case for these values
                             "from" | "to" | "icon" | "url" | "link"
                             | "tooltip" | "tip" | "desc"
-                            | "lane" | "sublabel" | "sub" | "subtitle" | "caption"
+                            | "lane" | "phase" | "sublabel" | "sub" | "subtitle" | "caption"
                             | "note" | "annotation" | "comment"
                             | "section" | "stage" | "col" | "column" | "board"
                             | "assigned" | "owner" | "assignee"
@@ -5211,5 +5277,49 @@ e1 --> h1: supports
         let doc = parse_hrf(spec).unwrap();
         let crate::model::NodeKind::Shape { shape, .. } = &doc.nodes[0].kind else { panic!("wrong kind") };
         assert_eq!(*shape, crate::model::NodeShape::Person);
+    }
+
+    #[test]
+    fn test_timeline_section_sets_timeline_mode() {
+        let spec = "## Config\nflow = LR\n\n## Timeline\n- [q1] Q1 2026 {phase:Q1}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert!(doc.timeline_mode);
+    }
+
+    #[test]
+    fn test_swimlane_section_adds_lane() {
+        let spec = "## Swimlane: Awareness\n- [hn] HN Launch {done}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert!(doc.timeline_lanes.contains(&"Awareness".to_string()));
+        assert_eq!(doc.nodes[0].timeline_lane, Some("Awareness".to_string()));
+    }
+
+    #[test]
+    fn test_orgtree_sets_layout_mode() {
+        let spec = "## OrgTree\n- [ceo] CEO\n- [cto] CTO\n- [coo] COO\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.layout_mode, crate::model::LayoutMode::OrgTree);
+    }
+
+    #[test]
+    fn test_kanban_section_adds_column() {
+        let spec = "## Kanban: Todo\n- [ta] Task A {todo}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert!(doc.kanban_columns.contains(&"Todo".to_string()));
+        assert_eq!(doc.layout_mode, crate::model::LayoutMode::Kanban);
+    }
+
+    #[test]
+    fn test_phase_decorator() {
+        let spec = "## Nodes\n- [a] Alpha {phase:Q1}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.nodes[0].timeline_period, Some("Q1".to_string()));
+    }
+
+    #[test]
+    fn test_lane_decorator() {
+        let spec = "## Nodes\n- [a] Alpha {lane:Sales}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.nodes[0].timeline_lane, Some("Sales".to_string()));
     }
 }
