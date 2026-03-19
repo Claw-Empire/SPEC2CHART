@@ -1123,19 +1123,248 @@ impl FlowchartApp {
                 ];
                 painter.add(egui::Shape::convex_polygon(tail_pts, fill, stroke));
             }
-            // New shapes — fall back to rounded rect until dedicated renderers are added (Task 3.1)
-            _ => {
-                let r = (10.0 * self.viewport.zoom).max(style.corner_radius * self.viewport.zoom.sqrt()) as u8;
-                if style.gradient {
-                    paint_gradient_rect_angle(painter, screen_rect, fill, darken(fill, 0.35), style.gradient_angle);
-                } else {
-                    painter.rect_filled(screen_rect, CornerRadius::same(r), fill);
+            NodeShape::Person => {
+                // Circle head at top-center, arc/trapezoid body below
+                let cx = screen_rect.center().x;
+                let top = screen_rect.min.y;
+                let bottom = screen_rect.max.y;
+                let h = screen_rect.height();
+                let w = screen_rect.width();
+
+                // Head: circle occupying top ~30% of height
+                let head_r = h * 0.22;
+                let head_center = Pos2::new(cx, top + head_r + h * 0.03);
+                painter.circle_filled(head_center, head_r, fill);
+                painter.circle_stroke(head_center, head_r, stroke);
+
+                // Body: symmetric trapezoid below head — wide shoulders, narrowing at bottom
+                let shoulder_w = w * 0.55;
+                let hip_w = w * 0.28;
+                let body_top_y = head_center.y + head_r + h * 0.03;
+                let body_bot_y = bottom - h * 0.05;
+                let body_pts = vec![
+                    Pos2::new(cx - shoulder_w / 2.0, body_top_y),  // top-left shoulder
+                    Pos2::new(cx + shoulder_w / 2.0, body_top_y),  // top-right shoulder
+                    Pos2::new(cx + hip_w / 2.0,      body_bot_y),  // bottom-right hip
+                    Pos2::new(cx - hip_w / 2.0,      body_bot_y),  // bottom-left hip
+                ];
+                painter.add(egui::Shape::convex_polygon(body_pts, fill, stroke));
+            }
+            NodeShape::Screen => {
+                // Main rounded body for the screen bezel
+                let r = CornerRadius::same(4);
+                let screen_body = Rect::from_min_max(screen_rect.min, Pos2::new(screen_rect.max.x, screen_rect.max.y - screen_rect.height() * 0.18));
+
+                // Outer bezel
+                painter.rect_filled(screen_body, r, fill);
+                painter.rect_stroke(screen_body, r, stroke, StrokeKind::Outside);
+
+                // Chrome bar at top (~12% of height) — slightly darker
+                let bar_h = screen_body.height() * 0.14;
+                let bar_rect = Rect::from_min_max(
+                    screen_body.min,
+                    Pos2::new(screen_body.max.x, screen_body.min.y + bar_h),
+                );
+                let bar_color = darken(fill, 0.25);
+                painter.rect_filled(bar_rect, CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, bar_color);
+
+                // Stand: narrow rectangle at bottom center
+                let stand_w = screen_rect.width() * 0.22;
+                let stand_top = screen_body.max.y;
+                let stand_bot = screen_rect.max.y;
+                let stand_left = screen_rect.center().x - stand_w / 2.0;
+                let stand_rect = Rect::from_min_max(
+                    Pos2::new(stand_left, stand_top),
+                    Pos2::new(stand_left + stand_w, stand_bot),
+                );
+                painter.rect_filled(stand_rect, CornerRadius::ZERO, darken(fill, 0.15));
+                painter.rect_stroke(stand_rect, CornerRadius::ZERO, stroke, StrokeKind::Outside);
+
+                // Base: thin wide bar at very bottom
+                let base_w = screen_rect.width() * 0.45;
+                let base_h = (stand_bot - stand_top).max(2.0);
+                let base_rect = Rect::from_min_max(
+                    Pos2::new(screen_rect.center().x - base_w / 2.0, stand_bot - base_h),
+                    Pos2::new(screen_rect.center().x + base_w / 2.0, stand_bot),
+                );
+                painter.rect_filled(base_rect, CornerRadius::same(2), darken(fill, 0.15));
+                painter.rect_stroke(base_rect, CornerRadius::same(2), stroke, StrokeKind::Outside);
+            }
+            NodeShape::Cylinder => {
+                // Drum / database shape: rectangle body with ellipse caps at top and bottom
+                let cx = screen_rect.center().x;
+                let w = screen_rect.width();
+                let top_y = screen_rect.min.y;
+                let bot_y = screen_rect.max.y;
+                // Ellipse half-height at top and bottom
+                let ell_h = (screen_rect.height() * 0.18).max(4.0);
+                let ell_rx = w / 2.0;
+                let ell_ry = ell_h / 2.0;
+                let bw = stroke.width;
+                let bc = stroke.color;
+
+                // Body rectangle (between the two ellipse centers)
+                let body_rect = Rect::from_min_max(
+                    Pos2::new(screen_rect.min.x, top_y + ell_ry),
+                    Pos2::new(screen_rect.max.x, bot_y - ell_ry),
+                );
+                painter.rect_filled(body_rect, CornerRadius::ZERO, fill);
+
+                // Left and right border lines for the body
+                painter.line_segment(
+                    [Pos2::new(screen_rect.min.x, top_y + ell_ry),
+                     Pos2::new(screen_rect.min.x, bot_y - ell_ry)],
+                    Stroke::new(bw, bc),
+                );
+                painter.line_segment(
+                    [Pos2::new(screen_rect.max.x, top_y + ell_ry),
+                     Pos2::new(screen_rect.max.x, bot_y - ell_ry)],
+                    Stroke::new(bw, bc),
+                );
+
+                // Bottom ellipse cap (drawn before top so top occludes it)
+                let bot_center = Pos2::new(cx, bot_y - ell_ry);
+                painter.add(egui::Shape::ellipse_filled(bot_center, Vec2::new(ell_rx, ell_ry), fill));
+                painter.add(egui::Shape::ellipse_stroke(bot_center, Vec2::new(ell_rx, ell_ry), Stroke::new(bw, bc)));
+
+                // Top ellipse cap — slightly darker tint for 3D look
+                let top_center = Pos2::new(cx, top_y + ell_ry);
+                let top_face_color = darken(fill, 0.20);
+                painter.add(egui::Shape::ellipse_filled(top_center, Vec2::new(ell_rx, ell_ry), top_face_color));
+                painter.add(egui::Shape::ellipse_stroke(top_center, Vec2::new(ell_rx, ell_ry), Stroke::new(bw, bc)));
+            }
+            NodeShape::Cloud => {
+                // Cloud silhouette: a base rounded rect plus 4 overlapping circle bumps on top
+                let cx = screen_rect.center().x;
+                let cy = screen_rect.center().y;
+                let w = screen_rect.width();
+                let h = screen_rect.height();
+
+                // Base body — lower 60% of the bounding rect
+                let base_rect = Rect::from_min_max(
+                    Pos2::new(screen_rect.min.x + w * 0.05, cy - h * 0.05),
+                    Pos2::new(screen_rect.max.x - w * 0.05, screen_rect.max.y - h * 0.05),
+                );
+                painter.rect_filled(base_rect, CornerRadius::same(8), fill);
+
+                // Four bumps along the top edge
+                let bump_y = cy - h * 0.10;
+                let radii: [f32; 4] = [w * 0.17, w * 0.22, w * 0.20, w * 0.15];
+                let x_positions: [f32; 4] = [
+                    cx - w * 0.28,
+                    cx - w * 0.08,
+                    cx + w * 0.10,
+                    cx + w * 0.27,
+                ];
+                for (i, &r) in radii.iter().enumerate() {
+                    let bump_center = Pos2::new(x_positions[i], bump_y);
+                    painter.circle_filled(bump_center, r, fill);
                 }
-                if style.border_dashed {
-                    draw_dashed_rect(painter, screen_rect, stroke);
-                } else {
-                    painter.rect_stroke(screen_rect, CornerRadius::same(r), stroke, StrokeKind::Outside);
-                }
+
+                // Single outline pass: draw a stroked rounded-rect slightly smaller than bumps
+                // to give a coherent silhouette border (approximation)
+                let outline_rect = Rect::from_min_max(
+                    Pos2::new(screen_rect.min.x + w * 0.05, screen_rect.min.y + h * 0.12),
+                    Pos2::new(screen_rect.max.x - w * 0.05, screen_rect.max.y - h * 0.05),
+                );
+                painter.rect_stroke(outline_rect, CornerRadius::same(12), stroke, StrokeKind::Outside);
+            }
+            NodeShape::Document => {
+                // Rectangle body with a folded bottom-right corner ("dog-ear")
+                let fold = (screen_rect.width() * 0.18).min(screen_rect.height() * 0.20).max(6.0);
+                let max = screen_rect.max;
+                let min = screen_rect.min;
+
+                // Main body polygon with the fold corner clipped
+                let body_pts = vec![
+                    Pos2::new(min.x, min.y),
+                    Pos2::new(max.x, min.y),
+                    Pos2::new(max.x, max.y - fold),  // notch point (top of fold)
+                    Pos2::new(max.x - fold, max.y),  // notch point (right of fold)
+                    Pos2::new(min.x, max.y),
+                ];
+                painter.add(egui::Shape::convex_polygon(body_pts, fill, stroke));
+
+                // Fold triangle — slightly darker shade for visual depth
+                let fold_pts = vec![
+                    Pos2::new(max.x - fold, max.y - fold),  // inner corner
+                    Pos2::new(max.x,        max.y - fold),  // top of fold
+                    Pos2::new(max.x - fold, max.y),         // bottom of fold
+                ];
+                let fold_color = darken(fill, 0.30);
+                painter.add(egui::Shape::convex_polygon(
+                    fold_pts,
+                    fold_color,
+                    Stroke::new(stroke.width, stroke.color),
+                ));
+            }
+            NodeShape::Channel => {
+                // Funnel / trapezoid: wide at top, narrow at bottom
+                let cx = screen_rect.center().x;
+                let top = screen_rect.min.y;
+                let bot = screen_rect.max.y;
+                let w = screen_rect.width();
+                let inset = w * 0.28; // how much each side narrows at the bottom
+
+                let pts = vec![
+                    Pos2::new(screen_rect.min.x,          top), // top-left
+                    Pos2::new(screen_rect.max.x,          top), // top-right
+                    Pos2::new(cx + (w / 2.0 - inset),     bot), // bottom-right (inset)
+                    Pos2::new(cx - (w / 2.0 - inset),     bot), // bottom-left (inset)
+                ];
+                painter.add(egui::Shape::convex_polygon(pts, fill, stroke));
+            }
+            NodeShape::Segment => {
+                // Person-group: a slightly offset smaller silhouette behind, then the main person
+                let cx = screen_rect.center().x;
+                let top = screen_rect.min.y;
+                let bottom = screen_rect.max.y;
+                let h = screen_rect.height();
+                let w = screen_rect.width();
+
+                // Background (secondary) person — shifted left by 18%, slightly smaller, dimmer
+                let offset_x = w * 0.18;
+                let scale = 0.82f32;
+                let bg_h = h * scale;
+                let bg_w = w * scale;
+                let bg_cx = cx - offset_x;
+                let bg_top = top + (h - bg_h) / 2.0;
+                let bg_bot = bg_top + bg_h;
+
+                let bg_fill = darken(fill, 0.18);
+                let bg_head_r = bg_h * 0.22;
+                let bg_head_center = Pos2::new(bg_cx, bg_top + bg_head_r + bg_h * 0.03);
+                painter.circle_filled(bg_head_center, bg_head_r, bg_fill);
+                painter.circle_stroke(bg_head_center, bg_head_r, stroke);
+                let bg_shoulder_w = bg_w * 0.55;
+                let bg_hip_w = bg_w * 0.28;
+                let bg_body_top_y = bg_head_center.y + bg_head_r + bg_h * 0.03;
+                let bg_body_bot_y = bg_bot - bg_h * 0.05;
+                let bg_body_pts = vec![
+                    Pos2::new(bg_cx - bg_shoulder_w / 2.0, bg_body_top_y),
+                    Pos2::new(bg_cx + bg_shoulder_w / 2.0, bg_body_top_y),
+                    Pos2::new(bg_cx + bg_hip_w / 2.0,      bg_body_bot_y),
+                    Pos2::new(bg_cx - bg_hip_w / 2.0,      bg_body_bot_y),
+                ];
+                painter.add(egui::Shape::convex_polygon(bg_body_pts, bg_fill, stroke));
+
+                // Foreground (main) person — slightly right of center
+                let fg_cx = cx + offset_x * 0.3;
+                let head_r = h * 0.22;
+                let head_center = Pos2::new(fg_cx, top + head_r + h * 0.03);
+                painter.circle_filled(head_center, head_r, fill);
+                painter.circle_stroke(head_center, head_r, stroke);
+                let shoulder_w = w * 0.55;
+                let hip_w = w * 0.28;
+                let body_top_y = head_center.y + head_r + h * 0.03;
+                let body_bot_y = bottom - h * 0.05;
+                let body_pts = vec![
+                    Pos2::new(fg_cx - shoulder_w / 2.0, body_top_y),
+                    Pos2::new(fg_cx + shoulder_w / 2.0, body_top_y),
+                    Pos2::new(fg_cx + hip_w / 2.0,      body_bot_y),
+                    Pos2::new(fg_cx - hip_w / 2.0,      body_bot_y),
+                ];
+                painter.add(egui::Shape::convex_polygon(body_pts, fill, stroke));
             }
         }
 

@@ -5391,4 +5391,34 @@ e1 --> h1: supports
         assert_eq!(node_b.timeline_lane, None,
             "node in ## Nodes after ## Kanban should not inherit the previous kanban column");
     }
+
+    #[test]
+    fn test_new_shape_tags_parse() {
+        // Verify that all 7 new shape tags map to the correct NodeShape variants.
+        let hrf = concat!(
+            "## Nodes\n",
+            "- [a] Person {shape:person}\n",
+            "- [b] Screen {shape:screen}\n",
+            "- [c] Cylinder {shape:cylinder}\n",
+            "- [d] Cloud {shape:cloud}\n",
+            "- [e] Document {shape:document}\n",
+            "- [f] Channel {shape:channel}\n",
+            "- [g] Segment {shape:segment}\n",
+        );
+        let doc = parse_hrf(hrf).unwrap();
+        let shape_of = |id: &str| {
+            let node = doc.nodes.iter().find(|n| n.hrf_id == id).unwrap();
+            let crate::model::NodeKind::Shape { shape, .. } = &node.kind else {
+                panic!("node {id} has wrong NodeKind");
+            };
+            *shape
+        };
+        assert_eq!(shape_of("a"), crate::model::NodeShape::Person,   "{{shape:person}}");
+        assert_eq!(shape_of("b"), crate::model::NodeShape::Screen,    "{{shape:screen}}");
+        assert_eq!(shape_of("c"), crate::model::NodeShape::Cylinder,  "{{shape:cylinder}}");
+        assert_eq!(shape_of("d"), crate::model::NodeShape::Cloud,     "{{shape:cloud}}");
+        assert_eq!(shape_of("e"), crate::model::NodeShape::Document,  "{{shape:document}}");
+        assert_eq!(shape_of("f"), crate::model::NodeShape::Channel,   "{{shape:channel}}");
+        assert_eq!(shape_of("g"), crate::model::NodeShape::Segment,   "{{shape:segment}}");
+    }
 }
