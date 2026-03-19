@@ -628,8 +628,6 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.timeline_mode = true;
                     doc.layout_mode = LayoutMode::Timeline;
                     current_period = None;
-                    current_swimlane = None;
-                    current_kanban_col = None;
                     Section::Nodes { default_z: 0.0 }
                 }
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
@@ -757,15 +755,12 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                             doc.timeline_lanes.push(label.clone());
                         }
                         current_swimlane = Some(label.clone());
-                        current_kanban_col = None;
                         Section::Nodes { default_z: 0.0 }
                     // "## OrgTree" — sets layout mode to OrgTree.
                     } else if header == "orgtree" || header == "org-tree" || header == "org tree"
                             || header == "org_tree" || header == "org chart" || header == "orgchart"
                             || header == "org-chart" {
                         doc.layout_mode = LayoutMode::OrgTree;
-                        current_swimlane = None;
-                        current_kanban_col = None;
                         Section::Nodes { default_z: 0.0 }
                     // "## Kanban: Name" — adds a kanban column; nodes below belong to that column.
                     } else if header.starts_with("kanban") {
@@ -780,7 +775,6 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         }
                         doc.layout_mode = LayoutMode::Kanban;
                         current_kanban_col = Some(label.clone());
-                        current_swimlane = None;
                         Section::Nodes { default_z: 0.0 }
                     } else {
                         // Unknown section name — treat as a Nodes section so user-defined
@@ -5288,6 +5282,7 @@ e1 --> h1: supports
         let spec = "## Config\nflow = LR\n\n## Timeline\n- [q1] Q1 2026 {phase:Q1}\n";
         let doc = parse_hrf(spec).unwrap();
         assert!(doc.timeline_mode);
+        assert_eq!(doc.layout_mode, crate::model::LayoutMode::Timeline);
     }
 
     #[test]
