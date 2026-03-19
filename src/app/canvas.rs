@@ -6473,7 +6473,7 @@ impl FlowchartApp {
         // (glyph, tooltip, is_active_index: which field it toggles)
         let items: [(&str, &str, bool); 6] = [
             ("╮", "Orthogonal", is_orthogonal),
-            ("⌒", "Curved bend",   edge_id.0.as_u128() > 0 && false), // always inactive for bend
+            ("⌒", "Curved bend",   false), // always inactive for bend
             ("╌", "Dashed",        is_dashed),
             ("✦", "Glow",          has_glow),
             ("⟳", "Animated",      is_animated),

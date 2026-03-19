@@ -148,7 +148,11 @@ Use {done} {wip} {todo} for status. Use {owner:@name} for ownership."#;
 
 /// Convert prose to HRF using Anthropic API (blocking via curl).
 pub fn prose_to_hrf(prose: &str, template: &str, api_key: &str) -> Result<String, String> {
-    let system = format!("{}\n\nTemplate hint: {}", HRF_SYSTEM_PROMPT, template);
+    let system = if template.is_empty() {
+        HRF_SYSTEM_PROMPT.to_string()
+    } else {
+        format!("{}\n\nTemplate hint: {}", HRF_SYSTEM_PROMPT, template)
+    };
     let body = serde_json::json!({
         "model": "claude-opus-4-5",
         "max_tokens": 2048,
@@ -157,6 +161,7 @@ pub fn prose_to_hrf(prose: &str, template: &str, api_key: &str) -> Result<String
     });
     let body_str = serde_json::to_string(&body)
         .map_err(|e| format!("JSON serialize error: {}", e))?;
+    // Note: API key is passed as a header arg to curl subprocess; it may be visible in `ps` output.
     let output = std::process::Command::new("curl")
         .args([
             "-s", "-X", "POST",

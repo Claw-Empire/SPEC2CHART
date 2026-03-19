@@ -203,7 +203,8 @@ fn cli_generate(template: &str) {
         std::process::exit(1);
     });
     let mut prose = String::new();
-    std::io::Read::read_to_string(&mut std::io::stdin(), &mut prose).unwrap();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut prose)
+        .unwrap_or_else(|e| { eprintln!("Error reading stdin: {}", e); std::process::exit(1); });
     match crate::specgraph::llm::prose_to_hrf(&prose, template, &api_key) {
         Ok(hrf) => print!("{}", hrf),
         Err(e) => {
@@ -218,30 +219,31 @@ fn cli_watch(directory: PathBuf, out: PathBuf, template: &str) {
     use std::sync::mpsc::channel;
 
     println!("Watching {:?} → {:?}", directory, out);
-    let (tx, rx) = channel::<notify::Result<Event>>();
-    let mut watcher = notify::recommended_watcher(tx).unwrap();
-    watcher.watch(&directory, RecursiveMode::Recursive).unwrap();
+    let (tx, rx) = channel();
+    let mut watcher = notify::recommended_watcher(tx)
+        .unwrap_or_else(|e| { eprintln!("Watch error: {}", e); std::process::exit(1); });
+    watcher.watch(&directory, RecursiveMode::Recursive)
+        .unwrap_or_else(|e| { eprintln!("Watch error: {}", e); std::process::exit(1); });
 
     // Initial render
     regenerate_watch(&directory, &out, template);
 
-    for res in rx {
-        if let Ok(event) = res {
-            if event.paths.iter().any(|p| p.extension().map_or(false, |e| e == "spec")) {
-                println!("Change detected — regenerating...");
-                regenerate_watch(&directory, &out, template);
-            }
+    for event in rx.into_iter().flatten() {
+        if event.paths.iter().any(|p| p.extension().is_some_and(|e| e == "spec")) {
+            println!("Change detected — regenerating...");
+            regenerate_watch(&directory, &out, template);
         }
     }
 }
 
 fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &str) {
+    // TODO: pass template hint to generate subcommand
     if let Some(spec_path) = std::fs::read_dir(dir)
         .ok()
         .and_then(|entries| {
             entries
                 .filter_map(|e| e.ok())
-                .find(|e| e.path().extension().map_or(false, |x| x == "spec"))
+                .find(|e| e.path().extension().is_some_and(|x| x == "spec"))
         })
         .map(|e| e.path())
     {
@@ -271,12 +273,12 @@ fn cli_serve(port: u16) {
         match crate::specgraph::hrf::parse_hrf(&body) {
             Ok(mut doc) => {
                 crate::specgraph::layout::auto_layout(&mut doc);
-                let tmp = std::env::temp_dir().join("lf_serve_tmp.svg");
+                let tmp = std::env::temp_dir().join(format!("lf_serve_{}.svg", uuid::Uuid::new_v4()));
                 match crate::export::export_svg(&doc, &tmp) {
                     Ok(()) => {
                         let svg = std::fs::read_to_string(&tmp).unwrap_or_default();
                         let response = Response::from_string(svg).with_header(
-                            Header::from_bytes("Content-Type", "image/svg+xml").unwrap(),
+                            Header::from_bytes("Content-Type", "image/svg+xml").expect("valid static header"),
                         );
                         let _ = r.respond(response);
                     }

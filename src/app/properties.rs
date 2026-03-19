@@ -1686,7 +1686,7 @@ impl FlowchartApp {
             ui.label(egui::RichText::new("👤 Assign all:").size(10.5).color(self.theme.text_dim));
         });
         ui.add_space(2.0);
-        if !self.bulk_assign_buf.is_empty() || true {
+        if true {
             let prev = self.bulk_assign_buf.clone();
             let r = ui.add(egui::TextEdit::singleline(&mut self.bulk_assign_buf)
                 .desired_width(f32::INFINITY)
