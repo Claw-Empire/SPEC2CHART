@@ -272,6 +272,7 @@ pub fn orgtree_layout(doc: &mut FlowchartDocument) {
 /// stacked top-to-bottom. Column order follows `doc.kanban_columns`. Nodes with no
 /// lane assignment are placed in a row below all columns.
 pub fn kanban_layout(doc: &mut FlowchartDocument) {
+    const ORIGIN_X: f32 = 20.0; // left margin before the first column
     let col_width = 200.0f32;
     let card_height = 80.0f32;
     let gap_y = 20.0f32;
@@ -279,7 +280,7 @@ pub fn kanban_layout(doc: &mut FlowchartDocument) {
     let padding_top = 60.0f32; // space for column header label
 
     for (col_idx, col_name) in doc.kanban_columns.clone().iter().enumerate() {
-        let col_x = col_idx as f32 * (col_width + col_gap);
+        let col_x = ORIGIN_X + col_idx as f32 * (col_width + col_gap);
         let mut row = 0usize;
         for node in doc.nodes.iter_mut() {
             if node.timeline_lane.as_deref() == Some(col_name.as_str()) {
@@ -293,9 +294,14 @@ pub fn kanban_layout(doc: &mut FlowchartDocument) {
         }
     }
 
+    // Find the tallest column to determine where unassigned nodes should go.
+    let max_rows = doc.kanban_columns.iter().map(|col_name| {
+        doc.nodes.iter().filter(|n| n.timeline_lane.as_deref() == Some(col_name.as_str())).count()
+    }).max().unwrap_or(0);
+    let unassigned_y = padding_top + max_rows as f32 * (card_height + gap_y) + gap_y * 2.0;
+
     // Nodes without a column: place below all columns
-    let unassigned_y = doc.kanban_columns.len() as f32 * 200.0 + 40.0;
-    let mut unassigned_x = 0.0f32;
+    let mut unassigned_x = ORIGIN_X;
     for node in doc.nodes.iter_mut() {
         if node.timeline_lane.is_none() {
             node.position = [unassigned_x, unassigned_y];
