@@ -215,35 +215,45 @@ Computed via a simple platform-specific path (no new crate needed):
 ```rust
 fn autosave_path() -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
-    let base = dirs_base();  // ~/Library/Application Support
-    #[cfg(not(target_os = "macos"))]
+    let base = {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home).join("Library").join("Application Support")
+    };
+    #[cfg(target_os = "windows")]
+    let base = std::path::PathBuf::from(
+        std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string())
+    );
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let base = std::env::var("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            let mut h = dirs_home();
-            h.push(".local/share");
-            h
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            std::path::PathBuf::from(home).join(".local").join("share")
         });
     base.join("light-figma").join("autosave.json")
 }
 ```
 
-To avoid adding a new crate dependency, use `std::env::var("HOME")` (Unix) and `APPDATA` (Windows) directly.
+All platform branches use only `std::env::var` — no new crate dependencies.
 
 **Recovery file format:** JSON of `FlowchartDocument` (already derives `serde::Serialize`).
 
 **Dirty tracking:** `FlowchartApp` gains:
 
 ```rust
-autosave_last_hash: u64,   // hash of node_count + edge_count
+autosave_last_hash: u64,        // hash of node_count + edge_count at last save
 autosave_last_time: std::time::Instant,
 autosave_path: std::path::PathBuf,
-autosave_dirty: bool,  // set to true after any mutation
+autosave_dirty: bool,           // set to true after any document mutation
+show_restore_prompt: bool,      // true on launch if recent autosave exists
+autosave_status: Option<String>,// "Autosaved HH:MM" displayed in statusbar
 ```
+
+`autosave_dirty` must be set to `true` at **every call site** of `self.history.push(&self.document)` — that is the single canonical mutation point. No other explicit sites are needed.
 
 **Restore prompt on launch:** `FlowchartApp::new()` checks for `autosave.json`. If it exists and is newer than 10 minutes ago, sets `self.show_restore_prompt = true`. The restore prompt is a simple egui Window with "Restore" and "Discard" buttons.
 
-**Status bar indicator:** After each autosave, update `self.autosave_status: Option<String>` to `"Autosaved HH:MM"`. `statusbar.rs` displays it on the right.
+**Status bar indicator:** After each autosave, update `self.autosave_status` to `"Autosaved HH:MM"`. `statusbar.rs` displays it on the right.
 
 **Files changed:** `src/app/mod.rs`, `src/app/statusbar.rs`
 
@@ -266,91 +276,117 @@ if self.autosave_dirty
 
 ### Design
 
-**Overview:** Presentation mode hides all UI chrome (toolbar, properties panel, statusbar, command palette) and steps through "slides" in sequence. A slide is any node with `is_frame = true`. Slide order is determined by `{slide:N}` tag (if present) or by top-left position sorting.
+**Overview:** Presentation mode steps through "slides" in sequence. A slide is any node with `is_frame = true`. Slide order is determined by top-left position sorting.
 
-### ViewMode Extension
+**Key constraint:** `presentation_mode: bool` already exists on `FlowchartApp` (line 165 of `src/app/mod.rs`). It is already toggled by `Key::F` in `shortcuts.rs`, already hides toolbar + properties panel (`!self.presentation_mode` guard), and already hides the statusbar (early return in `statusbar.rs`). A partial HUD (`draw_presentation_spotlight`) is also already wired in `canvas.rs`. **Do NOT add a new `ViewMode::Presentation` variant** — build slide navigation on top of the existing bool.
 
-Add `Presentation` variant to the existing `ViewMode` enum in `src/model.rs`:
-
-```rust
-pub enum ViewMode {
-    TwoD,
-    ThreeD,
-    Presentation,
-}
-```
-
-### New Fields on `FlowchartApp`
+### New Fields on `FlowchartApp` (in `src/app/mod.rs`)
 
 ```rust
-presentation_slide_index: usize,   // current slide (0-based)
-presentation_slides: Vec<usize>,   // indices into document.nodes for frame nodes, sorted
+presentation_slide_index: usize,         // current slide (0-based)
+presentation_slides: Vec<usize>,         // indices into document.nodes, sorted by position
+pending_fit_to_node: Option<usize>,      // consumed in canvas draw to fit viewport to frame
 ```
 
 ### HRF Support (minimal)
 
-The existing `is_frame` field on `Node` already marks frames. No new HRF tag needed for basic presentation mode. The `{slide:N}` ordering tag is a stretch goal for a later iteration.
+The existing `is_frame` field on `Node` already marks frames. No new HRF tag needed for basic presentation mode.
 
 ### Entering Presentation Mode
 
-- **Keyboard:** F5
-- **Toolbar:** "Present" button (added to toolbar.rs)
-- Computes `presentation_slides` (sorted frame nodes by position)
-- If no frames exist: creates a single virtual "slide" covering all nodes (fit-to-content)
-- Sets `view_mode = ViewMode::Presentation`
-- Sets `pending_fit = true` to fit the first slide
+- **Keyboard:** F5 (replaces the existing `Key::F` toggle in `shortcuts.rs`)
+- **Toolbar:** "Present" button (added to `toolbar.rs`)
+
+`enter_presentation_mode()` method:
+1. Collect indices of all `document.nodes` where `node.is_frame == true`, sorted by `(node.position[1], node.position[0])` (top-to-bottom, left-to-right)
+2. If no frames exist: set `presentation_slides = vec![usize::MAX]` as a sentinel for "all nodes" and call `pending_fit = true`
+3. Set `presentation_slide_index = 0`
+4. Set `presentation_mode = true`
+5. Call `self.fit_to_frame(0)` (or `pending_fit = true` if no frames)
+
+`exit_presentation_mode()` method:
+1. Set `presentation_mode = false`
+2. Clear `presentation_slides`
+3. Set `pending_fit = true` to restore overview
 
 ### Navigation
 
-In `update()`, when `view_mode == Presentation`:
+In `update()`, **before** the existing arrow-key node-nudging code, add a guard:
 
 ```rust
-if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::Space)) {
-    self.presentation_next_slide();
-}
-if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-    self.presentation_prev_slide();
-}
-if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-    self.view_mode = ViewMode::TwoD;
+// Slide navigation — consumes arrow keys in presentation mode before nudging
+if self.presentation_mode {
+    if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight)
+                  || i.key_pressed(egui::Key::Space))
+    {
+        self.presentation_next_slide();
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+        self.presentation_prev_slide();
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        self.exit_presentation_mode();
+    }
+    return; // skip rest of normal update (no node-nudge, no editing)
 }
 ```
 
-`presentation_next_slide()` / `presentation_prev_slide()` advance `presentation_slide_index` and fit the viewport to the target frame's bounds.
+The early `return` ensures the existing arrow-key node-nudge block never fires while in presentation mode.
+
+`presentation_next_slide()` / `presentation_prev_slide()` advance `presentation_slide_index` (clamped/wrapping) and call `fit_to_frame(new_index)`.
 
 ### Fitting to a Slide
 
 ```rust
-fn fit_to_frame(&mut self, node_idx: usize) {
-    let node = &self.document.nodes[node_idx];
-    // compute viewport offset + zoom to fit node rect with 40px padding
-    let padding = 40.0;
-    let w = node.size[0] + padding * 2.0;
-    let h = node.size[1] + padding * 2.0;
-    // zoom = min(canvas_width / w, canvas_height / h)
-    // offset = center the node
-    self.pending_fit_to_node = Some(node_idx);
+fn fit_to_frame(&mut self, slide_pos: usize) {
+    if slide_pos < self.presentation_slides.len() {
+        let node_idx = self.presentation_slides[slide_pos];
+        if node_idx == usize::MAX {
+            // sentinel: no frames — fit all nodes
+            self.pending_fit = true;
+        } else {
+            self.pending_fit_to_node = Some(node_idx);
+        }
+    }
+}
+```
+
+`pending_fit_to_node` is consumed in `canvas.rs` after `canvas_rect` is known:
+
+```rust
+if let Some(idx) = self.pending_fit_to_node.take() {
+    if let Some(node) = self.document.nodes.get(idx) {
+        let padding = 40.0;
+        // zoom = min(canvas_rect.width() / (node.size[0] + 2*padding),
+        //            canvas_rect.height() / (node.size[1] + 2*padding))
+        // offset = center node in canvas
+        let zoom = (canvas_rect.width() / (node.size[0] + padding * 2.0))
+            .min(canvas_rect.height() / (node.size[1] + padding * 2.0));
+        self.viewport.zoom = zoom;
+        self.viewport.offset = [
+            canvas_rect.center().x - node.position[0] * zoom - node.size[0] * zoom / 2.0,
+            canvas_rect.center().y - node.position[1] * zoom - node.size[1] * zoom / 2.0,
+        ];
+    }
 }
 ```
 
 ### Overlay Rendering
 
-In presentation mode, a minimal HUD is drawn:
-- Bottom-center: `Slide N / M` pill in semi-transparent gray
+In presentation mode, a slide-counter HUD replaces the existing `draw_presentation_spotlight`. Draw via `egui::Area::new("presentation_hud").order(Order::Foreground)`:
+- Bottom-center: `Slide N / M` pill in semi-transparent gray (only if `presentation_slides` is non-empty and not the sentinel)
 - Bottom-right: `ESC to exit` hint
-
-Drawn via `egui::Area::new("presentation_hud").order(Order::Foreground)`.
 
 ### Files Changed
 
 | File | Change |
 |---|---|
-| `src/model.rs` | Add `Presentation` to `ViewMode` enum |
-| `src/app/mod.rs` | `presentation_slide_index`, `presentation_slides` fields; F5 handler; slide navigation methods |
-| `src/app/toolbar.rs` | "Present" button; hide toolbar in Presentation mode |
-| `src/app/canvas.rs` | Arrow key slide navigation; ESC exit; HUD overlay |
-| `src/app/properties.rs` | Hide panel in Presentation mode |
-| `src/app/statusbar.rs` | Hide in Presentation mode; add autosave timestamp display |
+| `src/app/mod.rs` | Add 3 new fields; `enter_presentation_mode()`, `exit_presentation_mode()`, `presentation_next_slide()`, `presentation_prev_slide()`, `fit_to_frame()` methods; update F5 handler to call `enter_presentation_mode()` |
+| `src/app/shortcuts.rs` | Replace `Key::F` simple toggle with call to `enter_presentation_mode()` / `exit_presentation_mode()` |
+| `src/app/toolbar.rs` | "Present" button calls `enter_presentation_mode()` |
+| `src/app/canvas.rs` | Consume `pending_fit_to_node` after canvas rect is known; add slide-counter HUD overlay; arrow-key guard (see Navigation section) |
+
+No changes to `src/model.rs` (no `ViewMode` change). `toolbar.rs`, `properties.rs`, and `statusbar.rs` already hide in presentation mode.
 
 ---
 
@@ -370,22 +406,20 @@ Drawn via `egui::Area::new("presentation_hud").order(Order::Foreground)`.
 - [ ] Wire `cli.file` into `new_with_file` in the `None` arm
 
 ### Feature 5 — Autosave
-- [ ] Add `autosave_*` fields to `FlowchartApp`
-- [ ] Implement `autosave_path()` free function
+- [ ] Add `autosave_last_hash`, `autosave_last_time`, `autosave_path`, `autosave_dirty`, `show_restore_prompt`, `autosave_status` fields to `FlowchartApp`
+- [ ] Implement `autosave_path()` free function (using `std::env::var`)
 - [ ] Implement `do_autosave()` method
-- [ ] Add restore prompt check in `new()` and `show_restore_prompt` field
+- [ ] Set `autosave_dirty = true` at every `self.history.push()` call site
+- [ ] Add restore prompt check in `new()` (check file age)
 - [ ] Draw restore prompt `egui::Window` in `update()`
 - [ ] Add autosave timer check at end of `update()`
-- [ ] Add autosave status to statusbar.rs
+- [ ] Add autosave timestamp to `statusbar.rs`
 
 ### Feature 6 — Presentation Mode
-- [ ] Add `Presentation` to `ViewMode` in `model.rs`
-- [ ] Add `presentation_slide_index`, `presentation_slides` to `FlowchartApp`
-- [ ] Add `enter_presentation_mode()`, `exit_presentation_mode()`, `presentation_next_slide()`, `presentation_prev_slide()` methods
-- [ ] F5 handler in `shortcuts.rs` (or `update()`)
-- [ ] "Present" button in toolbar
-- [ ] Hide toolbar, properties, statusbar in Presentation mode
-- [ ] Arrow key navigation in `update()` when in Presentation mode
-- [ ] ESC exit
-- [ ] HUD overlay (slide counter + ESC hint)
-- [ ] `fit_to_frame()` method
+- [ ] Add `presentation_slide_index`, `presentation_slides`, `pending_fit_to_node` fields to `FlowchartApp`
+- [ ] Add `enter_presentation_mode()`, `exit_presentation_mode()`, `presentation_next_slide()`, `presentation_prev_slide()`, `fit_to_frame()` methods
+- [ ] Update `Key::F` handler in `shortcuts.rs` to call `enter/exit_presentation_mode()`
+- [ ] "Present" button in `toolbar.rs`
+- [ ] Arrow key + ESC guard in `canvas.rs` or `update()` (before node-nudge block)
+- [ ] Consume `pending_fit_to_node` in `canvas.rs` after `canvas_rect` is set
+- [ ] Slide-counter HUD overlay in `canvas.rs`
