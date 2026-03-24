@@ -55,6 +55,30 @@ pub const TEMPLATES: &[Template] = &[
         description: "Incident response flow",
         content: include_str!("ops/incident-map.spec"),
     },
+    Template {
+        name: "Team Topology",
+        category: "Org",
+        description: "Stream-aligned, platform, enabling, and subsystem teams",
+        content: include_str!("org/team-topology.spec"),
+    },
+    Template {
+        name: "RACI Matrix",
+        category: "Org",
+        description: "Responsibility assignment matrix",
+        content: include_str!("org/raci-matrix.spec"),
+    },
+    Template {
+        name: "Runbook",
+        category: "Ops",
+        description: "Operational incident runbook with severity triage",
+        content: include_str!("ops/runbook.spec"),
+    },
+    Template {
+        name: "On-Call Tree",
+        category: "Ops",
+        description: "On-call escalation tree",
+        content: include_str!("ops/on-call-tree.spec"),
+    },
 ];
 
 #[cfg(test)]
