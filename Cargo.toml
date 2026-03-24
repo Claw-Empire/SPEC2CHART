@@ -4,6 +4,10 @@ version = "0.3.0"
 edition = "2021"
 description = "A Figma-inspired flowchart application"
 
+[lib]
+name = "light_figma"
+path = "src/lib.rs"
+
 [dependencies]
 eframe = "0.31"
 egui = "0.31"
