@@ -393,6 +393,41 @@ impl FlowchartApp {
         }
     }
 
+    pub fn new_with_file(cc: &eframe::CreationContext<'_>, file: Option<std::path::PathBuf>) -> Self {
+        let mut app = Self::new(cc);
+        if let Some(path) = file {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => match crate::specgraph::hrf::parse_hrf(&content) {
+                    Ok(mut doc) => {
+                        crate::specgraph::layout::auto_layout(&mut doc);
+                        app.document = doc;
+                        app.pending_fit = true;
+                        let name = path.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "file".to_string());
+                        app.status_message = Some((
+                            format!("Opened {name}"),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                    Err(e) => {
+                        app.status_message = Some((
+                            format!("Failed to parse {:?}: {e}", path.file_name().unwrap_or_default()),
+                            std::time::Instant::now(),
+                        ));
+                    }
+                },
+                Err(e) => {
+                    app.status_message = Some((
+                        format!("Failed to open {:?}: {e}", path.file_name().unwrap_or_default()),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+        }
+        app
+    }
+
     /// In LR kanban layout, returns the section name for a canvas-space x-coordinate.
     /// Used to auto-assign section_name when creating nodes in a kanban column.
     pub(crate) fn section_for_canvas_x(&self, canvas_x: f32) -> Option<String> {

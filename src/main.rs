@@ -13,6 +13,9 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "light-figma", about = "Lightweight diagramming tool")]
 struct Cli {
+    /// Optional .spec or .hrf file to open on launch
+    file: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -108,6 +111,7 @@ fn main() -> eframe::Result<()> {
     }
 
     // GUI mode (no subcommand)
+    let startup_file = cli.file;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 860.0])
@@ -117,7 +121,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Light Figma",
         options,
-        Box::new(|cc| Ok(Box::new(app::FlowchartApp::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(app::FlowchartApp::new_with_file(cc, startup_file)))),
     )
 }
 
