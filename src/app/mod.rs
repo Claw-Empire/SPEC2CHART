@@ -812,6 +812,65 @@ impl eframe::App for FlowchartApp {
         if self.autosave_dirty && self.autosave_last_time.elapsed().as_secs() >= 30 {
             self.do_autosave();
         }
+
+        // Drag-and-drop spec import — hover overlay
+        let hovered: Vec<egui::HoveredFile> = ctx.input(|i| {
+            i.raw.hovered_files.iter()
+                .filter(|f| is_supported_ext(f.path.as_deref()))
+                .cloned()
+                .collect()
+        });
+        if !hovered.is_empty() {
+            draw_drop_overlay(ctx, &hovered);
+        }
+
+        // Drag-and-drop spec import — drop handling
+        let dropped: Vec<egui::DroppedFile> =
+            ctx.input_mut(|i| i.raw.dropped_files.drain(..).collect());
+        if let Some(file) = dropped.into_iter().find(|f| is_supported_ext(f.path.as_deref())) {
+            let filename = file.path.as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "file".to_owned());
+            match read_dropped_content(&file) {
+                Ok(content) => {
+                    match crate::specgraph::import_auto(&content, Some(&self.llm_config)) {
+                        Ok(doc) => {
+                            if let Some(bg) = doc.import_hints.bg_pattern.as_deref() {
+                                self.bg_pattern = match bg {
+                                    "dots" | "dot" => BgPattern::Dots,
+                                    "lines" | "line" | "grid" => BgPattern::Lines,
+                                    "crosshatch" | "cross" | "hash" => BgPattern::Crosshatch,
+                                    _ => BgPattern::None,
+                                };
+                            }
+                            if let Some(snap) = doc.import_hints.snap { self.snap_to_grid = snap; }
+                            if let Some(gs) = doc.import_hints.grid_size { self.grid_size = gs; }
+                            let specific_zoom = doc.import_hints.zoom;
+                            if let Some(z) = specific_zoom { self.viewport.zoom = z; }
+                            if let Some(yaw) = doc.import_hints.camera_yaw { self.camera3d.yaw = yaw; }
+                            if let Some(pitch) = doc.import_hints.camera_pitch { self.camera3d.pitch = pitch; }
+                            if let Some(true) = doc.import_hints.view_3d { self.view_mode = ViewMode::ThreeD; }
+                            if let Some(bg) = doc.import_hints.canvas_bg { self.canvas_bg = bg; }
+                            if let Some(ref title) = doc.import_hints.project_title.clone() { self.project_title = title.clone(); }
+                            let do_fit = doc.import_hints.auto_fit || specific_zoom.is_none();
+                            self.history.push(&self.document);
+                            self.autosave_dirty = true;
+                            self.document = doc;
+                            self.selection.clear();
+                            self.pending_fit = do_fit;
+                            self.status_message = Some((format!("Imported {filename}"), std::time::Instant::now()));
+                        }
+                        Err(e) => {
+                            self.status_message = Some((format!("Drop failed: {e}"), std::time::Instant::now()));
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.status_message = Some((format!("Drop failed: {e}"), std::time::Instant::now()));
+                }
+            }
+        }
     }
 }
 
@@ -834,4 +893,126 @@ fn autosave_path() -> std::path::PathBuf {
             std::path::PathBuf::from(home).join(".local").join("share")
         });
     base.join("light-figma").join("autosave.json")
+}
+
+/// Returns true if the path has a .spec or .yaml extension (case-insensitive).
+fn is_supported_ext(path: Option<&std::path::Path>) -> bool {
+    path.and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "spec" | "yaml"))
+        .unwrap_or(false)
+}
+
+/// Read a dropped file's content: try path first, then bytes, then error.
+fn read_dropped_content(file: &egui::DroppedFile) -> Result<String, String> {
+    if let Some(path) = &file.path {
+        std::fs::read_to_string(path).map_err(|e| e.to_string())
+    } else if let Some(bytes) = &file.bytes {
+        std::str::from_utf8(bytes).map(|s| s.to_owned()).map_err(|e| e.to_string())
+    } else {
+        Err("file path unavailable".to_string())
+    }
+}
+
+/// Renders a full-screen dim overlay with drop instructions.
+fn draw_drop_overlay(ctx: &egui::Context, hovered_files: &[egui::HoveredFile]) {
+    let name = hovered_files.first()
+        .and_then(|f| f.path.as_ref())
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown file".to_owned());
+
+    egui::Area::new(egui::Id::new("drop_overlay"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen = ctx.screen_rect();
+            ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
+            let center = screen.center();
+            ui.painter().text(
+                center - egui::vec2(0.0, 20.0),
+                egui::Align2::CENTER_CENTER,
+                "Drop .spec or .yaml to import",
+                egui::FontId::proportional(28.0),
+                egui::Color32::WHITE,
+            );
+            ui.painter().text(
+                center + egui::vec2(0.0, 20.0),
+                egui::Align2::CENTER_CENTER,
+                &name,
+                egui::FontId::proportional(16.0),
+                egui::Color32::from_gray(180),
+            );
+        });
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_is_supported_ext_spec() {
+        assert!(is_supported_ext(Some(Path::new("diagram.spec"))));
+    }
+
+    #[test]
+    fn test_is_supported_ext_yaml() {
+        assert!(is_supported_ext(Some(Path::new("diagram.yaml"))));
+    }
+
+    #[test]
+    fn test_is_supported_ext_uppercase() {
+        assert!(is_supported_ext(Some(Path::new("diagram.SPEC"))));
+        assert!(is_supported_ext(Some(Path::new("diagram.YAML"))));
+    }
+
+    #[test]
+    fn test_is_supported_ext_mixed_case() {
+        assert!(is_supported_ext(Some(Path::new("diagram.Spec"))));
+    }
+
+    #[test]
+    fn test_is_supported_ext_unsupported() {
+        assert!(!is_supported_ext(Some(Path::new("image.png"))));
+        assert!(!is_supported_ext(Some(Path::new("doc.txt"))));
+        assert!(!is_supported_ext(Some(Path::new("file.svg"))));
+    }
+
+    #[test]
+    fn test_is_supported_ext_no_ext() {
+        assert!(!is_supported_ext(Some(Path::new("README"))));
+    }
+
+    #[test]
+    fn test_is_supported_ext_none_path() {
+        assert!(!is_supported_ext(None));
+    }
+
+    #[test]
+    fn test_read_dropped_content_bytes_fallback() {
+        let content = "## Nodes\n- [a] Alpha\n";
+        let file = egui::DroppedFile {
+            path: None,
+            name: "test.spec".to_string(),
+            last_modified: None,
+            bytes: Some(std::sync::Arc::from(content.as_bytes())),
+            mime: String::new(),
+        };
+        assert_eq!(read_dropped_content(&file).unwrap(), content);
+    }
+
+    #[test]
+    fn test_read_dropped_content_no_path_no_bytes() {
+        let file = egui::DroppedFile {
+            path: None,
+            name: "test.spec".to_string(),
+            last_modified: None,
+            bytes: None,
+            mime: String::new(),
+        };
+        let result = read_dropped_content(&file);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("file path unavailable"));
+    }
 }
