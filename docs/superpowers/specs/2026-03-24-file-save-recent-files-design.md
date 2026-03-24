@@ -183,7 +183,30 @@ pub(crate) enum GallerySelection {
 }
 ```
 
-`draw_template_gallery` return type changes from `Option<String>` to `Option<GallerySelection>`. The call site in `update()` matches on the new enum. Existing template-load and empty-canvas arms are unchanged in behaviour. New `RecentFile(path)` arm: read file, parse HRF, auto-layout, set `current_file_path`, `push_recent`, `save_recent_files`, toast `"Opened <filename>"`.
+`draw_template_gallery` return type changes from `Option<String>` to `Option<GallerySelection>`. The call site in `update()` changes from:
+
+```rust
+if let Some(content) = draw_template_gallery(...) {
+    // load content
+}
+```
+
+to:
+
+```rust
+if let Some(selection) = draw_template_gallery(...) {
+    match selection {
+        GallerySelection::Template(content) => { /* unchanged: parse HRF, load doc */ }
+        GallerySelection::EmptyCanvas        => { /* unchanged: reset to empty doc */ }
+        GallerySelection::RecentFile(path)   => {
+            // fs::read → parse_hrf → auto_layout
+            // current_file_path = Some(path.clone())
+            // push_recent(path); save_recent_files()
+            // toast "Opened <filename>"
+        }
+    }
+}
+```
 
 ### Rendering
 
@@ -224,6 +247,23 @@ PaletteAction::OpenRecentFile(idx) => {
 }
 ```
 
+### `PaletteEntry` struct change
+
+`PaletteEntry.label` is currently `&'static str`, which cannot hold a dynamically built filename string. Change `label` to `std::borrow::Cow<'static, str>` so both static literals and owned strings work without other structural changes:
+
+```rust
+use std::borrow::Cow;
+
+struct PaletteEntry {
+    icon:     &'static str,
+    label:    Cow<'static, str>,  // was &'static str
+    category: &'static str,
+    action:   PaletteAction,
+}
+```
+
+All existing `build_entries()` call sites change `label: "text"` → `label: "text".into()`. This is a purely mechanical change; `&'static str` coerces to `Cow::Borrowed` via `Into`. All existing code that reads `entry.label` continues to work because `Cow<'static, str>` dereferences to `&str`.
+
 ### Entry injection
 
 `build_entries()` is a free function (no `self`) that returns a static `Vec<PaletteEntry>`. Recent-file entries must be built separately before the `Window::show` closure, where `self` is accessible:
@@ -233,17 +273,21 @@ PaletteAction::OpenRecentFile(idx) => {
 let recent_entries: Vec<PaletteEntry> = self.recent_files
     .iter()
     .enumerate()
-    .map(|(i, path)| PaletteEntry {
-        label: path.file_name()
+    .map(|(i, path)| {
+        let filename = path.file_name()
             .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string_lossy().into_owned()),
-        action: PaletteAction::OpenRecentFile(i),
-        ..PaletteEntry::default()
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        PaletteEntry {
+            icon:     "",
+            label:    filename.into(),   // Cow::Owned — dynamic filename
+            category: "Recent",
+            action:   PaletteAction::OpenRecentFile(i),
+        }
     })
     .collect();
 ```
 
-`PaletteEntry::default()` supplies the remaining fields (e.g. `group`, `icon`) with empty/None values. The indices in `OpenRecentFile(i)` are stable for the lifetime of this frame because `self.recent_files` is not mutated until `run_palette_action` is called after the UI closure returns.
+The indices in `OpenRecentFile(i)` are stable for the lifetime of this frame because `self.recent_files` is not mutated until `run_palette_action` is called after the `Window::show` closure returns (egui closures execute synchronously). The existing `command_palette_cursor` is reset to 0 on palette open (before entries are built), so no cursor-invalidation hazard arises from the prepended recent entries.
 
 ### Ranking
 
@@ -297,7 +341,7 @@ Gallery / Palette open recent file
 | `src/app/mod.rs` | 2 new fields; init in `new()`; explicit additions inside `Ok` arm of `new_with_file()`; `save_to_path()`, `push_recent()` methods; `recent_files_path()`, `load_recent_files()`, `save_recent_files()` free functions; replace title block at lines 783–791 |
 | `src/app/shortcuts.rs` | Add Cmd+S and Cmd+Shift+S handlers; rebind existing Cmd+Shift+S clipboard-copy to Cmd+Shift+Y (change modifier at line 935 only) |
 | `src/app/template_gallery.rs` | `GallerySelection` enum; `draw_template_gallery` return type; "Recent" section; deferred removal |
-| `src/app/command_palette.rs` | `PaletteAction` loses `Copy`; `OpenRecentFile(usize)` variant; `.clone()` at copy sites; two-list ranking; `OpenRecentFile` arm in `run_palette_action` |
+| `src/app/command_palette.rs` | `PaletteEntry.label` → `Cow<'static, str>` (add `use std::borrow::Cow`; all `build_entries` labels get `.into()`); `PaletteAction` loses `Copy`; `OpenRecentFile(usize)` variant; `.clone()` at copy sites; `recent_entries` built before `Window::show`; two-list ranking; `OpenRecentFile` arm in `run_palette_action` |
 
 No new crates. No changes to model, parser, or export code.
 
