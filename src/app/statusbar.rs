@@ -220,6 +220,16 @@ impl FlowchartApp {
 
                     // Right side — graph stats, zoom, cursor
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if let Some(ref msg) = self.autosave_status {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(msg)
+                                    .size(11.0)
+                                    .color(Color32::from_gray(120)),
+                            );
+                            ui.add_space(4.0);
+                            separator(ui, surface1);
+                        }
                         // Cursor coords
                         if let Some((cx, cy)) = cursor_canvas {
                             label(ui, &format!("{cx}, {cy}"), text_dim);

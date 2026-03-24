@@ -268,6 +268,16 @@ pub struct FlowchartApp {
     pub(crate) fab_color_picker_open: bool,
     /// Template gallery overlay open (Cmd+N)
     pub(crate) show_template_gallery: bool,
+    /// Tracks whether the document has changed since the last autosave
+    pub(crate) autosave_dirty: bool,
+    /// Instant of the last successful autosave write
+    pub(crate) autosave_last_time: std::time::Instant,
+    /// Path of the autosave recovery file
+    pub(crate) autosave_path: std::path::PathBuf,
+    /// When true, show the restore-from-autosave prompt on first frame
+    pub(crate) show_restore_prompt: bool,
+    /// Status string shown in statusbar: e.g. "Autosaved 14:32"
+    pub(crate) autosave_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -390,6 +400,19 @@ impl FlowchartApp {
             bulk_due_buf: String::new(),
             fab_color_picker_open: false,
             show_template_gallery: false,
+            autosave_dirty: false,
+            autosave_last_time: std::time::Instant::now(),
+            autosave_path: autosave_path(),
+            show_restore_prompt: {
+                let p = autosave_path();
+                p.exists()
+                    && std::fs::metadata(&p).ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.elapsed().ok())
+                        .map(|age| age.as_secs() < 600)
+                        .unwrap_or(false)
+            },
+            autosave_status: None,
         }
     }
 
@@ -539,6 +562,26 @@ impl FlowchartApp {
         );
         ui.add_space(1.0);
     }
+
+    fn do_autosave(&mut self) {
+        if let Some(dir) = self.autosave_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(json) = serde_json::to_string(&self.document) {
+            if std::fs::write(&self.autosave_path, &json).is_ok() {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let hour = (secs % 86400) / 3600;
+                let min = (secs % 3600) / 60;
+                self.autosave_status = Some(format!("Autosaved {:02}:{:02}", hour, min));
+                self.autosave_dirty = false;
+                self.autosave_last_time = std::time::Instant::now();
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +625,7 @@ impl eframe::App for FlowchartApp {
                     Ok(mut doc) => {
                         crate::specgraph::layout::auto_layout(&mut doc);
                         self.history.push(&self.document);
+                        self.autosave_dirty = true;
                         self.document = doc;
                         self.selection.clear();
                         self.pending_fit = true;
@@ -594,10 +638,42 @@ impl eframe::App for FlowchartApp {
             } else {
                 // Empty canvas
                 self.history.push(&self.document);
+                self.autosave_dirty = true;
                 self.document = crate::model::FlowchartDocument::default();
                 self.selection.clear();
                 self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
             }
+        }
+
+        // Restore-from-autosave prompt (shown once at launch if recent autosave exists)
+        if self.show_restore_prompt {
+            let mut keep = true;
+            egui::Window::new("Restore Previous Session?")
+                .id(egui::Id::new("autosave_restore"))
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("An autosave from less than 10 minutes ago was found.");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Restore").clicked() {
+                            if let Ok(json) = std::fs::read_to_string(&self.autosave_path.clone()) {
+                                if let Ok(doc) = serde_json::from_str::<crate::model::FlowchartDocument>(&json) {
+                                    self.document = doc;
+                                    self.pending_fit = true;
+                                    self.status_message = Some(("Restored from autosave".to_string(), std::time::Instant::now()));
+                                }
+                            }
+                            keep = false;
+                        }
+                        if ui.button("Discard").clicked() {
+                            let _ = std::fs::remove_file(&self.autosave_path.clone());
+                            keep = false;
+                        }
+                    });
+                });
+            self.show_restore_prompt = keep;
         }
 
         self.draw_zoom_indicator(ctx);
@@ -666,5 +742,31 @@ impl eframe::App for FlowchartApp {
                 }
             }
         }
+
+        // Autosave: write recovery file if dirty and 30 seconds have elapsed
+        if self.autosave_dirty && self.autosave_last_time.elapsed().as_secs() >= 30 {
+            self.do_autosave();
+        }
     }
+}
+
+/// Returns the platform-specific path for the autosave recovery file.
+fn autosave_path() -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    let base = {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home).join("Library").join("Application Support")
+    };
+    #[cfg(target_os = "windows")]
+    let base = std::path::PathBuf::from(
+        std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string())
+    );
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let base = std::env::var("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            std::path::PathBuf::from(home).join(".local").join("share")
+        });
+    base.join("light-figma").join("autosave.json")
 }
