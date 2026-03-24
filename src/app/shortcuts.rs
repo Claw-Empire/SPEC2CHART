@@ -1348,11 +1348,13 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
-        // F = toggle presentation mode (hide all panels for clean view)
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.is_none()) {
-            self.presentation_mode = !self.presentation_mode;
-            let msg = if self.presentation_mode { "Presentation Mode On" } else { "Presentation Mode Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+        // F / F5 = toggle presentation mode with slide navigation
+        if !any_text_focused && ctx.input(|i| (i.key_pressed(Key::F) || i.key_pressed(Key::F5)) && i.modifiers.is_none()) {
+            if self.presentation_mode {
+                self.exit_presentation_mode();
+            } else {
+                self.enter_presentation_mode();
+            }
         }
 
         // [ = toggle left toolbar   ] = toggle right properties panel
@@ -1828,6 +1830,20 @@ impl FlowchartApp {
                 self.history.push(&self.document);
                 self.status_message = Some(("Distributed evenly".to_string(), std::time::Instant::now()));
             }
+        }
+
+        // Presentation mode: arrow keys + Space navigate slides, ESC exits
+        if self.presentation_mode {
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::Space)) {
+                self.presentation_next_slide();
+            }
+            if !any_text_focused && ctx.input(|i| i.key_pressed(Key::ArrowLeft)) {
+                self.presentation_prev_slide();
+            }
+            if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.exit_presentation_mode();
+            }
+            return;
         }
 
         // Arrow keys = nudge selected nodes (1px; 10px with Shift)

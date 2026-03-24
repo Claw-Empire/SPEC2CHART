@@ -163,6 +163,12 @@ pub struct FlowchartApp {
     pub(crate) ruler_guides: Vec<(bool, f32)>,
     /// When true, hide all panels for a clean presentation view (toggle with F)
     pub(crate) presentation_mode: bool,
+    /// Index into presentation_slides of the currently displayed slide
+    pub(crate) presentation_slide_index: usize,
+    /// Node indices (into document.nodes) of frame nodes sorted top→bottom left→right
+    pub(crate) presentation_slides: Vec<usize>,
+    /// When Some(idx), canvas will fit the viewport to document.nodes[idx] on next frame
+    pub(crate) pending_fit_to_node: Option<usize>,
     /// Custom canvas background color (overrides default CANVAS_BG)
     pub(crate) canvas_bg: [u8; 4],
     /// Optional project title shown as a watermark in the canvas top-left
@@ -351,6 +357,9 @@ impl FlowchartApp {
             alignment_guides: Vec::new(),
             ruler_guides: Vec::new(),
             presentation_mode: false,
+            presentation_slide_index: 0,
+            presentation_slides: Vec::new(),
+            pending_fit_to_node: None,
             canvas_bg: [30, 30, 46, 255], // default = CANVAS_BG
             project_title: String::new(),
             show_heatmap: false,
@@ -561,6 +570,62 @@ impl FlowchartApp {
             Stroke::new(0.5, self.theme.divider_color),
         );
         ui.add_space(1.0);
+    }
+
+    pub(crate) fn enter_presentation_mode(&mut self) {
+        let mut slides: Vec<usize> = self.document.nodes.iter()
+            .enumerate()
+            .filter(|(_, n)| n.is_frame)
+            .map(|(i, _)| i)
+            .collect();
+        slides.sort_by(|&a, &b| {
+            let na = &self.document.nodes[a];
+            let nb = &self.document.nodes[b];
+            na.position[1].partial_cmp(&nb.position[1])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(na.position[0].partial_cmp(&nb.position[0])
+                    .unwrap_or(std::cmp::Ordering::Equal))
+        });
+        self.presentation_slides = if slides.is_empty() { vec![usize::MAX] } else { slides };
+        self.presentation_slide_index = 0;
+        self.presentation_mode = true;
+        self.fit_to_frame(0);
+        self.status_message = Some(("Presentation mode".to_string(), std::time::Instant::now()));
+    }
+
+    pub(crate) fn exit_presentation_mode(&mut self) {
+        self.presentation_mode = false;
+        self.presentation_slides.clear();
+        self.pending_fit = true;
+        self.status_message = Some(("Presentation mode off".to_string(), std::time::Instant::now()));
+    }
+
+    pub(crate) fn presentation_next_slide(&mut self) {
+        if self.presentation_slides.is_empty() { return; }
+        let max = self.presentation_slides.len() - 1;
+        if self.presentation_slide_index < max {
+            self.presentation_slide_index += 1;
+            self.fit_to_frame(self.presentation_slide_index);
+        }
+    }
+
+    pub(crate) fn presentation_prev_slide(&mut self) {
+        if self.presentation_slides.is_empty() { return; }
+        if self.presentation_slide_index > 0 {
+            self.presentation_slide_index -= 1;
+            self.fit_to_frame(self.presentation_slide_index);
+        }
+    }
+
+    fn fit_to_frame(&mut self, slide_pos: usize) {
+        if slide_pos < self.presentation_slides.len() {
+            let node_idx = self.presentation_slides[slide_pos];
+            if node_idx == usize::MAX {
+                self.pending_fit = true;
+            } else {
+                self.pending_fit_to_node = Some(node_idx);
+            }
+        }
     }
 
     fn do_autosave(&mut self) {

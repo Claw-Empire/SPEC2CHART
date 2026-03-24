@@ -946,6 +946,18 @@ impl FlowchartApp {
                 self.draw_section_header(ui, "View");
                 ui.add_space(4.0);
 
+                // Present button
+                {
+                    let btn_size = egui::vec2(172.0, 30.0);
+                    let text = egui::RichText::new("Present").size(12.0).color(self.theme.text_secondary);
+                    if ui.add_sized(btn_size, egui::Button::new(text)
+                        .fill(self.theme.surface0)
+                    ).on_hover_text("Enter presentation mode (F / F5)").clicked() {
+                        self.enter_presentation_mode();
+                    }
+                }
+                ui.add_space(4.0);
+
                 // 2D/3D toggle
                 ui.horizontal(|ui| {
                     let is_2d = self.view_mode == super::ViewMode::TwoD;

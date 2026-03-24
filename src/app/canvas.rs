@@ -49,6 +49,20 @@ impl FlowchartApp {
         );
         painter.rect_filled(canvas_rect, CornerRadius::ZERO, bg);
 
+        // Presentation mode: fit viewport to the requested frame node
+        if let Some(idx) = self.pending_fit_to_node.take() {
+            if let Some(node) = self.document.nodes.get(idx) {
+                let padding = 60.0_f32;
+                let zoom = (canvas_rect.width() / (node.size[0] + padding * 2.0))
+                    .min(canvas_rect.height() / (node.size[1] + padding * 2.0));
+                self.viewport.zoom = zoom;
+                self.viewport.offset = [
+                    canvas_rect.center().x - (node.position[0] + node.size[0] / 2.0) * zoom,
+                    canvas_rect.center().y - (node.position[1] + node.size[1] / 2.0) * zoom,
+                ];
+            }
+        }
+
         if self.show_grid && self.bg_pattern != super::BgPattern::None {
             self.draw_grid(&painter, canvas_rect);
         }
@@ -1214,6 +1228,36 @@ impl FlowchartApp {
         self.draw_back_to_content(&painter, canvas_rect, ui);
 
         self.draw_tag_filter_pills(&painter, canvas_rect, ui);
+
+        // Presentation mode slide-counter HUD
+        if self.presentation_mode
+            && !self.presentation_slides.is_empty()
+            && self.presentation_slides[0] != usize::MAX
+        {
+            let total = self.presentation_slides.len();
+            let current = self.presentation_slide_index + 1;
+            egui::Area::new(egui::Id::new("presentation_hud_counter"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -20.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Slide {current} / {total}"))
+                            .size(13.0)
+                            .color(Color32::from_gray(200)),
+                    );
+                });
+            egui::Area::new(egui::Id::new("presentation_hud_hint"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::RIGHT_BOTTOM, [-12.0, -20.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label(
+                        egui::RichText::new("ESC to exit")
+                            .size(11.0)
+                            .color(Color32::from_gray(120)),
+                    );
+                });
+        }
+
         self.draw_persistent_filter_chip(ui, canvas_rect);
         self.draw_kanban_column_headers(ui, canvas_rect);
 
