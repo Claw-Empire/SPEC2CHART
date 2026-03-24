@@ -39,10 +39,19 @@ enum Commands {
         before: PathBuf,
         after: PathBuf,
     },
-    /// Generate HRF from prose via LLM (requires ANTHROPIC_API_KEY)
+    /// Generate HRF from prose via LLM (reads stdin, writes HRF to stdout)
     Generate {
         #[arg(long, default_value = "")]
         template: String,
+        /// LLM model (e.g. claude-opus-4-5, gpt-4o, llama-3.1-70b)
+        #[arg(long, default_value = "")]
+        model: String,
+        /// Custom LLM API endpoint (default: Anthropic; pass OpenAI-compatible URL for other providers)
+        #[arg(long, default_value = "")]
+        endpoint: String,
+        /// API key — overrides ANTHROPIC_API_KEY / LLM_API_KEY env vars
+        #[arg(long, default_value = "")]
+        api_key: String,
     },
     /// Watch a directory and regenerate SVG on file changes
     Watch {
@@ -79,8 +88,8 @@ fn main() -> eframe::Result<()> {
             cli_diff(before, after);
             return Ok(());
         }
-        Some(Commands::Generate { template }) => {
-            cli_generate(&template);
+        Some(Commands::Generate { template, model, endpoint, api_key }) => {
+            cli_generate(&template, &model, &endpoint, &api_key);
             return Ok(());
         }
         Some(Commands::Watch {
@@ -174,8 +183,11 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     let doc_b = crate::specgraph::hrf::parse_hrf(&spec_b)
         .unwrap_or_else(|e| { eprintln!("Parse error in {:?}: {}", after, e); std::process::exit(1); });
 
-    let ids_a: std::collections::HashSet<String> = doc_a.nodes.iter().map(|n| n.hrf_id.clone()).collect();
-    let ids_b: std::collections::HashSet<String> = doc_b.nodes.iter().map(|n| n.hrf_id.clone()).collect();
+    let node_key = |n: &crate::model::Node| -> String {
+        if n.hrf_id.is_empty() { n.display_label().to_string() } else { n.hrf_id.clone() }
+    };
+    let ids_a: std::collections::HashSet<String> = doc_a.nodes.iter().map(|n| node_key(n)).collect();
+    let ids_b: std::collections::HashSet<String> = doc_b.nodes.iter().map(|n| node_key(n)).collect();
 
     for id in ids_b.difference(&ids_a) {
         println!("+ node: {}", id);
@@ -184,10 +196,22 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
         println!("- node: {}", id);
     }
 
+    // Build NodeId → human-readable key maps so edge diffs show names, not UUIDs.
+    let id_to_key_a: std::collections::HashMap<crate::model::NodeId, String> =
+        doc_a.nodes.iter().map(|n| (n.id, node_key(n))).collect();
+    let id_to_key_b: std::collections::HashMap<crate::model::NodeId, String> =
+        doc_b.nodes.iter().map(|n| (n.id, node_key(n))).collect();
+
     let edges_a: std::collections::HashSet<String> = doc_a.edges.iter()
-        .map(|e| format!("{} → {}", e.source.node_id.0, e.target.node_id.0)).collect();
+        .map(|e| format!("{} → {}",
+            id_to_key_a.get(&e.source.node_id).map(String::as_str).unwrap_or("?"),
+            id_to_key_a.get(&e.target.node_id).map(String::as_str).unwrap_or("?")))
+        .collect();
     let edges_b: std::collections::HashSet<String> = doc_b.edges.iter()
-        .map(|e| format!("{} → {}", e.source.node_id.0, e.target.node_id.0)).collect();
+        .map(|e| format!("{} → {}",
+            id_to_key_b.get(&e.source.node_id).map(String::as_str).unwrap_or("?"),
+            id_to_key_b.get(&e.target.node_id).map(String::as_str).unwrap_or("?")))
+        .collect();
 
     for e in edges_b.difference(&edges_a) {
         println!("+ edge: {}", e);
@@ -197,15 +221,50 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     }
 }
 
-fn cli_generate(template: &str) {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_else(|_| {
-        eprintln!("Error: ANTHROPIC_API_KEY environment variable not set.\nSet it with: export ANTHROPIC_API_KEY=your-key");
-        std::process::exit(1);
-    });
+fn cli_generate(template: &str, model: &str, endpoint: &str, api_key_flag: &str) {
+    use crate::specgraph::llm::LlmConfig;
+
+    // Resolve API key: --api-key flag > ANTHROPIC_API_KEY > LLM_API_KEY
+    let api_key = if !api_key_flag.is_empty() {
+        api_key_flag.to_string()
+    } else {
+        std::env::var("ANTHROPIC_API_KEY")
+            .or_else(|_| std::env::var("LLM_API_KEY"))
+            .unwrap_or_else(|_| {
+                eprintln!(
+                    "Error: no API key found.\n\
+                     Set ANTHROPIC_API_KEY (Anthropic) or LLM_API_KEY (other providers),\n\
+                     or pass --api-key <key>."
+                );
+                std::process::exit(1);
+            })
+    };
+
+    // Build config: explicit endpoint → custom; otherwise default to Anthropic.
+    let config = if !endpoint.is_empty() {
+        let resolved_model = if !model.is_empty() {
+            model.to_string()
+        } else {
+            eprintln!("Note: --model not specified for custom endpoint; defaulting to gpt-4o. Pass --model to silence this.");
+            "gpt-4o".to_string()
+        };
+        LlmConfig {
+            endpoint: endpoint.to_string(),
+            api_key,
+            model: resolved_model,
+        }
+    } else {
+        LlmConfig::anthropic(
+            api_key,
+            if !model.is_empty() { Some(model.to_string()) } else { None },
+        )
+    };
+
     let mut prose = String::new();
     std::io::Read::read_to_string(&mut std::io::stdin(), &mut prose)
         .unwrap_or_else(|e| { eprintln!("Error reading stdin: {}", e); std::process::exit(1); });
-    match crate::specgraph::llm::prose_to_hrf(&prose, template, &api_key) {
+
+    match crate::specgraph::llm::prose_to_hrf(&prose, template, &config) {
         Ok(hrf) => print!("{}", hrf),
         Err(e) => {
             eprintln!("LLM error: {}", e);
@@ -215,7 +274,7 @@ fn cli_generate(template: &str) {
 }
 
 fn cli_watch(directory: PathBuf, out: PathBuf, template: &str) {
-    use notify::{Watcher, RecursiveMode, Event};
+    use notify::{Watcher, RecursiveMode};
     use std::sync::mpsc::channel;
 
     println!("Watching {:?} → {:?}", directory, out);
@@ -237,23 +296,22 @@ fn cli_watch(directory: PathBuf, out: PathBuf, template: &str) {
 }
 
 fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &str) {
-    // TODO: pass template hint to generate subcommand
-    if let Some(spec_path) = std::fs::read_dir(dir)
-        .ok()
-        .and_then(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .find(|e| e.path().extension().is_some_and(|x| x == "spec"))
-        })
+    let mut spec_files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
         .map(|e| e.path())
-    {
+        .filter(|p| p.extension().is_some_and(|x| x == "spec"))
+        .collect();
+    spec_files.sort();
+    if let Some(spec_path) = spec_files.into_iter().next() {
         cli_render(spec_path, out.to_path_buf());
     }
 }
 
 fn cli_serve(port: u16) {
     use tiny_http::{Server, Response, Header};
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("127.0.0.1:{}", port);
     let server = Server::http(&addr).unwrap_or_else(|e| {
         eprintln!("Failed to start server on {}: {}", addr, e);
         std::process::exit(1);
@@ -277,6 +335,7 @@ fn cli_serve(port: u16) {
                 match crate::export::export_svg(&doc, &tmp) {
                     Ok(()) => {
                         let svg = std::fs::read_to_string(&tmp).unwrap_or_default();
+                        let _ = std::fs::remove_file(&tmp);
                         let response = Response::from_string(svg).with_header(
                             Header::from_bytes("Content-Type", "image/svg+xml").expect("valid static header"),
                         );
@@ -306,9 +365,10 @@ mod cli_tests {
         let spec = "## Nodes\n- [alpha] Alpha {done}\n- [beta] Beta {todo}\n## Flow\nalpha --> beta\n";
         let mut doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
         crate::specgraph::layout::auto_layout(&mut doc);
-        let tmp = std::env::temp_dir().join("test_render_cli.svg");
+        let tmp = std::env::temp_dir().join(format!("test_render_cli_{}.svg", uuid::Uuid::new_v4()));
         crate::export::export_svg(&doc, &tmp).unwrap();
         let content = std::fs::read_to_string(&tmp).unwrap();
+        let _ = std::fs::remove_file(&tmp);
         assert!(content.contains("<svg"));
         assert!(content.contains("Alpha"));
     }

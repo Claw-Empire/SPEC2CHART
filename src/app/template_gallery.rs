@@ -16,6 +16,11 @@ impl super::FlowchartApp {
             return None;
         }
 
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_template_gallery = false;
+            return None;
+        }
+
         let mut selected_content: Option<String> = None;
 
         // Dim the canvas behind the gallery window
@@ -72,8 +77,12 @@ impl super::FlowchartApp {
                         });
                         ui.add_space(16.0);
 
-                        // Grouped template categories
-                        let categories = ["Engineering", "Strategy", "Org", "Ops"];
+                        // Grouped template categories — derived from TEMPLATES to stay in sync
+                        let mut seen = std::collections::HashSet::new();
+                        let categories: Vec<&str> = TEMPLATES.iter()
+                            .map(|t| t.category)
+                            .filter(|c| seen.insert(*c))
+                            .collect();
                         for category in &categories {
                             let templates_in_cat: Vec<&Template> = TEMPLATES
                                 .iter()

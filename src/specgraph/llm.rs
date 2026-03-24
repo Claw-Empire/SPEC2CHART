@@ -1,4 +1,4 @@
-/// LLM configuration for prose-to-YAML conversion.
+/// LLM configuration for prose-to-diagram conversion.
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
     pub endpoint: String,
@@ -15,6 +15,72 @@ impl Default for LlmConfig {
         }
     }
 }
+
+impl LlmConfig {
+    /// Create a config pre-set for the Anthropic Messages API.
+    pub fn anthropic(api_key: String, model: Option<String>) -> Self {
+        Self {
+            endpoint: "https://api.anthropic.com/v1/messages".to_string(),
+            api_key,
+            model: model.unwrap_or_else(|| "claude-opus-4-5".to_string()),
+        }
+    }
+
+    /// True when the endpoint targets the Anthropic Messages API.
+    ///
+    /// Detection is URL-based: any endpoint containing "anthropic.com" is treated
+    /// as the Anthropic Messages API (different request/response shape from OpenAI).
+    /// A local proxy or mirror at a non-anthropic.com URL will be treated as
+    /// OpenAI-compatible — use the OpenAI-compatible format in that case.
+    pub fn is_anthropic(&self) -> bool {
+        self.endpoint.contains("anthropic.com")
+    }
+}
+
+// ── curl config helper ──────────────────────────────────────────────────────
+
+/// Write curl auth headers to a temp file to avoid API key exposure in `ps`.
+/// Returns the file path. Caller must delete it when done.
+fn write_curl_config(config: &LlmConfig) -> Result<std::path::PathBuf, String> {
+    use std::io::Write;
+    let tmp = std::env::temp_dir()
+        .join(format!("lf_curl_{}.cfg", uuid::Uuid::new_v4()));
+    // Open with 0o600 at creation time (no TOCTOU window).
+    #[cfg(unix)]
+    let mut f = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+            .map_err(|e| format!("Failed to create curl config: {}", e))?
+    };
+    #[cfg(not(unix))]
+    let mut f = std::fs::File::create(&tmp)
+        .map_err(|e| format!("Failed to create curl config: {}", e))?;
+    if config.is_anthropic() {
+        writeln!(f, "header = \"x-api-key: {}\"", config.api_key)
+            .map_err(|e| format!("Failed to write curl config: {}", e))?;
+        writeln!(f, "header = \"anthropic-version: 2023-06-01\"")
+            .map_err(|e| format!("Failed to write curl config: {}", e))?;
+    } else {
+        writeln!(f, "header = \"Authorization: Bearer {}\"", config.api_key)
+            .map_err(|e| format!("Failed to write curl config: {}", e))?;
+    }
+    Ok(tmp)
+}
+
+/// Truncate `s` to at most `max_chars` Unicode scalar values for display.
+/// Unlike `&s[..n]`, this never panics on a multi-byte UTF-8 boundary.
+fn truncate_for_display(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
+}
+
+// ── SpecGraph YAML (OpenAI-compatible) ──────────────────────────────────────
 
 const SYSTEM_PROMPT: &str = r#"You are a diagram specification converter. Convert the user's natural language description into SpecGraph YAML format.
 
@@ -60,39 +126,47 @@ Infer the best diagram structure from the description. Use meaningful node IDs.
 Do NOT include position or size fields — they will be auto-laid out.
 Do NOT wrap output in markdown code fences."#;
 
-/// Convert prose text to SpecGraph YAML using an LLM API (blocking HTTP).
+/// Convert prose text to SpecGraph YAML using any LLM — Anthropic or OpenAI-compatible.
 pub fn prose_to_yaml(prose: &str, config: &LlmConfig) -> Result<String, String> {
     if config.api_key.is_empty() {
         return Err("No API key configured. Go to LLM Settings to set your API key.".to_string());
     }
 
-    let body = serde_json::json!({
-        "model": config.model,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prose}
-        ]
-    });
-
-    // Use ureq-style blocking HTTP via std (minimal dependency)
-    // We'll use a raw TCP+TLS approach via the system curl command
-    // to avoid adding reqwest/tokio as dependencies
+    let body = if config.is_anthropic() {
+        serde_json::json!({
+            "model": config.model,
+            "max_tokens": 2048,
+            "system": SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": prose}]
+        })
+    } else {
+        serde_json::json!({
+            "model": config.model,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prose}
+            ]
+        })
+    };
     let body_str = serde_json::to_string(&body)
         .map_err(|e| format!("JSON serialize error: {}", e))?;
 
+    let cfg_path = write_curl_config(config)?;
+    let cfg_str = cfg_path.to_str()
+        .ok_or_else(|| "Temp config path contains non-UTF-8 characters".to_string())?;
     let output = std::process::Command::new("curl")
         .args([
-            "-s",
-            "-X", "POST",
+            "-s", "-X", "POST",
             &config.endpoint,
+            "--config", cfg_str,
             "-H", "Content-Type: application/json",
-            "-H", &format!("Authorization: Bearer {}", config.api_key),
             "-d", &body_str,
         ])
-        .output()
-        .map_err(|e| format!("Failed to call LLM API: {}", e))?;
+        .output();
+    let _ = std::fs::remove_file(&cfg_path);
 
+    let output = output.map_err(|e| format!("Failed to call LLM API: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("LLM API request failed: {}", stderr));
@@ -100,19 +174,27 @@ pub fn prose_to_yaml(prose: &str, config: &LlmConfig) -> Result<String, String> 
 
     let response_str = String::from_utf8_lossy(&output.stdout);
     let response: serde_json::Value = serde_json::from_str(&response_str)
-        .map_err(|e| format!("Failed to parse LLM response: {} — raw: {}", e, &response_str[..200.min(response_str.len())]))?;
+        .map_err(|e| format!(
+            "Failed to parse LLM response: {} — raw: {}",
+            e,
+            truncate_for_display(&response_str, 200)
+        ))?;
 
-    // Extract content from OpenAI-compatible response
-    let content = response["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or_else(|| {
-            // Check for error response
-            if let Some(err) = response["error"]["message"].as_str() {
-                format!("LLM API error: {}", err)
-            } else {
-                format!("Unexpected LLM response format: {}", &response_str[..300.min(response_str.len())])
-            }
-        })?;
+    if let Some(err) = response["error"]["message"].as_str() {
+        return Err(format!("LLM API error: {}", err));
+    }
+
+    let content = if config.is_anthropic() {
+        response["content"][0]["text"].as_str()
+    } else {
+        response["choices"][0]["message"]["content"].as_str()
+    };
+    let content = content.ok_or_else(|| {
+        format!(
+            "Unexpected LLM response format: {}",
+            truncate_for_display(&response_str, 300)
+        )
+    })?;
 
     // Strip markdown fences if the LLM included them
     let yaml = content
@@ -124,6 +206,8 @@ pub fn prose_to_yaml(prose: &str, config: &LlmConfig) -> Result<String, String> 
 
     Ok(yaml.to_string())
 }
+
+// ── HRF (Anthropic or OpenAI-compatible) ────────────────────────────────────
 
 const HRF_SYSTEM_PROMPT: &str = r#"You are a diagram generator. Convert the user's description into HRF (Human-Readable Format) for the light-figma diagramming tool.
 
@@ -146,45 +230,85 @@ For roadmaps use ## Timeline sections with {phase:Q1} {milestone} tags.
 For GTM use ## Swimlane: Name sections with {metric:N} tags.
 Use {done} {wip} {todo} for status. Use {owner:@name} for ownership."#;
 
-/// Convert prose to HRF using Anthropic API (blocking via curl).
-pub fn prose_to_hrf(prose: &str, template: &str, api_key: &str) -> Result<String, String> {
+/// Convert prose to HRF using any LLM — Anthropic or OpenAI-compatible.
+///
+/// Routing:
+/// - `config.is_anthropic()` → Anthropic Messages API format
+/// - otherwise              → OpenAI chat-completions format
+///
+/// The API key is never passed as a command-line argument; it is written to a
+/// temp file and referenced via `curl --config` to prevent `ps` exposure.
+pub fn prose_to_hrf(prose: &str, template: &str, config: &LlmConfig) -> Result<String, String> {
+    if config.api_key.is_empty() {
+        return Err(
+            "No API key. Set ANTHROPIC_API_KEY env var or use --api-key flag.".to_string()
+        );
+    }
+
     let system = if template.is_empty() {
         HRF_SYSTEM_PROMPT.to_string()
     } else {
         format!("{}\n\nTemplate hint: {}", HRF_SYSTEM_PROMPT, template)
     };
-    let body = serde_json::json!({
-        "model": "claude-opus-4-5",
-        "max_tokens": 2048,
-        "system": system,
-        "messages": [{"role": "user", "content": prose}]
-    });
+
+    let body = if config.is_anthropic() {
+        serde_json::json!({
+            "model": config.model,
+            "max_tokens": 2048,
+            "system": system,
+            "messages": [{"role": "user", "content": prose}]
+        })
+    } else {
+        serde_json::json!({
+            "model": config.model,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prose}
+            ]
+        })
+    };
+
     let body_str = serde_json::to_string(&body)
         .map_err(|e| format!("JSON serialize error: {}", e))?;
-    // Note: API key is passed as a header arg to curl subprocess; it may be visible in `ps` output.
+
+    let cfg_path = write_curl_config(config)?;
+    let cfg_str = cfg_path.to_str()
+        .ok_or_else(|| "Temp config path contains non-UTF-8 characters".to_string())?;
     let output = std::process::Command::new("curl")
         .args([
             "-s", "-X", "POST",
-            "https://api.anthropic.com/v1/messages",
+            &config.endpoint,
+            "--config", cfg_str,
             "-H", "Content-Type: application/json",
-            "-H", "anthropic-version: 2023-06-01",
-            "-H", &format!("x-api-key: {}", api_key),
             "-d", &body_str,
         ])
-        .output()
-        .map_err(|e| format!("Failed to call Anthropic API: {}", e))?;
+        .output();
+    let _ = std::fs::remove_file(&cfg_path);
+
+    let output = output.map_err(|e| format!("Failed to call LLM API: {}", e))?;
     if !output.status.success() {
-        return Err(format!("API request failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "API request failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    let response: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let response: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| format!("Parse error: {}", e))?;
+
     if let Some(err) = response["error"]["message"].as_str() {
         return Err(format!("API error: {}", err));
     }
-    response["content"][0]["text"].as_str()
+
+    let content = if config.is_anthropic() {
+        response["content"][0]["text"].as_str()
+    } else {
+        response["choices"][0]["message"]["content"].as_str()
+    };
+
+    content
         .map(|s| s.trim().to_string())
-        .ok_or_else(|| {
-            let raw = String::from_utf8_lossy(&output.stdout);
-            format!("Unexpected API response: {}", &raw[..200.min(raw.len())])
-        })
+        .ok_or_else(|| format!("Unexpected API response: {}", truncate_for_display(&raw, 200)))
 }

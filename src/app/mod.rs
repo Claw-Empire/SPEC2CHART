@@ -546,9 +546,9 @@ impl eframe::App for FlowchartApp {
                 match crate::specgraph::hrf::parse_hrf(&content) {
                     Ok(mut doc) => {
                         crate::specgraph::layout::auto_layout(&mut doc);
+                        self.history.push(&self.document);
                         self.document = doc;
                         self.selection.clear();
-                        self.history.push(&self.document);
                         self.pending_fit = true;
                         self.status_message = Some(("Template loaded".to_string(), std::time::Instant::now()));
                     }
@@ -558,9 +558,9 @@ impl eframe::App for FlowchartApp {
                 }
             } else {
                 // Empty canvas
+                self.history.push(&self.document);
                 self.document = crate::model::FlowchartDocument::default();
                 self.selection.clear();
-                self.history.push(&self.document);
                 self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
             }
         }
