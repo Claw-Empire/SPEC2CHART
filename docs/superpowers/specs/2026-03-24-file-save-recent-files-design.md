@@ -29,15 +29,17 @@ Both initialize to `None` / empty `Vec` in `new()`.
 
 ## Shortcut Rebinding
 
-The existing Cmd+Shift+S binding (`src/app/shortcuts.rs:934–959`) copies the HRF spec to the system clipboard. Save As takes over Cmd+Shift+S (the macOS standard). Clipboard-copy moves to **Cmd+Shift+C** ("copy spec"). The handler logic is unchanged; only the modifier check changes from `cmd_shift_s` to `cmd_shift_c`.
+The existing Cmd+Shift+S binding (`src/app/shortcuts.rs:934–959`) copies the HRF spec to the system clipboard. Save As takes over Cmd+Shift+S (the macOS standard). Clipboard-copy moves to **Cmd+Shift+Y** ("yank" — the Unix/vim idiom for copy-to-clipboard, and confirmed free in the current shortcut map).
+
+Full audit of Cmd+Shift bindings confirmed taken: Z, ], [, C, V, A, K, ., ,, E, I, T, F, S, R, X, W, H. Cmd+Shift+Y is unused.
 
 | Shortcut | Action |
 |----------|--------|
 | Cmd+S | Save to current path; if none, open Save As dialog |
 | Cmd+Shift+S | Always open Save As dialog |
-| Cmd+Shift+C | Copy current diagram as HRF spec to clipboard *(moved from Cmd+Shift+S)* |
+| Cmd+Shift+Y | Copy current diagram as HRF spec to clipboard *(moved from Cmd+Shift+S)* |
 
-Both Cmd+S and Cmd+Shift+S are wired in `src/app/shortcuts.rs` alongside existing bindings.
+Both Cmd+S and Cmd+Shift+S are wired in `src/app/shortcuts.rs` alongside existing bindings. The existing Cmd+Shift+S handler at line 934 has its modifier check updated from `cmd_shift_s` to `cmd_shift_y`.
 
 The app has no native menu bar (egui does not render one by default on macOS). Save is keyboard-only.
 
@@ -60,40 +62,39 @@ If the user cancels, save is a silent no-op.
 
 ### `export_hrf_ex` and title resolution
 
-Save uses `export_hrf_ex` (the richer variant already used throughout the app), which has signature:
+Save uses `export_hrf_ex` (signature: `pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, vp: Option<&ViewportExportConfig>) -> String`).
 
-```rust
-pub fn export_hrf_ex(doc: &FlowchartDocument, title: &str, vp: Option<&ViewportExportConfig>) -> String
-```
-
-`export_hrf_ex` applies its own internal override: if `doc.title` is non-empty it uses `doc.title` regardless of the `title` argument. Therefore `save_to_path` only needs to supply a fallback title for documents that have no title set:
+`export_hrf_ex` has an internal override at `hrf.rs:1611`: `if doc.title.is_empty() { title } else { &doc.title }`. This means the `title` arg only takes effect when `doc.title` is empty. `save_to_path` therefore passes only the fallback for the empty-title case:
 
 ```rust
 let fallback_title = self.current_file_path.as_ref()
     .and_then(|p| p.file_stem())
     .map(|s| s.to_string_lossy().into_owned())
     .unwrap_or_else(|| "Untitled Diagram".to_string());
-// export_hrf_ex will use doc.title if non-empty, fallback_title otherwise
 let hrf = export_hrf_ex(&self.document, &fallback_title, None);
 ```
 
-The `ViewportExportConfig` argument is `None` for a plain save (no viewport hints embedded). If the user wants to save with viewport state, that is a future enhancement.
+`ViewportExportConfig` is `None` for a plain save (no viewport hints embedded).
 
 ### `save_to_path(&mut self, path: PathBuf)` method
 
-1. Compute `fallback_title` as above.
-2. Call `export_hrf_ex(&self.document, &fallback_title, None)`.
-3. Call `std::fs::write(&path, &hrf)`.
+```
+1. Compute fallback_title as above.
+2. export_hrf_ex(&self.document, &fallback_title, None) → hrf: String
+3. std::fs::write(&path, &hrf)
 4. On success:
-   - Set `self.current_file_path = Some(path.clone())`
-   - Call `self.push_recent(path)` (in-memory only)
-   - Call `save_recent_files(&self.recent_files)` (best-effort, failures silently ignored)
-   - Set `self.autosave_dirty = false`
-   - Show toast only when `path != old_current_file_path` (i.e. first save or Save As to new path): `"Saved to <filename>"`
-   - Cmd+S to the already-known path is silent (no toast) to avoid spam
-5. On failure: show toast `"Save failed: <os error>"`, leave state unchanged.
+   a. let is_new_path = self.current_file_path.as_ref() != Some(&path);
+   b. self.push_recent(path.clone())     [in-memory, see below]
+   c. self.current_file_path = Some(path) [consumes path]
+   d. save_recent_files(&self.recent_files) [best-effort, see below]
+   e. self.autosave_dirty = false
+   f. if is_new_path { show toast "Saved to <filename>" }
+      // Cmd+S to already-known path is silent to avoid toast spam
+      // Cmd+Shift+S (Save As) always passes a path != old path, so always toasts
+5. On failure: toast "Save failed: <os error>"; leave state unchanged.
+```
 
-### `push_recent(&mut self, path: PathBuf)` method — in-memory only
+### `push_recent(&mut self, path: PathBuf)` — in-memory only
 
 Does NOT call `save_recent_files`. Callers persist after calling this.
 
@@ -105,29 +106,31 @@ Does NOT call `save_recent_files`. Callers persist after calling this.
 
 ### `new_with_file` update
 
-`new_with_file(cc, Some(path))` must be updated to add these three lines after the document is loaded successfully:
+Inside the `Ok(mut doc) => { ... }` arm of `new_with_file` (around `src/app/mod.rs:444`), after `app.pending_fit = true`, add:
 
 ```rust
+app.push_recent(path.clone());    // path is still owned here (inside Ok arm)
 app.current_file_path = Some(path.clone());
-app.push_recent(path.clone());
 save_recent_files(&app.recent_files);
 ```
 
-This is an explicit addition to the existing `new_with_file` body in `src/app/mod.rs` (~line 428–461).
+Note: `path` is the variable bound by the outer `if let Some(path) = file` at the top of `new_with_file`. It is still in scope inside the `Ok` arm. Do not place these lines after the outer `if let` block — `path` would be out of scope.
 
 ---
 
 ## Window Title
 
-The existing title block at `src/app/mod.rs:783–791` is **replaced** (not supplemented — only one `ctx.send_viewport_cmd(Title(...))` call must exist):
+The existing title block at `src/app/mod.rs:783–791` is **replaced entirely** (delete those lines and substitute the block below — do not add alongside):
 
 ```rust
 let filename = self.current_file_path.as_ref()
     .and_then(|p| p.file_name())
     .map(|n| n.to_string_lossy().into_owned());
+// dirty_mark is only shown when a file path is known; for unsaved new documents
+// autosave already handles recovery, so no indicator is intentional.
 let dirty_mark = if self.autosave_dirty && self.current_file_path.is_some() { "•" } else { "" };
 
-let title = match (filename, n) {
+let title = match (&filename, n) {
     (Some(f), 0) => format!("{f}{dirty_mark}"),
     (Some(f), _) => format!("{f}{dirty_mark} — {n}N {e}E"),
     (None,    0) => "Light Figma".to_string(),
@@ -136,7 +139,7 @@ let title = match (filename, n) {
 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 ```
 
-The `•` dirty indicator is U+2022 BULLET, which renders correctly on macOS and Windows. Linux rendering depends on the window manager; acceptable.
+The `•` dirty indicator is U+2022 BULLET, correct on macOS/Windows. Linux depends on window manager; acceptable.
 
 ---
 
@@ -152,23 +155,23 @@ Same base directory as `autosave.json`:
 $XDG_DATA_HOME/light-figma/recent-files.json                   (Linux)
 ```
 
-Three free functions alongside `autosave_path()`:
+Three free functions alongside `autosave_path()` in `src/app/mod.rs`:
 
 ```rust
 fn recent_files_path() -> PathBuf { /* same base-dir logic as autosave_path() */ }
 fn load_recent_files() -> Vec<PathBuf> { /* deserialize JSON; return empty vec on any error */ }
-fn save_recent_files(files: &[PathBuf]) { /* serialize to JSON; silently ignore write errors */ }
+fn save_recent_files(files: &[PathBuf]) { /* serialize to JSON; silently ignore all errors */ }
 ```
 
-`recent_files` is loaded in `new()` via `load_recent_files()`. Non-existing paths are retained and shown dimmed; they are removed only when clicked.
+`recent_files` is loaded in `new()` via `load_recent_files()`. Non-existing paths are retained and shown dimmed; removed only when clicked.
 
 ---
 
 ## Recent Files in Template Gallery
 
-### Return type change
+### `GallerySelection` enum
 
-`draw_template_gallery` currently returns `Option<String>`. This changes to:
+Defined in `src/app/template_gallery.rs` with `pub(crate)` visibility (accessible from `mod.rs`'s `update()` loop via the `super::template_gallery::GallerySelection` path, or re-exported at the top of `mod.rs` with `use crate::app::template_gallery::GallerySelection`).
 
 ```rust
 pub(crate) enum GallerySelection {
@@ -178,16 +181,16 @@ pub(crate) enum GallerySelection {
 }
 ```
 
-The call site in `update()` matches on the new enum. Existing template-load and empty-canvas arms are unchanged. The new `RecentFile(path)` arm reads the file, parses, auto-layouts, sets `current_file_path`, calls `push_recent`, calls `save_recent_files`, shows toast `"Opened <filename>"`.
+`draw_template_gallery` return type changes from `Option<String>` to `Option<GallerySelection>`. The call site in `update()` matches on the new enum. Existing template-load and empty-canvas arms are unchanged in behaviour. New `RecentFile(path)` arm: read file, parse HRF, auto-layout, set `current_file_path`, `push_recent`, `save_recent_files`, toast `"Opened <filename>"`.
 
 ### Rendering
 
-A **"Recent"** section renders above all template categories when `self.recent_files` is non-empty. Each entry shows:
+A **"Recent"** section renders above all template categories when `self.recent_files` is non-empty. Each entry:
 - Filename bold, e.g. `arch.spec`
 - Full path dimmed, right-truncated to 40 chars, e.g. `…/project/arch.spec`
-- Missing file: warning color with `(not found)` suffix
+- Missing file: warning color, `(not found)` suffix
 
-**Deferred removal of missing entries:** collect missing paths into a `to_remove: Vec<PathBuf>` during rendering, then after the UI closure: `self.recent_files.retain(|p| !to_remove.contains(p))` and call `save_recent_files`. This avoids mutating `self.recent_files` while iterating inside the UI closure.
+**Deferred removal:** collect missing paths into `to_remove: Vec<PathBuf>` during rendering; after the UI closure call `self.recent_files.retain(|p| !to_remove.contains(p))` then `save_recent_files`. This avoids mutating `self.recent_files` inside the UI closure.
 
 ---
 
@@ -195,7 +198,7 @@ A **"Recent"** section renders above all template categories when `self.recent_f
 
 ### `PaletteAction` change
 
-`PaletteAction` is currently `#[derive(Clone, Copy)]`. Adding file indexing requires removing `Copy`:
+Remove `Copy` from the derive list in `command_palette.rs:15`:
 
 ```rust
 #[derive(Clone)]  // Copy removed
@@ -205,11 +208,11 @@ pub(crate) enum PaletteAction {
 }
 ```
 
-All existing sites in `command_palette.rs` that copy a `PaletteAction` (e.g. `execute_action = Some(entry.action)`) become `entry.action.clone()`. This is a mechanical change confined to `command_palette.rs`.
+All sites in `command_palette.rs` that copy a `PaletteAction` (lines ~136, ~237: `execute_action = Some(entry.action)`) become `entry.action.clone()`. Change is mechanical and confined to `command_palette.rs`.
 
 ### `OpenRecentFile` dispatch
 
-The `OpenRecentFile(idx)` variant is handled inside the existing `run_palette_action` method in `command_palette.rs`, which is already a `&mut self` method on `FlowchartApp` and has direct access to `self.recent_files`. No dispatch through `update()` is needed.
+Handled inside `run_palette_action` (`command_palette.rs:264`), which is already `&mut self` on `FlowchartApp` with direct access to `self.recent_files`:
 
 ```rust
 PaletteAction::OpenRecentFile(idx) => {
@@ -223,10 +226,10 @@ PaletteAction::OpenRecentFile(idx) => {
 
 Two filtered lists, concatenated for display:
 
-1. **Recent file matches:** `recent_files` entries whose filename contains the query (case-insensitive), up to 5 when query is empty.
+1. **Recent file matches:** `recent_files` entries whose filename contains the query (case-insensitive); up to 5 when query is empty.
 2. **Built-in command matches:** existing static entries matching the query.
 
-When query is empty: up to 5 recents first, then all built-ins. When query is non-empty: recent matches precede built-in matches. Ties within each group preserve insertion order.
+When query is empty: up to 5 recents first, then all built-ins. When non-empty: recent matches precede built-ins. Ties within each group preserve insertion order.
 
 ---
 
@@ -241,23 +244,23 @@ Cmd+S
 Cmd+Shift+S
   └─ rfd Save dialog → save_to_path(chosen) → toast
 
-Cmd+Shift+C  (moved from Cmd+Shift+S)
+Cmd+Shift+Y  (moved from Cmd+Shift+S)
   └─ export_hrf_ex → copy to clipboard → toast "Spec copied"
 
 save_to_path(path)
   └─ export_hrf_ex(fallback_title, None)
      → fs::write
-     → current_file_path = path
-     → push_recent(path)        [in-memory]
-     → save_recent_files()      [best-effort]
+     → push_recent(path.clone())   [in-memory]
+     → current_file_path = Some(path)
+     → save_recent_files()         [best-effort]
      → autosave_dirty = false
      → toast if new path
 
 Gallery / Palette open recent file
   └─ fs::read → parse_hrf → auto_layout
      → document = doc
-     → current_file_path = path
-     → push_recent(path)        [in-memory]
+     → push_recent(path.clone())   [in-memory]
+     → current_file_path = Some(path)
      → save_recent_files()
      → toast "Opened <filename>"
 ```
@@ -268,10 +271,10 @@ Gallery / Palette open recent file
 
 | File | Change |
 |------|--------|
-| `src/app/mod.rs` | 2 new struct fields; init in `new()` + explicit additions to `new_with_file()`; `save_to_path()`, `push_recent()` methods; `recent_files_path()`, `load_recent_files()`, `save_recent_files()` free functions; replace title block at lines 783–791 |
-| `src/app/shortcuts.rs` | Cmd+S and Cmd+Shift+S handlers; move clipboard-copy from Cmd+Shift+S to Cmd+Shift+C |
-| `src/app/template_gallery.rs` | `GallerySelection` enum replaces `Option<String>`; "Recent" section; deferred removal |
-| `src/app/command_palette.rs` | `PaletteAction` loses `Copy`; `OpenRecentFile(usize)` variant; two-list ranking; `clone()` at copy sites |
+| `src/app/mod.rs` | 2 new fields; init in `new()`; explicit additions inside `Ok` arm of `new_with_file()`; `save_to_path()`, `push_recent()` methods; `recent_files_path()`, `load_recent_files()`, `save_recent_files()` free functions; replace title block at lines 783–791 |
+| `src/app/shortcuts.rs` | Add Cmd+S and Cmd+Shift+S handlers; rebind existing Cmd+Shift+S clipboard-copy to Cmd+Shift+Y (change modifier at line 935 only) |
+| `src/app/template_gallery.rs` | `GallerySelection` enum; `draw_template_gallery` return type; "Recent" section; deferred removal |
+| `src/app/command_palette.rs` | `PaletteAction` loses `Copy`; `OpenRecentFile(usize)` variant; `.clone()` at copy sites; two-list ranking; `OpenRecentFile` arm in `run_palette_action` |
 
 No new crates. No changes to model, parser, or export code.
 
@@ -293,6 +296,6 @@ No new crates. No changes to model, parser, or export code.
 
 - Unit test: `push_recent` deduplicates and caps at 10 entries.
 - Unit test: `recent_files_path()` returns a path under the correct platform directory.
-- Unit test: title string logic covers all four `(filename, node_count)` combinations including dirty marker.
+- Unit test: title string covers all four `(filename, node_count)` + dirty-mark combinations.
 - Integration: `save_to_path` round-trip — save a document, re-parse the written file, assert node/edge counts match.
 - All existing 102 tests continue to pass.
