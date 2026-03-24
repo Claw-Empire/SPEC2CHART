@@ -31,7 +31,7 @@ Both initialize to `None` / empty `Vec` in `new()`.
 
 The existing Cmd+Shift+S binding (`src/app/shortcuts.rs:934–959`) copies the HRF spec to the system clipboard. Save As takes over Cmd+Shift+S (the macOS standard). Clipboard-copy moves to **Cmd+Shift+Y** ("yank" — the Unix/vim idiom for copy-to-clipboard, and confirmed free in the current shortcut map).
 
-Full audit of Cmd+Shift bindings confirmed taken: Z, ], [, C, V, A, K, ., ,, E, I, T, F, S, R, X, W, H. Cmd+Shift+Y is unused.
+Full audit of Cmd+Shift bindings confirmed taken: Z, ], [, C, V, A, K, ., ,, E, I, T, F, S, R, X, W, H, L. Cmd+Shift+Y is unused.
 
 | Shortcut | Action |
 |----------|--------|
@@ -109,12 +109,12 @@ Does NOT call `save_recent_files`. Callers persist after calling this.
 Inside the `Ok(mut doc) => { ... }` arm of `new_with_file` (around `src/app/mod.rs:444`), after `app.pending_fit = true`, add:
 
 ```rust
-app.push_recent(path.clone());    // path is still owned here (inside Ok arm)
-app.current_file_path = Some(path.clone());
+app.push_recent(path.clone());    // clone: push_recent takes PathBuf by value
+app.current_file_path = Some(path); // move: consumes path (last use)
 save_recent_files(&app.recent_files);
 ```
 
-Note: `path` is the variable bound by the outer `if let Some(path) = file` at the top of `new_with_file`. It is still in scope inside the `Ok` arm. Do not place these lines after the outer `if let` block — `path` would be out of scope.
+Note: `path` is the variable bound by the outer `if let Some(path) = file` at the top of `new_with_file`. It is still in scope inside the `Ok` arm. Do not place these lines after the outer `if let` block — `path` would be out of scope. `push_recent` receives a clone so `path` remains valid for `Some(path)` on the next line.
 
 ---
 
@@ -162,6 +162,8 @@ fn recent_files_path() -> PathBuf { /* same base-dir logic as autosave_path() */
 fn load_recent_files() -> Vec<PathBuf> { /* deserialize JSON; return empty vec on any error */ }
 fn save_recent_files(files: &[PathBuf]) { /* serialize to JSON; silently ignore all errors */ }
 ```
+
+JSON format is a flat array of UTF-8 path strings, e.g. `["/Users/alice/proj/arch.spec", "/tmp/test.spec"]`. No wrapper object. Serialization: `serde_json::to_string(files)` where `files: &[PathBuf]` serializes directly because `PathBuf` implements `Serialize` via its string representation. Deserialization: `serde_json::from_str::<Vec<PathBuf>>(s)`.
 
 `recent_files` is loaded in `new()` via `load_recent_files()`. Non-existing paths are retained and shown dimmed; removed only when clicked.
 
@@ -222,14 +224,35 @@ PaletteAction::OpenRecentFile(idx) => {
 }
 ```
 
+### Entry injection
+
+`build_entries()` is a free function (no `self`) that returns a static `Vec<PaletteEntry>`. Recent-file entries must be built separately before the `Window::show` closure, where `self` is accessible:
+
+```rust
+// Inside draw_command_palette(), before the Window::show(...) { ... } block:
+let recent_entries: Vec<PaletteEntry> = self.recent_files
+    .iter()
+    .enumerate()
+    .map(|(i, path)| PaletteEntry {
+        label: path.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+        action: PaletteAction::OpenRecentFile(i),
+        ..PaletteEntry::default()
+    })
+    .collect();
+```
+
+`PaletteEntry::default()` supplies the remaining fields (e.g. `group`, `icon`) with empty/None values. The indices in `OpenRecentFile(i)` are stable for the lifetime of this frame because `self.recent_files` is not mutated until `run_palette_action` is called after the UI closure returns.
+
 ### Ranking
 
 Two filtered lists, concatenated for display:
 
-1. **Recent file matches:** `recent_files` entries whose filename contains the query (case-insensitive); up to 5 when query is empty.
-2. **Built-in command matches:** existing static entries matching the query.
+1. **Recent file matches:** filter `recent_entries` by filename containing the query (case-insensitive); take up to 5 when query is empty, all matches when non-empty.
+2. **Built-in command matches:** filter `build_entries()` results by the query as before.
 
-When query is empty: up to 5 recents first, then all built-ins. When non-empty: recent matches precede built-ins. Ties within each group preserve insertion order.
+Concatenate: recent matches first, then built-in matches. When query is empty: show up to 5 recents then all built-ins. Ties within each group preserve insertion order.
 
 ---
 
