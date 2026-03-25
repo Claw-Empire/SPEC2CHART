@@ -466,7 +466,7 @@ impl FlowchartApp {
         // H = Hypothesis, Y = Assumption (A conflicts with select all), W = evidence (E conflicts with Connect)
         let dt_keys = [Key::H, Key::Y, Key::W];
         for ((&key, preset)) in dt_keys.iter().zip(dt_presets.iter()) {
-            if !any_text_focused && ctx.input(|i| i.key_pressed(key) && i.modifiers.is_none()) {
+            if !any_text_focused && self.selection.node_ids.is_empty() && ctx.input(|i| i.key_pressed(key) && i.modifiers.is_none()) {
                 let (shape, fill, label, status) = preset;
                 let canvas_center = {
                     let c = self.canvas_rect.center();
@@ -1170,7 +1170,7 @@ impl FlowchartApp {
                     format!("Bookmark {} saved", slot + 1),
                     std::time::Instant::now(),
                 ));
-            } else if !any_text_focused && ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_exact(shift_only)) {
+            } else if !any_text_focused && self.selection.node_ids.is_empty() && ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_exact(shift_only)) {
                 if let Some(bv) = &self.bookmarks[slot].clone() {
                     self.zoom_target = bv.zoom;
                     self.pan_target = Some(bv.offset);
@@ -1234,8 +1234,8 @@ impl FlowchartApp {
             }
         }
 
-        // Cmd+L = auto-layout (hierarchical, animated)
-        if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) {
+        // Cmd+R = auto-layout / Rearrange (hierarchical, animated)
+        if ctx.input(|i| i.key_pressed(Key::R) && i.modifiers.matches_exact(cmd)) {
             // Compute hierarchical layout on a document clone, then animate toward results
             let mut doc_clone = self.document.clone();
             for node in doc_clone.nodes.iter_mut() {
@@ -1365,8 +1365,8 @@ impl FlowchartApp {
             }
         }
 
-        // W = toggle focus mode (dim non-selected)
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.is_none()) {
+        // Shift+F = toggle focus mode (dim non-selected; W freed for design-thinking Evidence)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.shift && !i.modifiers.command && !i.modifiers.alt) {
             self.focus_mode = !self.focus_mode;
             let msg = if self.focus_mode { "Focus Mode On" } else { "Focus Mode Off" };
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
@@ -1396,8 +1396,8 @@ impl FlowchartApp {
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
         }
 
-        // H = toggle connectivity heatmap
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::H) && i.modifiers.is_none()) {
+        // K = toggle connectivity heatmap (H is reserved for design-thinking Hypothesis)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::K) && i.modifiers.is_none()) {
             self.show_heatmap = !self.show_heatmap;
             let msg = if self.show_heatmap { "Heatmap On" } else { "Heatmap Off" };
             self.status_message = Some((msg.to_string(), std::time::Instant::now()));
