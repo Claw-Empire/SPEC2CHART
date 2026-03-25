@@ -932,23 +932,21 @@ impl FlowchartApp {
         }
 
         // Cmd+S = save to current path (or open Save As if no path yet)
+        // matches_exact: ensures Cmd+Shift+S (shift also held) does NOT trigger this path
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd)) {
             if let Some(path) = self.current_file_path.clone() {
                 self.save_to_path(path);
-            } else {
-                if let Some(path) = rfd::FileDialog::new()
+            } else if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Spec / YAML", &["spec", "yaml"])
                     .set_file_name("diagram.spec")
                     .save_file()
-                {
-                    self.save_to_path(path);
-                }
+            {
+                self.save_to_path(path);
             }
         }
 
         // Cmd+Shift+S = always open Save As dialog
-        let cmd_shift_s = Modifiers { shift: true, ..cmd };
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd_shift_s)) {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd_shift)) {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("Spec / YAML", &["spec", "yaml"])
                 .set_file_name("diagram.spec")
@@ -959,8 +957,7 @@ impl FlowchartApp {
         }
 
         // Cmd+Shift+Y = copy current diagram as HRF spec to system clipboard (moved from Cmd+Shift+S)
-        let cmd_shift_y = Modifiers { shift: true, ..cmd };
-        if ctx.input(|i| i.key_pressed(Key::Y) && i.modifiers.matches_exact(cmd_shift_y)) {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Y) && i.modifiers.matches_exact(cmd_shift)) {
             let is_3d = matches!(self.view_mode, super::ViewMode::ThreeD);
             let bg_str = match self.bg_pattern {
                 super::BgPattern::Dots      => "dots",
