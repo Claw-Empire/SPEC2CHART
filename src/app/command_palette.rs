@@ -1,18 +1,19 @@
 //! Command palette — Cmd+K searchable action list.
 
 use egui::{Align2, Color32, Frame, Key, Margin, RichText, Stroke, Vec2};
+use std::borrow::Cow;
 
 use super::{BgPattern, DiagramMode, FlowchartApp};
 use crate::model::NodeId;
 
 struct PaletteEntry {
     icon:     &'static str,
-    label:    &'static str,
+    label:    Cow<'static, str>,
     category: &'static str,
     action:   PaletteAction,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum PaletteAction {
     FitAll,
     ZoomIn,
@@ -90,6 +91,7 @@ enum PaletteAction {
     LoadPostmortemTemplate,
     LoadSupportSLAMatrixTemplate,
     LoadSupportQueueTemplate,
+    OpenRecentFile(usize),
 }
 
 impl FlowchartApp {
@@ -113,15 +115,34 @@ impl FlowchartApp {
             return;
         }
 
+        let recent_entries: Vec<PaletteEntry> = self.recent_files
+            .iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let filename = path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                PaletteEntry {
+                    icon:     "📄",
+                    label:    filename.into(),
+                    category: "Recent",
+                    action:   PaletteAction::OpenRecentFile(i),
+                }
+            })
+            .collect();
         let entries = build_entries();
         let q = self.command_palette_query.to_lowercase();
-        let matches: Vec<&PaletteEntry> = if q.is_empty() {
-            entries.iter().collect()
-        } else {
-            entries.iter().filter(|e| {
-                e.label.to_lowercase().contains(&q) || e.category.to_lowercase().contains(&q)
-            }).collect()
-        };
+        let recent_limit = if q.is_empty() { 5 } else { recent_entries.len() };
+        let recent_matches: Vec<&PaletteEntry> = recent_entries.iter()
+            .filter(|e| q.is_empty() || e.label.to_lowercase().contains(&q))
+            .take(recent_limit)
+            .collect();
+        let builtin_matches: Vec<&PaletteEntry> = entries.iter()
+            .filter(|e| q.is_empty() || e.label.to_lowercase().contains(&q) || e.category.to_lowercase().contains(&q))
+            .collect();
+        let matches: Vec<&PaletteEntry> = recent_matches.into_iter()
+            .chain(builtin_matches)
+            .collect();
 
         // Clamp cursor
         let max_idx = matches.len().saturating_sub(1);
@@ -137,7 +158,7 @@ impl FlowchartApp {
         let mut execute_action: Option<PaletteAction> = None;
         if enter {
             if let Some(entry) = matches.get(self.command_palette_cursor) {
-                execute_action = Some(entry.action);
+                execute_action = Some(entry.action.clone());
             }
             self.show_command_palette = false;
         }
@@ -225,7 +246,7 @@ impl FlowchartApp {
                                         );
                                         ui.add_space(6.0);
                                         ui.label(
-                                            RichText::new(entry.label)
+                                            RichText::new(entry.label.as_ref())
                                                 .size(13.0)
                                                 .color(if is_sel { text_primary } else { text_secondary }),
                                         );
@@ -234,7 +255,7 @@ impl FlowchartApp {
                             });
 
                         if row.response.interact(egui::Sense::click()).clicked() {
-                            execute_action = Some(entry.action);
+                            execute_action = Some(entry.action.clone());
                         }
                         if row.response.hovered() {
                             self.command_palette_cursor = i;
@@ -948,6 +969,42 @@ impl FlowchartApp {
                     Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
                 }
             }
+            PaletteAction::OpenRecentFile(idx) => {
+                if let Some(path) = self.recent_files.get(idx).cloned() {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => match crate::specgraph::hrf::parse_hrf(&content) {
+                            Ok(mut doc) => {
+                                crate::specgraph::layout::auto_layout(&mut doc);
+                                self.history.push(&self.document);
+                                self.autosave_dirty = false;
+                                self.document = doc;
+                                self.selection.clear();
+                                self.pending_fit = true;
+                                let fname = path.file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                self.push_recent(path.clone());
+                                self.current_file_path = Some(path);
+                                super::save_recent_files(&self.recent_files);
+                                self.status_message = Some((format!("Opened {fname}"), std::time::Instant::now()));
+                            }
+                            Err(e) => {
+                                self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                            }
+                        },
+                        Err(e) => {
+                            let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                self.recent_files.retain(|p| p != &path);
+                                super::save_recent_files(&self.recent_files);
+                                self.status_message = Some((format!("File not found: {fname}"), std::time::Instant::now()));
+                            } else {
+                                self.status_message = Some((format!("Could not open {fname}: {e}"), std::time::Instant::now()));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -955,86 +1012,86 @@ impl FlowchartApp {
 fn build_entries() -> Vec<PaletteEntry> {
     vec![
         // View
-        PaletteEntry { icon: "⊙", label: "Fit all to view",           category: "View",    action: PaletteAction::FitAll },
-        PaletteEntry { icon: "⊕", label: "Zoom in",                   category: "View",    action: PaletteAction::ZoomIn },
-        PaletteEntry { icon: "⊖", label: "Zoom out",                  category: "View",    action: PaletteAction::ZoomOut },
-        PaletteEntry { icon: "⊟", label: "Zoom to 100%",              category: "View",    action: PaletteAction::ZoomReset },
-        PaletteEntry { icon: "⊞", label: "Toggle grid",               category: "View",    action: PaletteAction::ToggleGrid },
-        PaletteEntry { icon: "⊠", label: "Toggle snap to grid",       category: "View",    action: PaletteAction::ToggleSnap },
-        PaletteEntry { icon: "◎", label: "Focus mode",                category: "View",    action: PaletteAction::ToggleFocusMode },
-        PaletteEntry { icon: "▣", label: "Presentation mode",         category: "View",    action: PaletteAction::TogglePresentation },
-        PaletteEntry { icon: "≋", label: "Flow animation",            category: "View",    action: PaletteAction::ToggleFlowAnimation },
-        PaletteEntry { icon: "☀", label: "Toggle dark/light mode",   category: "View",    action: PaletteAction::ToggleDarkMode },
-        PaletteEntry { icon: "·", label: "Background: dots",          category: "View",    action: PaletteAction::SetBgDots },
-        PaletteEntry { icon: "—", label: "Background: lines",         category: "View",    action: PaletteAction::SetBgLines },
-        PaletteEntry { icon: "#", label: "Background: crosshatch",    category: "View",    action: PaletteAction::SetBgCrosshatch },
-        PaletteEntry { icon: " ", label: "Background: none",          category: "View",    action: PaletteAction::SetBgNone },
+        PaletteEntry { icon: "⊙", label: "Fit all to view".into(),           category: "View",    action: PaletteAction::FitAll },
+        PaletteEntry { icon: "⊕", label: "Zoom in".into(),                   category: "View",    action: PaletteAction::ZoomIn },
+        PaletteEntry { icon: "⊖", label: "Zoom out".into(),                  category: "View",    action: PaletteAction::ZoomOut },
+        PaletteEntry { icon: "⊟", label: "Zoom to 100%".into(),              category: "View",    action: PaletteAction::ZoomReset },
+        PaletteEntry { icon: "⊞", label: "Toggle grid".into(),               category: "View",    action: PaletteAction::ToggleGrid },
+        PaletteEntry { icon: "⊠", label: "Toggle snap to grid".into(),       category: "View",    action: PaletteAction::ToggleSnap },
+        PaletteEntry { icon: "◎", label: "Focus mode".into(),                category: "View",    action: PaletteAction::ToggleFocusMode },
+        PaletteEntry { icon: "▣", label: "Presentation mode".into(),         category: "View",    action: PaletteAction::TogglePresentation },
+        PaletteEntry { icon: "≋", label: "Flow animation".into(),            category: "View",    action: PaletteAction::ToggleFlowAnimation },
+        PaletteEntry { icon: "☀", label: "Toggle dark/light mode".into(),   category: "View",    action: PaletteAction::ToggleDarkMode },
+        PaletteEntry { icon: "·", label: "Background: dots".into(),          category: "View",    action: PaletteAction::SetBgDots },
+        PaletteEntry { icon: "—", label: "Background: lines".into(),         category: "View",    action: PaletteAction::SetBgLines },
+        PaletteEntry { icon: "#", label: "Background: crosshatch".into(),    category: "View",    action: PaletteAction::SetBgCrosshatch },
+        PaletteEntry { icon: " ", label: "Background: none".into(),          category: "View",    action: PaletteAction::SetBgNone },
         // Panels
-        PaletteEntry { icon: "◀", label: "Toggle left toolbar",       category: "Panels",  action: PaletteAction::ToggleToolbarCollapse },
-        PaletteEntry { icon: "▶", label: "Toggle right properties",   category: "Panels",  action: PaletteAction::TogglePropertiesCollapse },
+        PaletteEntry { icon: "◀", label: "Toggle left toolbar".into(),       category: "Panels",  action: PaletteAction::ToggleToolbarCollapse },
+        PaletteEntry { icon: "▶", label: "Toggle right properties".into(),   category: "Panels",  action: PaletteAction::TogglePropertiesCollapse },
         // Edit
-        PaletteEntry { icon: "↩", label: "Undo",                      category: "Edit",    action: PaletteAction::Undo },
-        PaletteEntry { icon: "↪", label: "Redo",                      category: "Edit",    action: PaletteAction::Redo },
-        PaletteEntry { icon: "⧉", label: "Duplicate selected",        category: "Edit",    action: PaletteAction::Duplicate },
-        PaletteEntry { icon: "✕", label: "Delete selected",           category: "Edit",    action: PaletteAction::DeleteSelected },
-        PaletteEntry { icon: "⊙", label: "Auto-layout (hierarchical)",category: "Edit",    action: PaletteAction::AutoLayout },
-        PaletteEntry { icon: "≡", label: "Copy node style",           category: "Edit",    action: PaletteAction::CopyStyle },
-        PaletteEntry { icon: "≣", label: "Paste node style",          category: "Edit",    action: PaletteAction::PasteStyle },
+        PaletteEntry { icon: "↩", label: "Undo".into(),                      category: "Edit",    action: PaletteAction::Undo },
+        PaletteEntry { icon: "↪", label: "Redo".into(),                      category: "Edit",    action: PaletteAction::Redo },
+        PaletteEntry { icon: "⧉", label: "Duplicate selected".into(),        category: "Edit",    action: PaletteAction::Duplicate },
+        PaletteEntry { icon: "✕", label: "Delete selected".into(),           category: "Edit",    action: PaletteAction::DeleteSelected },
+        PaletteEntry { icon: "⊙", label: "Auto-layout (hierarchical)".into(),category: "Edit",    action: PaletteAction::AutoLayout },
+        PaletteEntry { icon: "≡", label: "Copy node style".into(),           category: "Edit",    action: PaletteAction::CopyStyle },
+        PaletteEntry { icon: "≣", label: "Paste node style".into(),          category: "Edit",    action: PaletteAction::PasteStyle },
         // Selection
-        PaletteEntry { icon: "⬚", label: "Select all",                category: "Select",  action: PaletteAction::SelectAll },
-        PaletteEntry { icon: "⊘", label: "Deselect all",              category: "Select",  action: PaletteAction::Deselect },
+        PaletteEntry { icon: "⬚", label: "Select all".into(),                category: "Select",  action: PaletteAction::SelectAll },
+        PaletteEntry { icon: "⊘", label: "Deselect all".into(),              category: "Select",  action: PaletteAction::Deselect },
         // Diagram
-        PaletteEntry { icon: "⬡", label: "Switch to Flowchart mode",  category: "Diagram", action: PaletteAction::SwitchToFlowchart },
-        PaletteEntry { icon: "◫", label: "Switch to ER mode",         category: "Diagram", action: PaletteAction::SwitchToER },
-        PaletteEntry { icon: "★", label: "Switch to FigJam mode",     category: "Diagram", action: PaletteAction::SwitchToFigJam },
-        PaletteEntry { icon: "⊟", label: "Toggle timeline mode",      category: "Diagram", action: PaletteAction::ToggleTimelineMode },
-        PaletteEntry { icon: "💡", label: "Load hypothesis map template",    category: "Templates", action: PaletteAction::LoadHypothesisTemplate },
-        PaletteEntry { icon: "⊞", label: "Load SWOT analysis template",     category: "Templates", action: PaletteAction::LoadSwotTemplate },
-        PaletteEntry { icon: "📅", label: "Load roadmap timeline template",  category: "Templates", action: PaletteAction::LoadRoadmapTemplate },
-        PaletteEntry { icon: "⇄",  label: "Load force field analysis",       category: "Templates", action: PaletteAction::LoadForceFieldTemplate },
-        PaletteEntry { icon: "◫",  label: "Load lean canvas template",       category: "Templates", action: PaletteAction::LoadLeanCanvasTemplate },
-        PaletteEntry { icon: "⊙",  label: "Load OKR tree template",          category: "Templates", action: PaletteAction::LoadOkrTreeTemplate },
-        PaletteEntry { icon: "❓",  label: "Load 5 Whys root cause template", category: "Templates", action: PaletteAction::LoadFiveWhysTemplate },
-        PaletteEntry { icon: "⊞",  label: "Load Impact/Effort matrix",        category: "Templates", action: PaletteAction::LoadImpactEffortTemplate },
-        PaletteEntry { icon: "🗺",  label: "Load customer journey map",        category: "Templates", action: PaletteAction::LoadCustomerJourneyTemplate },
-        PaletteEntry { icon: "📋",  label: "Load decision record log (ADR)",   category: "Templates", action: PaletteAction::LoadDecisionRecordTemplate },
-        PaletteEntry { icon: "🧠",  label: "Load empathy map template",        category: "Templates", action: PaletteAction::LoadEmpathyMapTemplate },
-        PaletteEntry { icon: "💎",  label: "Load value proposition canvas",    category: "Templates", action: PaletteAction::LoadValuePropositionTemplate },
-        PaletteEntry { icon: "🐟",  label: "Load fishbone (Ishikawa) diagram", category: "Templates", action: PaletteAction::LoadFishboneTemplate },
-        PaletteEntry { icon: "🌍",  label: "Load PESTLE analysis template",    category: "Templates", action: PaletteAction::LoadPestleTemplate },
-        PaletteEntry { icon: "🧠",  label: "Load mind map template",           category: "Templates", action: PaletteAction::LoadMindMapTemplate },
-        PaletteEntry { icon: "💀",  label: "Load premortem analysis",          category: "Templates", action: PaletteAction::LoadPremorttemTemplate },
-        PaletteEntry { icon: "🌹",  label: "Load Rose-Bud-Thorn retro",        category: "Templates", action: PaletteAction::LoadRoseBudThornTemplate },
-        PaletteEntry { icon: "◈",   label: "Load Double Diamond design process", category: "Templates", action: PaletteAction::LoadDoubleDiamondTemplate },
-        PaletteEntry { icon: "⊞",  label: "Load Assumption Map (test vs assume)", category: "Templates", action: PaletteAction::LoadAssumptionMapTemplate },
-        PaletteEntry { icon: "🏢",  label: "Load Business Model Canvas (9-block)", category: "Templates", action: PaletteAction::LoadBusinessModelCanvasTemplate },
-        PaletteEntry { icon: "🧬",  label: "Load Hypothesis Validation Canvas",    category: "Templates", action: PaletteAction::LoadHypothesisCanvasTemplate },
-        PaletteEntry { icon: "🗺",  label: "Load User Story Map template",         category: "Templates", action: PaletteAction::LoadStoryMapTemplate },
-        PaletteEntry { icon: "🧊",  label: "Load ICE Scoring Matrix (prioritize experiments)", category: "Templates", action: PaletteAction::LoadIceScoringTemplate },
-        PaletteEntry { icon: "💼",  label: "Load Jobs To Be Done canvas",          category: "Templates", action: PaletteAction::LoadJobsToBeDoneTemplate },
-        PaletteEntry { icon: "🔁",  label: "Load Causal Loop Diagram (feedback loops)", category: "Templates", action: PaletteAction::LoadCausalLoopTemplate },
-        PaletteEntry { icon: "🗃",  label: "Load Experiment Board (backlog → running → validated)", category: "Templates", action: PaletteAction::LoadExperimentBoardTemplate },
-        PaletteEntry { icon: "🌱",  label: "Load Theory of Change (inputs → activities → impact)", category: "Templates", action: PaletteAction::LoadTheoryOfChangeTemplate },
-        PaletteEntry { icon: "⚔",   label: "Load Competitive Analysis Matrix",      category: "Templates", action: PaletteAction::LoadCompetitiveAnalysisTemplate },
-        PaletteEntry { icon: "🔁",  label: "Load What? So What? Now What? (debrief)", category: "Templates", action: PaletteAction::LoadWhatSoWhatTemplate },
-        PaletteEntry { icon: "⊞",  label: "Load 2×2 Prioritization Matrix (Impact vs Effort)", category: "Templates", action: PaletteAction::LoadTwoByTwoMatrixTemplate },
-        PaletteEntry { icon: "⚡",  label: "Load Design Sprint (5-day Map/Sketch/Decide/Prototype/Test)", category: "Templates", action: PaletteAction::LoadDesignSprintTemplate },
-        PaletteEntry { icon: "🎯",  label: "Load Problem/Solution Fit canvas",     category: "Templates", action: PaletteAction::LoadProblemSolutionFitTemplate },
-        PaletteEntry { icon: "🎫",  label: "Load Support Ticket Flow (intake → triage → resolve → close)", category: "Templates", action: PaletteAction::LoadSupportTicketFlowTemplate },
-        PaletteEntry { icon: "🚨",  label: "Load Incident Response Runbook (SEV-1/2/3 playbook)", category: "Templates", action: PaletteAction::LoadIncidentResponseTemplate },
-        PaletteEntry { icon: "📊",  label: "Load Support Escalation Matrix (L1→L4 tiers)",        category: "Templates", action: PaletteAction::LoadSupportEscalationMatrixTemplate },
-        PaletteEntry { icon: "🐛",  label: "Load Bug Triage Process (report → fix → verify)",     category: "Templates", action: PaletteAction::LoadBugTriageTemplate },
-        PaletteEntry { icon: "📚",  label: "Load Knowledge Base Structure (categories + lifecycle)", category: "Templates", action: PaletteAction::LoadKnowledgeBaseStructureTemplate },
-        PaletteEntry { icon: "📣",  label: "Load Voice of Customer (signals → themes → actions)", category: "Templates", action: PaletteAction::LoadVoiceOfCustomerTemplate },
-        PaletteEntry { icon: "🚀",  label: "Load Customer Onboarding Journey (sign-up → aha moment → health)", category: "Templates", action: PaletteAction::LoadCustomerOnboardingTemplate },
-        PaletteEntry { icon: "📈",  label: "Load Support Health Dashboard (volume · SLA · CSAT · escalations)", category: "Templates", action: PaletteAction::LoadSupportHealthDashboardTemplate },
-        PaletteEntry { icon: "📋",  label: "Load Incident Postmortem (blameless retro: timeline · root cause · action items)", category: "Templates", action: PaletteAction::LoadPostmortemTemplate },
-        PaletteEntry { icon: "⏱",  label: "Load Support SLA Matrix (P1/P2/P3/P4 response · resolve · escalation targets)", category: "Templates", action: PaletteAction::LoadSupportSLAMatrixTemplate },
-        PaletteEntry { icon: "📋",  label: "Load Support Queue kanban (Intake → Triage → In Progress → Resolved)", category: "Templates", action: PaletteAction::LoadSupportQueueTemplate },
+        PaletteEntry { icon: "⬡", label: "Switch to Flowchart mode".into(),  category: "Diagram", action: PaletteAction::SwitchToFlowchart },
+        PaletteEntry { icon: "◫", label: "Switch to ER mode".into(),         category: "Diagram", action: PaletteAction::SwitchToER },
+        PaletteEntry { icon: "★", label: "Switch to FigJam mode".into(),     category: "Diagram", action: PaletteAction::SwitchToFigJam },
+        PaletteEntry { icon: "⊟", label: "Toggle timeline mode".into(),      category: "Diagram", action: PaletteAction::ToggleTimelineMode },
+        PaletteEntry { icon: "💡", label: "Load hypothesis map template".into(),    category: "Templates", action: PaletteAction::LoadHypothesisTemplate },
+        PaletteEntry { icon: "⊞", label: "Load SWOT analysis template".into(),     category: "Templates", action: PaletteAction::LoadSwotTemplate },
+        PaletteEntry { icon: "📅", label: "Load roadmap timeline template".into(),  category: "Templates", action: PaletteAction::LoadRoadmapTemplate },
+        PaletteEntry { icon: "⇄",  label: "Load force field analysis".into(),       category: "Templates", action: PaletteAction::LoadForceFieldTemplate },
+        PaletteEntry { icon: "◫",  label: "Load lean canvas template".into(),       category: "Templates", action: PaletteAction::LoadLeanCanvasTemplate },
+        PaletteEntry { icon: "⊙",  label: "Load OKR tree template".into(),          category: "Templates", action: PaletteAction::LoadOkrTreeTemplate },
+        PaletteEntry { icon: "❓",  label: "Load 5 Whys root cause template".into(), category: "Templates", action: PaletteAction::LoadFiveWhysTemplate },
+        PaletteEntry { icon: "⊞",  label: "Load Impact/Effort matrix".into(),        category: "Templates", action: PaletteAction::LoadImpactEffortTemplate },
+        PaletteEntry { icon: "🗺",  label: "Load customer journey map".into(),        category: "Templates", action: PaletteAction::LoadCustomerJourneyTemplate },
+        PaletteEntry { icon: "📋",  label: "Load decision record log (ADR)".into(),   category: "Templates", action: PaletteAction::LoadDecisionRecordTemplate },
+        PaletteEntry { icon: "🧠",  label: "Load empathy map template".into(),        category: "Templates", action: PaletteAction::LoadEmpathyMapTemplate },
+        PaletteEntry { icon: "💎",  label: "Load value proposition canvas".into(),    category: "Templates", action: PaletteAction::LoadValuePropositionTemplate },
+        PaletteEntry { icon: "🐟",  label: "Load fishbone (Ishikawa) diagram".into(), category: "Templates", action: PaletteAction::LoadFishboneTemplate },
+        PaletteEntry { icon: "🌍",  label: "Load PESTLE analysis template".into(),    category: "Templates", action: PaletteAction::LoadPestleTemplate },
+        PaletteEntry { icon: "🧠",  label: "Load mind map template".into(),           category: "Templates", action: PaletteAction::LoadMindMapTemplate },
+        PaletteEntry { icon: "💀",  label: "Load premortem analysis".into(),          category: "Templates", action: PaletteAction::LoadPremorttemTemplate },
+        PaletteEntry { icon: "🌹",  label: "Load Rose-Bud-Thorn retro".into(),        category: "Templates", action: PaletteAction::LoadRoseBudThornTemplate },
+        PaletteEntry { icon: "◈",   label: "Load Double Diamond design process".into(), category: "Templates", action: PaletteAction::LoadDoubleDiamondTemplate },
+        PaletteEntry { icon: "⊞",  label: "Load Assumption Map (test vs assume)".into(), category: "Templates", action: PaletteAction::LoadAssumptionMapTemplate },
+        PaletteEntry { icon: "🏢",  label: "Load Business Model Canvas (9-block)".into(), category: "Templates", action: PaletteAction::LoadBusinessModelCanvasTemplate },
+        PaletteEntry { icon: "🧬",  label: "Load Hypothesis Validation Canvas".into(),    category: "Templates", action: PaletteAction::LoadHypothesisCanvasTemplate },
+        PaletteEntry { icon: "🗺",  label: "Load User Story Map template".into(),         category: "Templates", action: PaletteAction::LoadStoryMapTemplate },
+        PaletteEntry { icon: "🧊",  label: "Load ICE Scoring Matrix (prioritize experiments)".into(), category: "Templates", action: PaletteAction::LoadIceScoringTemplate },
+        PaletteEntry { icon: "💼",  label: "Load Jobs To Be Done canvas".into(),          category: "Templates", action: PaletteAction::LoadJobsToBeDoneTemplate },
+        PaletteEntry { icon: "🔁",  label: "Load Causal Loop Diagram (feedback loops)".into(), category: "Templates", action: PaletteAction::LoadCausalLoopTemplate },
+        PaletteEntry { icon: "🗃",  label: "Load Experiment Board (backlog → running → validated)".into(), category: "Templates", action: PaletteAction::LoadExperimentBoardTemplate },
+        PaletteEntry { icon: "🌱",  label: "Load Theory of Change (inputs → activities → impact)".into(), category: "Templates", action: PaletteAction::LoadTheoryOfChangeTemplate },
+        PaletteEntry { icon: "⚔",   label: "Load Competitive Analysis Matrix".into(),      category: "Templates", action: PaletteAction::LoadCompetitiveAnalysisTemplate },
+        PaletteEntry { icon: "🔁",  label: "Load What? So What? Now What? (debrief)".into(), category: "Templates", action: PaletteAction::LoadWhatSoWhatTemplate },
+        PaletteEntry { icon: "⊞",  label: "Load 2×2 Prioritization Matrix (Impact vs Effort)".into(), category: "Templates", action: PaletteAction::LoadTwoByTwoMatrixTemplate },
+        PaletteEntry { icon: "⚡",  label: "Load Design Sprint (5-day Map/Sketch/Decide/Prototype/Test)".into(), category: "Templates", action: PaletteAction::LoadDesignSprintTemplate },
+        PaletteEntry { icon: "🎯",  label: "Load Problem/Solution Fit canvas".into(),     category: "Templates", action: PaletteAction::LoadProblemSolutionFitTemplate },
+        PaletteEntry { icon: "🎫",  label: "Load Support Ticket Flow (intake → triage → resolve → close)".into(), category: "Templates", action: PaletteAction::LoadSupportTicketFlowTemplate },
+        PaletteEntry { icon: "🚨",  label: "Load Incident Response Runbook (SEV-1/2/3 playbook)".into(), category: "Templates", action: PaletteAction::LoadIncidentResponseTemplate },
+        PaletteEntry { icon: "📊",  label: "Load Support Escalation Matrix (L1→L4 tiers)".into(),        category: "Templates", action: PaletteAction::LoadSupportEscalationMatrixTemplate },
+        PaletteEntry { icon: "🐛",  label: "Load Bug Triage Process (report → fix → verify)".into(),     category: "Templates", action: PaletteAction::LoadBugTriageTemplate },
+        PaletteEntry { icon: "📚",  label: "Load Knowledge Base Structure (categories + lifecycle)".into(), category: "Templates", action: PaletteAction::LoadKnowledgeBaseStructureTemplate },
+        PaletteEntry { icon: "📣",  label: "Load Voice of Customer (signals → themes → actions)".into(), category: "Templates", action: PaletteAction::LoadVoiceOfCustomerTemplate },
+        PaletteEntry { icon: "🚀",  label: "Load Customer Onboarding Journey (sign-up → aha moment → health)".into(), category: "Templates", action: PaletteAction::LoadCustomerOnboardingTemplate },
+        PaletteEntry { icon: "📈",  label: "Load Support Health Dashboard (volume · SLA · CSAT · escalations)".into(), category: "Templates", action: PaletteAction::LoadSupportHealthDashboardTemplate },
+        PaletteEntry { icon: "📋",  label: "Load Incident Postmortem (blameless retro: timeline · root cause · action items)".into(), category: "Templates", action: PaletteAction::LoadPostmortemTemplate },
+        PaletteEntry { icon: "⏱",  label: "Load Support SLA Matrix (P1/P2/P3/P4 response · resolve · escalation targets)".into(), category: "Templates", action: PaletteAction::LoadSupportSLAMatrixTemplate },
+        PaletteEntry { icon: "📋",  label: "Load Support Queue kanban (Intake → Triage → In Progress → Resolved)".into(), category: "Templates", action: PaletteAction::LoadSupportQueueTemplate },
         // Search
-        PaletteEntry { icon: "🔍", label: "Search nodes",              category: "Search",  action: PaletteAction::OpenSearch },
-        PaletteEntry { icon: "⇄",  label: "Find & Replace",            category: "Search",  action: PaletteAction::OpenFindReplace },
+        PaletteEntry { icon: "🔍", label: "Search nodes".into(),              category: "Search",  action: PaletteAction::OpenSearch },
+        PaletteEntry { icon: "⇄",  label: "Find & Replace".into(),            category: "Search",  action: PaletteAction::OpenFindReplace },
         // Export
-        PaletteEntry { icon: "⎘",  label: "Copy as Mermaid to clipboard", category: "Export", action: PaletteAction::ExportMermaid },
+        PaletteEntry { icon: "⎘",  label: "Copy as Mermaid to clipboard".into(), category: "Export", action: PaletteAction::ExportMermaid },
     ]
 }
