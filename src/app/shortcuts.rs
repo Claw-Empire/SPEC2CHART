@@ -932,8 +932,7 @@ impl FlowchartApp {
         }
 
         // Cmd+S = save to current path (or open Save As if no path yet)
-        let cmd_s = Modifiers { command: true, ..Default::default() };
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd_s)) {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::S) && i.modifiers.matches_exact(cmd)) {
             if let Some(path) = self.current_file_path.clone() {
                 self.save_to_path(path);
             } else {
