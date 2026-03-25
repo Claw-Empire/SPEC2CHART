@@ -988,7 +988,7 @@ fn autosave_path() -> std::path::PathBuf {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
             std::path::PathBuf::from(home).join(".local").join("share")
         });
-    base.join("openAtlas").join("autosave.json")
+    base.join("openDraftly").join("autosave.json")
 }
 
 /// Returns the platform-specific path for the recent-files list.
@@ -1032,8 +1032,8 @@ fn compute_window_title(filename: Option<&str>, dirty: bool, nodes: usize, edges
     match (filename, nodes) {
         (Some(f), 0) => format!("{f}{dirty_mark}"),
         (Some(f), _) => format!("{f}{dirty_mark} — {nodes}N {edges}E"),
-        (None,    0) => "openAtlas".to_string(),
-        (None,    _) => format!("openAtlas — {nodes}N {edges}E"),
+        (None,    0) => "openDraftly".to_string(),
+        (None,    _) => format!("openDraftly — {nodes}N {edges}E"),
     }
 }
 
@@ -1192,20 +1192,20 @@ mod drop_tests {
     fn test_recent_files_path_contains_app_dir() {
         let p = super::recent_files_path();
         let s = p.to_string_lossy();
-        assert!(s.contains("openAtlas"), "expected 'openAtlas' in {s}");
+        assert!(s.contains("openDraftly"), "expected 'openDraftly' in {s}");
         assert!(s.ends_with("recent-files.json"), "expected 'recent-files.json' suffix in {s}");
     }
 
     #[test]
     fn test_compute_window_title_no_file_no_nodes() {
         let t = super::compute_window_title(None, false, 0, 0);
-        assert_eq!(t, "openAtlas");
+        assert_eq!(t, "openDraftly");
     }
 
     #[test]
     fn test_compute_window_title_no_file_with_nodes() {
         let t = super::compute_window_title(None, false, 3, 2);
-        assert_eq!(t, "openAtlas — 3N 2E");
+        assert_eq!(t, "openDraftly — 3N 2E");
     }
 
     #[test]

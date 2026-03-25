@@ -1,11 +1,11 @@
 [package]
-name = "open-atlas"
+name = "open-draftly"
 version = "0.3.0"
 edition = "2021"
-description = "openAtlas — lightweight diagramming tool"
+description = "openDraftly — lightweight diagramming tool"
 
 [lib]
-name = "open_atlas"
+name = "open_draftly"
 path = "src/lib.rs"
 
 [dependencies]
@@ -31,6 +31,6 @@ codegen-units = 1
 strip = true
 
 [package.metadata.bundle]
-name = "openAtlas"
-identifier = "com.openatlas.app"
+name = "openDraftly"
+identifier = "com.opendraftly.app"
 category = "public.app-category.graphics-design"

@@ -49,7 +49,7 @@ impl FlowchartApp {
                 ui.horizontal(|ui| {
                     ui.add_space(0.0);
                     ui.label(
-                        egui::RichText::new("openAtlas")
+                        egui::RichText::new("openDraftly")
                             .size(18.0)
                             .strong()
                             .color(self.theme.text_primary),

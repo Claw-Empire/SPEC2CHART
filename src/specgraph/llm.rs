@@ -209,7 +209,7 @@ pub fn prose_to_yaml(prose: &str, config: &LlmConfig) -> Result<String, String> 
 
 // ── HRF (Anthropic or OpenAI-compatible) ────────────────────────────────────
 
-const HRF_SYSTEM_PROMPT: &str = r#"You are a diagram generator. Convert the user's description into HRF (Human-Readable Format) for the openAtlas diagramming tool.
+const HRF_SYSTEM_PROMPT: &str = r#"You are a diagram generator. Convert the user's description into HRF (Human-Readable Format) for the openDraftly diagramming tool.
 
 Output ONLY valid HRF text. No markdown fences. No explanation.
 
