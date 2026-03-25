@@ -720,8 +720,10 @@ impl FlowchartApp {
                         .and_then(|p| p.file_name())
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
+                    let n = self.document.nodes.len();
+                    let e = self.document.edges.len();
                     self.status_message = Some((
-                        format!("Saved to {fname}"),
+                        format!("Saved {fname} ({n} nodes, {e} edges)"),
                         std::time::Instant::now(),
                     ));
                 }
@@ -742,8 +744,10 @@ impl FlowchartApp {
 
 impl eframe::App for FlowchartApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some((_, time)) = &self.status_message {
-            if time.elapsed().as_secs_f32() > 2.5 {
+        if let Some((msg, time)) = &self.status_message {
+            // Longer messages get more reading time (min 2s, +0.5s per 20 chars)
+            let duration = 2.0_f32 + (msg.len() as f32 / 20.0).min(2.0) * 0.5;
+            if time.elapsed().as_secs_f32() > duration {
                 self.status_message = None;
             }
         }
@@ -784,7 +788,9 @@ impl eframe::App for FlowchartApp {
                             self.document = doc;
                             self.selection.clear();
                             self.pending_fit = true;
-                            self.status_message = Some(("Template loaded".to_string(), std::time::Instant::now()));
+                            let n = self.document.nodes.len();
+                            let e = self.document.edges.len();
+                            self.status_message = Some((format!("Template loaded — {n} nodes, {e} edges"), std::time::Instant::now()));
                         }
                         Err(e) => {
                             self.status_message = Some((format!("Template error: {}", e), std::time::Instant::now()));
@@ -797,7 +803,7 @@ impl eframe::App for FlowchartApp {
                     self.autosave_dirty = true;
                     self.document = crate::model::FlowchartDocument::default();
                     self.selection.clear();
-                    self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
+                    self.status_message = Some(("Fresh canvas — double-click to add your first node".to_string(), std::time::Instant::now()));
                 }
                 GallerySelection::RecentFile(path) => {
                     self.open_recent_file(path);

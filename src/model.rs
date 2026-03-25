@@ -45,6 +45,30 @@ pub enum NodeShape {
     Segment,    // person-group shape
 }
 
+impl NodeShape {
+    /// Returns a human-friendly default label for this shape type.
+    pub fn default_label(&self) -> &'static str {
+        match self {
+            NodeShape::Rectangle => "Step",
+            NodeShape::RoundedRect => "Step",
+            NodeShape::Diamond => "Decision",
+            NodeShape::Circle => "State",
+            NodeShape::Parallelogram => "Input",
+            NodeShape::Connector => "Note",
+            NodeShape::Hexagon => "Phase",
+            NodeShape::Triangle => "Warning",
+            NodeShape::Callout => "Comment",
+            NodeShape::Person => "Actor",
+            NodeShape::Screen => "Screen",
+            NodeShape::Cylinder => "Database",
+            NodeShape::Cloud => "Service",
+            NodeShape::Document => "Document",
+            NodeShape::Channel => "Channel",
+            NodeShape::Segment => "Group",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum LayoutMode {
     #[default]
@@ -836,6 +860,20 @@ impl FlowchartDocument {
             .enumerate()
             .map(|(i, n)| (n.id, i))
             .collect()
+    }
+
+    /// Generate a smart sequential label for a new node based on its shape.
+    /// E.g. "Step 1", "Step 2", "Decision 1", "Database 1" etc.
+    pub fn next_label_for_shape(&self, shape: NodeShape) -> String {
+        let prefix = shape.default_label();
+        let count = self.nodes.iter().filter(|n| {
+            if let NodeKind::Shape { shape: s, label, .. } = &n.kind {
+                *s == shape && label.starts_with(prefix)
+            } else {
+                false
+            }
+        }).count();
+        format!("{} {}", prefix, count + 1)
     }
 
     pub fn find_node(&self, id: &NodeId) -> Option<&Node> {

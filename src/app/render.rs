@@ -977,6 +977,26 @@ impl FlowchartApp {
                     painter.circle_filled(screen_port, glow_r, self.theme.accent_glow);
                     painter.circle_filled(screen_port, r * 1.3, self.theme.accent);
                     painter.circle_stroke(screen_port, r * 1.3, Stroke::new(2.0, self.theme.text_primary));
+                    // Show connection count badge for this port
+                    let conn_count = self.document.edges.iter().filter(|e| {
+                        (e.source.node_id == node.id && e.source.side == *side) ||
+                        (e.target.node_id == node.id && e.target.side == *side)
+                    }).count();
+                    if conn_count > 0 {
+                        let badge_offset = match side {
+                            PortSide::Top    => Vec2::new(0.0, -r * 4.0),
+                            PortSide::Bottom => Vec2::new(0.0,  r * 4.0),
+                            PortSide::Left   => Vec2::new(-r * 4.0, 0.0),
+                            PortSide::Right  => Vec2::new( r * 4.0, 0.0),
+                        };
+                        let badge_pos = screen_port + badge_offset;
+                        let badge_r = 7.0_f32;
+                        painter.circle_filled(badge_pos, badge_r, self.theme.accent);
+                        painter.text(badge_pos, egui::Align2::CENTER_CENTER,
+                            &conn_count.to_string(),
+                            egui::FontId::proportional(8.5),
+                            self.theme.text_primary);
+                    }
                 } else {
                     painter.circle_filled(screen_port, r, self.theme.port_fill);
                     painter.circle_stroke(screen_port, r, Stroke::new(1.5, self.theme.selection_color));

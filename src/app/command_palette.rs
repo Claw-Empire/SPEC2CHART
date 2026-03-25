@@ -91,6 +91,9 @@ enum PaletteAction {
     LoadPostmortemTemplate,
     LoadSupportSLAMatrixTemplate,
     LoadSupportQueueTemplate,
+    CollapseAll,
+    ExpandAll,
+    InvertSelection,
     OpenRecentFile(usize),
 }
 
@@ -213,6 +216,29 @@ impl FlowchartApp {
                 // ── Results ───────────────────────────────────────────────
                 egui::ScrollArea::vertical().max_height(295.0).show(ui, |ui| {
                     ui.add_space(4.0);
+
+                    // Getting started tips when query is empty
+                    if q.is_empty() && self.document.nodes.is_empty() {
+                        Frame::NONE
+                            .fill(surface0)
+                            .corner_radius(egui::CornerRadius::same(6))
+                            .inner_margin(Margin { left: 12, right: 12, top: 8, bottom: 8 })
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("Getting Started").size(10.0).strong().color(accent));
+                                ui.add_space(4.0);
+                                let tips = [
+                                    "Try \"template\" to load a pre-built diagram",
+                                    "Double-click the canvas to create your first node",
+                                    "Press E to switch to Connect mode and draw edges",
+                                    "Try \"dark\" or \"light\" to switch themes",
+                                ];
+                                for tip in tips {
+                                    ui.label(RichText::new(format!("  {}", tip)).size(11.0).color(text_dim));
+                                }
+                            });
+                        ui.add_space(6.0);
+                    }
+
                     let mut last_cat = "";
                     for (i, entry) in matches.iter().enumerate() {
                         if entry.category != last_cat {
@@ -969,6 +995,40 @@ impl FlowchartApp {
                     Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
                 }
             }
+            PaletteAction::InvertSelection => {
+                let all_ids: std::collections::HashSet<crate::model::NodeId> = self.document.nodes.iter().map(|n| n.id).collect();
+                let currently_selected = self.selection.node_ids.clone();
+                self.selection.node_ids = all_ids.difference(&currently_selected).copied().collect();
+                let n = self.selection.node_ids.len();
+                self.status_message = Some((format!("Selection inverted — {} node{} selected", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+            }
+            PaletteAction::CollapseAll => {
+                let mut count = 0;
+                for node in &mut self.document.nodes {
+                    if !node.collapsed && !node.is_frame {
+                        node.uncollapsed_size = Some(node.size);
+                        node.collapsed = true;
+                        node.size[1] = 28.0;
+                        count += 1;
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some((format!("Collapsed {} nodes", count), std::time::Instant::now()));
+            }
+            PaletteAction::ExpandAll => {
+                let mut count = 0;
+                for node in &mut self.document.nodes {
+                    if node.collapsed {
+                        if let Some(size) = node.uncollapsed_size.take() {
+                            node.size = size;
+                        }
+                        node.collapsed = false;
+                        count += 1;
+                    }
+                }
+                self.history.push(&self.document);
+                self.status_message = Some((format!("Expanded {} nodes", count), std::time::Instant::now()));
+            }
             PaletteAction::OpenRecentFile(idx) => {
                 // SAFETY: idx was assigned from recent_entries.iter().enumerate() in this same frame,
                 // before Window::show. Nothing mutates self.recent_files between that build and this
@@ -1009,9 +1069,12 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⊙", label: "Auto-layout (hierarchical)".into(),category: "Edit",    action: PaletteAction::AutoLayout },
         PaletteEntry { icon: "≡", label: "Copy node style".into(),           category: "Edit",    action: PaletteAction::CopyStyle },
         PaletteEntry { icon: "≣", label: "Paste node style".into(),          category: "Edit",    action: PaletteAction::PasteStyle },
+        PaletteEntry { icon: "▼", label: "Collapse all nodes".into(),          category: "Edit",    action: PaletteAction::CollapseAll },
+        PaletteEntry { icon: "▲", label: "Expand all nodes".into(),            category: "Edit",    action: PaletteAction::ExpandAll },
         // Selection
         PaletteEntry { icon: "⬚", label: "Select all".into(),                category: "Select",  action: PaletteAction::SelectAll },
         PaletteEntry { icon: "⊘", label: "Deselect all".into(),              category: "Select",  action: PaletteAction::Deselect },
+        PaletteEntry { icon: "⇄", label: "Invert selection".into(),          category: "Select",  action: PaletteAction::InvertSelection },
         // Diagram
         PaletteEntry { icon: "⬡", label: "Switch to Flowchart mode".into(),  category: "Diagram", action: PaletteAction::SwitchToFlowchart },
         PaletteEntry { icon: "◫", label: "Switch to ER mode".into(),         category: "Diagram", action: PaletteAction::SwitchToER },

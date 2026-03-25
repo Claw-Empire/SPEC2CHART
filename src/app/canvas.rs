@@ -208,7 +208,14 @@ impl FlowchartApp {
                             canvas_pos = self.snap_pos(canvas_pos);
                         }
                         Some(match kind {
-                            NodeKind::Shape { shape, .. } => Node::new(*shape, canvas_pos),
+                            NodeKind::Shape { shape, .. } => {
+                                let label = self.document.next_label_for_shape(*shape);
+                                let mut n = Node::new(*shape, canvas_pos);
+                                if let NodeKind::Shape { label: ref mut l, .. } = n.kind {
+                                    *l = label;
+                                }
+                                n
+                            }
                             NodeKind::StickyNote { color, .. } => Node::new_sticky(*color, canvas_pos),
                             NodeKind::Entity { .. } => Node::new_entity(canvas_pos),
                             NodeKind::Text { .. } => Node::new_text(canvas_pos),
@@ -389,7 +396,11 @@ impl FlowchartApp {
                         self.section_rename = Some((sec_name.clone(), sec_name, label_pos));
                     } else {
                         // Create a new default shape node centered on the click
+                        let smart_label = self.document.next_label_for_shape(NodeShape::Rectangle);
                         let mut node = Node::new(NodeShape::Rectangle, canvas_pos);
+                        if let NodeKind::Shape { ref mut label, .. } = node.kind {
+                            *label = smart_label;
+                        }
                         let w = node.size[0];
                         let h = node.size[1];
                         node.set_pos(egui::Pos2::new(canvas_pos.x - w / 2.0, canvas_pos.y - h / 2.0));
@@ -403,7 +414,7 @@ impl FlowchartApp {
                         self.selection.select_node(id);
                         self.inline_node_edit = Some((id, String::new()));
                         self.history.push(&self.document);
-                        self.status_message = Some(("Node created".to_string(), std::time::Instant::now()));
+                        self.status_message = Some(("New node — type to label it".to_string(), std::time::Instant::now()));
                     }
                 }
             }
@@ -1371,7 +1382,8 @@ impl FlowchartApp {
                         // Select only the clones; originals stay unselected
                         self.selection.clear();
                         for id in &new_ids { self.selection.select_node(*id); }
-                        self.status_message = Some(("Alt+drag: duplicated".to_string(), std::time::Instant::now()));
+                        let n = new_ids.len();
+                        self.status_message = Some((format!("Duplicated {} node{} — drag to position", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
                     }
                     let start_positions: Vec<(NodeId, Pos2)> = self
                         .selection
@@ -2170,6 +2182,20 @@ impl FlowchartApp {
             }
         }
 
+        // Cursor-following hint text
+        let hovering_any_port = self.hit_test_port(canvas_dst)
+            .map_or(false, |p| p.node_id != source.node_id);
+        if !hovering_any_port {
+            let hint = "Release on a port to connect";
+            let hint_pos = *current_screen + Vec2::new(14.0, 18.0);
+            let pad = Vec2::new(6.0, 3.0);
+            let font = FontId::proportional(10.0);
+            let galley = painter.ctx().fonts(|f| f.layout_no_wrap(hint.to_string(), font.clone(), self.theme.text_dim));
+            let bg_rect = Rect::from_min_size(hint_pos - pad, galley.size() + pad * 2.0);
+            painter.rect_filled(bg_rect, CornerRadius::same(4), self.theme.tooltip_bg);
+            painter.text(hint_pos, Align2::LEFT_TOP, hint, font, self.theme.text_dim);
+        }
+
         // Highlight target port with name badge
         if let Some(target_port) = self.hit_test_port(canvas_dst) {
             if target_port.node_id != source.node_id {
@@ -2246,8 +2272,9 @@ impl FlowchartApp {
     ) {
         if let Some((ref msg, time)) = self.status_message {
             let elapsed = time.elapsed().as_secs_f32();
-            if elapsed < 2.0 {
-                let alpha = ((2.0 - elapsed) * 255.0).min(255.0) as u8;
+            let fade_duration = 2.0_f32 + (msg.len() as f32 / 20.0).min(2.0) * 0.5;
+            if elapsed < fade_duration {
+                let alpha = ((fade_duration - elapsed).min(1.0) * 255.0) as u8;
                 let toast_pos = Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 40.0);
                 let font = FontId::proportional(12.0);
 
@@ -2273,14 +2300,37 @@ impl FlowchartApp {
                     StrokeKind::Outside,
                 );
 
-                // Checkmark + text
-                let check = "\u{2713} ";
+                // Contextual icon + text
+                let msg_lower = msg.to_lowercase();
+                let (icon, icon_color) = if msg_lower.contains("error") || msg_lower.contains("failed") {
+                    ("\u{2717} ", Color32::from_rgba_premultiplied(243, 139, 168, alpha)) // ✗ red
+                } else if msg_lower.contains("copied") || msg_lower.contains("clipboard") {
+                    ("\u{2398} ", Color32::from_rgba_premultiplied(137, 180, 250, alpha)) // ⎘ blue
+                } else if msg_lower.contains("saved") || msg_lower.contains("save") {
+                    ("\u{2713} ", Color32::from_rgba_premultiplied(166, 227, 161, alpha)) // ✓ green
+                } else if msg_lower.contains("undo") {
+                    ("\u{21A9} ", Color32::from_rgba_premultiplied(249, 226, 175, alpha)) // ↩ yellow
+                } else if msg_lower.contains("redo") {
+                    ("\u{21AA} ", Color32::from_rgba_premultiplied(249, 226, 175, alpha)) // ↪ yellow
+                } else if msg_lower.contains("pasted") || msg_lower.contains("paste") {
+                    ("\u{2398} ", Color32::from_rgba_premultiplied(203, 166, 247, alpha)) // ⎘ purple
+                } else if msg_lower.contains("duplicated") {
+                    ("\u{2750} ", Color32::from_rgba_premultiplied(137, 180, 250, alpha)) // ❐ blue
+                } else if msg_lower.contains("navigated") {
+                    ("\u{2192} ", Color32::from_rgba_premultiplied(137, 180, 250, alpha)) // → blue
+                } else if msg_lower.contains("template") || msg_lower.contains("loaded") {
+                    ("\u{2605} ", Color32::from_rgba_premultiplied(249, 226, 175, alpha)) // ★ yellow
+                } else if msg_lower.contains("fresh canvas") || msg_lower.contains("new") {
+                    ("\u{2728} ", Color32::from_rgba_premultiplied(203, 166, 247, alpha)) // sparkles purple
+                } else {
+                    ("\u{2713} ", Color32::from_rgba_premultiplied(166, 227, 161, alpha)) // ✓ green
+                };
                 painter.text(
                     toast_pos,
                     Align2::CENTER_CENTER,
-                    &format!("{}{}", check, msg),
+                    &format!("{}{}", icon, msg),
                     font,
-                    Color32::from_rgba_premultiplied(166, 227, 161, alpha),
+                    icon_color,
                 );
                 ctx.request_repaint();
             }
@@ -2375,7 +2425,7 @@ impl FlowchartApp {
 
         // Only show if there's something to show
         let rich_mode = hover_duration > 0.8;
-        let has_basic = !desc.is_empty();
+        let has_basic = !desc.is_empty() || node.progress > 0.0 || node.priority > 0;
         if !has_basic && !rich_mode { return; }
 
         let max_w = 240.0;
@@ -2393,21 +2443,31 @@ impl FlowchartApp {
         if !desc.is_empty() {
             rows.push((desc.to_string(), self.theme.text_dim));
         }
+        // Progress and priority show immediately (no hover delay)
+        if node.progress > 0.0 {
+            let pct = (node.progress * 100.0).round() as u32;
+            let bar = "█".repeat((node.progress * 10.0) as usize);
+            let empty = "░".repeat(10 - (node.progress * 10.0) as usize);
+            rows.push((format!("{}% {}{}", pct, bar, empty),
+                if node.progress >= 1.0 { Color32::from_rgb(166, 227, 161) }
+                else if node.progress >= 0.6 { Color32::from_rgb(249, 226, 175) }
+                else { Color32::from_rgb(243, 139, 168) }
+            ));
+        }
+        if !rich_mode && node.priority > 0 {
+            let plabel = match node.priority { 1 => "P1 — Critical", 2 => "P2 — High", 3 => "P3 — Medium", _ => "P4 — Low" };
+            let pcol = match node.priority {
+                1 => Color32::from_rgb(243, 139, 168),
+                2 => Color32::from_rgb(250, 179, 135),
+                3 => Color32::from_rgb(137, 180, 250),
+                _ => Color32::from_rgb(166, 227, 161),
+            };
+            rows.push((plabel.to_string(), pcol));
+        }
         if rich_mode {
             // Sublabel (if set and different from main label)
             if !node.sublabel.is_empty() {
                 rows.push((node.sublabel.clone(), self.theme.text_dim.gamma_multiply(0.75)));
-            }
-            // Progress bar percentage
-            if node.progress > 0.0 {
-                let pct = (node.progress * 100.0).round() as u32;
-                let bar = "█".repeat((node.progress * 10.0) as usize);
-                let empty = "░".repeat(10 - (node.progress * 10.0) as usize);
-                rows.push((format!("{}% {}{}", pct, bar, empty),
-                    if node.progress >= 1.0 { Color32::from_rgb(166, 227, 161) }
-                    else if node.progress >= 0.6 { Color32::from_rgb(249, 226, 175) }
-                    else { Color32::from_rgb(243, 139, 168) }
-                ));
             }
             if conn_in > 0 || conn_out > 0 {
                 rows.push((format!("↑{} in  ↓{} out", conn_in, conn_out), self.theme.text_dim));
@@ -2719,13 +2779,17 @@ impl FlowchartApp {
                     Some(acc.map_or(n.rect(), |r| r.union(n.rect())))
                 });
             let size_str = bb.map(|r| format!("  {:.0}×{:.0}", r.width(), r.height())).unwrap_or_default();
-            // Show node-of-total when single node is selected
-            let node_idx_str = if n_sel_n == 1 && n_sel_e == 0 {
+            // Show node-of-total and section when single node is selected
+            let node_detail_str = if n_sel_n == 1 && n_sel_e == 0 {
                 let sel_id = *self.selection.node_ids.iter().next().unwrap();
                 let idx = self.document.nodes.iter().position(|n| n.id == sel_id).unwrap_or(0);
-                format!("  ({}/{})", idx + 1, n_nodes)
+                let section_str = self.document.find_node(&sel_id)
+                    .filter(|n| !n.section_name.is_empty())
+                    .map(|n| format!("  [{}]", n.section_name))
+                    .unwrap_or_default();
+                format!("  ({}/{}){}",  idx + 1, n_nodes, section_str)
             } else { String::new() };
-            format!("{} sel{}{}  ·  {}N {}E", parts.join("+"), size_str, node_idx_str, n_nodes, n_edges)
+            format!("{} sel{}{}  ·  {}N {}E", parts.join("+"), size_str, node_detail_str, n_nodes, n_edges)
         } else {
             format!("{}N  {}E", n_nodes, n_edges)
         };
@@ -3383,7 +3447,7 @@ impl FlowchartApp {
                                 e.target = old_src;
                             }
                             self.history.push(&self.document);
-                            self.status_message = Some(("Edge reversed".to_string(), std::time::Instant::now()));
+                            self.status_message = Some(("Edge direction reversed".to_string(), std::time::Instant::now()));
                         }
                         1 => { self.focus_label_edit = true; }
                         2 => { // Duplicate edge
@@ -3637,7 +3701,7 @@ impl FlowchartApp {
                     if let Some(id) = self.selection.node_ids.iter().next() {
                         if let Some(node) = self.document.find_node(id) {
                             self.style_clipboard = Some(node.style.clone());
-                            self.status_message = Some(("Style copied".to_string(), std::time::Instant::now()));
+                            self.status_message = Some(("Style copied — Cmd+Shift+V to apply".to_string(), std::time::Instant::now()));
                         }
                     }
                 }
@@ -3702,7 +3766,8 @@ impl FlowchartApp {
                             }
                         }
                         self.history.push(&self.document);
-                        self.status_message = Some(("Style pasted".to_string(), std::time::Instant::now()));
+                        let n = ids.len();
+                        self.status_message = Some((format!("Style applied to {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
                     }
                 }
                 6 => { // Lock / unlock toggle

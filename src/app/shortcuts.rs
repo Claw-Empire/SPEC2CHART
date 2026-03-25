@@ -16,9 +16,29 @@ impl FlowchartApp {
 
         // Cmd+Z = undo
         if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.matches_exact(cmd)) {
+            let n_before = self.document.nodes.len();
+            let e_before = self.document.edges.len();
             if let Some(doc) = self.history.undo() {
                 self.document = doc.clone();
                 self.selection.clear();
+                let n_after = self.document.nodes.len();
+                let e_after = self.document.edges.len();
+                let remaining = self.history.undo_steps();
+                let detail = if n_after != n_before {
+                    let diff = n_after as i32 - n_before as i32;
+                    if diff > 0 { format!(" (restored {} node{})", diff, if diff == 1 { "" } else { "s" }) }
+                    else { format!(" (removed {} node{})", -diff, if diff == -1 { "" } else { "s" }) }
+                } else if e_after != e_before {
+                    let diff = e_after as i32 - e_before as i32;
+                    if diff > 0 { format!(" (restored {} edge{})", diff, if diff == 1 { "" } else { "s" }) }
+                    else { format!(" (removed {} edge{})", -diff, if diff == -1 { "" } else { "s" }) }
+                } else {
+                    String::new()
+                };
+                self.status_message = Some((
+                    format!("Undo{} — {} step{} remaining", detail, remaining, if remaining == 1 { "" } else { "s" }),
+                    std::time::Instant::now(),
+                ));
             }
         }
 
@@ -28,9 +48,29 @@ impl FlowchartApp {
             ..cmd
         };
         if ctx.input(|i| i.key_pressed(Key::Z) && i.modifiers.matches_exact(cmd_shift)) {
+            let n_before = self.document.nodes.len();
+            let e_before = self.document.edges.len();
             if let Some(doc) = self.history.redo() {
                 self.document = doc.clone();
                 self.selection.clear();
+                let n_after = self.document.nodes.len();
+                let e_after = self.document.edges.len();
+                let remaining = self.history.redo_steps();
+                let detail = if n_after != n_before {
+                    let diff = n_after as i32 - n_before as i32;
+                    if diff > 0 { format!(" (added {} node{})", diff, if diff == 1 { "" } else { "s" }) }
+                    else { format!(" (removed {} node{})", -diff, if diff == -1 { "" } else { "s" }) }
+                } else if e_after != e_before {
+                    let diff = e_after as i32 - e_before as i32;
+                    if diff > 0 { format!(" (added {} edge{})", diff, if diff == 1 { "" } else { "s" }) }
+                    else { format!(" (removed {} edge{})", -diff, if diff == -1 { "" } else { "s" }) }
+                } else {
+                    String::new()
+                };
+                self.status_message = Some((
+                    format!("Redo{} — {} step{} ahead", detail, remaining, if remaining == 1 { "" } else { "s" }),
+                    std::time::Instant::now(),
+                ));
             }
         }
 
@@ -60,8 +100,20 @@ impl FlowchartApp {
             for id in &edge_ids {
                 self.document.remove_edge(id);
             }
+            let n_deleted = node_ids.len();
+            let e_deleted = edge_ids.len();
             self.selection.clear();
             self.history.push(&self.document);
+            // Deletion feedback
+            if n_deleted > 0 || e_deleted > 0 {
+                let mut parts = Vec::new();
+                if n_deleted > 0 { parts.push(format!("{} node{}", n_deleted, if n_deleted == 1 { "" } else { "s" })); }
+                if e_deleted > 0 { parts.push(format!("{} edge{}", e_deleted, if e_deleted == 1 { "" } else { "s" })); }
+                self.status_message = Some((
+                    format!("Deleted {} — Cmd+Z to undo", parts.join(", ")),
+                    std::time::Instant::now(),
+                ));
+            }
         }
 
         // Cmd+] = bring forward (increase z_offset), Cmd+[ = send backward
@@ -152,7 +204,7 @@ impl FlowchartApp {
             if let Some(id) = self.selection.node_ids.iter().next() {
                 if let Some(node) = self.document.find_node(id) {
                     self.style_clipboard = Some(node.style.clone());
-                    self.status_message = Some(("Style copied".to_string(), std::time::Instant::now()));
+                    self.status_message = Some(("Style copied — paste with Cmd+Shift+V".to_string(), std::time::Instant::now()));
                 }
             }
         }
@@ -168,7 +220,8 @@ impl FlowchartApp {
                 }
                 if !ids.is_empty() {
                     self.history.push(&self.document);
-                    self.status_message = Some(("Style pasted".to_string(), std::time::Instant::now()));
+                    let n = ids.len();
+                    self.status_message = Some((format!("Style applied to {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
                 }
             }
         }
@@ -192,10 +245,15 @@ impl FlowchartApp {
             }
             let n_edges = self.edge_clipboard.len();
             let n_nodes = self.clipboard.len();
-            let msg = if n_edges > 0 {
-                format!("Copied {} nodes, {} edges", n_nodes, n_edges)
+            let msg = if n_nodes == 0 {
+                "Nothing to copy — select nodes first".to_string()
+            } else if n_edges > 0 {
+                format!("Copied {} node{} + {} edge{} — Cmd+V to paste",
+                    n_nodes, if n_nodes == 1 { "" } else { "s" },
+                    n_edges, if n_edges == 1 { "" } else { "s" })
             } else {
-                format!("Copied {} node{}", n_nodes, if n_nodes == 1 { "" } else { "s" })
+                format!("Copied {} node{} — Cmd+V to paste",
+                    n_nodes, if n_nodes == 1 { "" } else { "s" })
             };
             self.status_message = Some((msg, std::time::Instant::now()));
         }
@@ -317,9 +375,11 @@ impl FlowchartApp {
             self.history.push(&self.document);
             let n_pasted = self.selection.node_ids.len();
             let msg = if pasted_edges > 0 {
-                format!("Pasted {} nodes + {} edges ×{}", n_pasted, pasted_edges, self.paste_count)
+                format!("Pasted {} node{} + {} edge{}",
+                    n_pasted, if n_pasted == 1 { "" } else { "s" },
+                    pasted_edges, if pasted_edges == 1 { "" } else { "s" })
             } else {
-                format!("Pasted ×{}", self.paste_count)
+                format!("Pasted {} node{}", n_pasted, if n_pasted == 1 { "" } else { "s" })
             };
             self.status_message = Some((msg, std::time::Instant::now()));
         }
@@ -348,7 +408,11 @@ impl FlowchartApp {
                     .unwrap_or((egui::Pos2::ZERO, egui::Vec2::new(140.0, 60.0)));
                 let gap = 60.0;
                 let new_pos = egui::Pos2::new(src_pos.x + src_size.x + gap, src_pos.y);
+                let smart_label = self.document.next_label_for_shape(crate::model::NodeShape::Rectangle);
                 let mut new_node = crate::model::Node::new(crate::model::NodeShape::Rectangle, new_pos);
+                if let crate::model::NodeKind::Shape { ref mut label, .. } = new_node.kind {
+                    *label = smart_label;
+                }
                 // Copy style from source
                 if let Some(src_node) = self.document.find_node(&src_id) {
                     new_node.style = src_node.style.clone();
@@ -372,7 +436,7 @@ impl FlowchartApp {
                 self.selection.select_node(new_id);
                 self.focus_label_edit = true;
                 self.history.push(&self.document);
-                self.status_message = Some(("Connected node added".to_string(), std::time::Instant::now()));
+                self.status_message = Some(("Connected node added — type to rename".to_string(), std::time::Instant::now()));
             }
         }
 
@@ -663,12 +727,61 @@ impl FlowchartApp {
                 self.document.nodes.push(node);
             }
             self.history.push(&self.document);
-            self.status_message = Some(("Duplicated".to_string(), std::time::Instant::now()));
+            let n_duped = self.selection.node_ids.len();
+            self.status_message = Some((format!("Duplicated {} node{}", n_duped, if n_duped == 1 { "" } else { "s" }), std::time::Instant::now()));
         }
 
         // Escape = deselect
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.selection.clear();
+        }
+
+        // Tab = navigate to next connected node (follows outgoing edges)
+        // Shift+Tab = navigate to previous connected node (follows incoming edges)
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Tab)) {
+            if self.selection.node_ids.len() == 1 {
+                let current_id = *self.selection.node_ids.iter().next().unwrap();
+                let is_shift = ctx.input(|i| i.modifiers.shift);
+                let neighbors: Vec<NodeId> = if is_shift {
+                    // Incoming edges: find source nodes of edges targeting current
+                    self.document.edges.iter()
+                        .filter(|e| e.target.node_id == current_id)
+                        .map(|e| e.source.node_id)
+                        .collect()
+                } else {
+                    // Outgoing edges: find target nodes of edges from current
+                    self.document.edges.iter()
+                        .filter(|e| e.source.node_id == current_id)
+                        .map(|e| e.target.node_id)
+                        .collect()
+                };
+                if let Some(&next_id) = neighbors.first() {
+                    self.selection.clear();
+                    self.selection.select_node(next_id);
+                    // Pan to center the selected node
+                    if let Some(node) = self.document.find_node(&next_id) {
+                        let center = node.rect().center();
+                        self.pan_target = Some([
+                            self.canvas_rect.center().x - center.x * self.viewport.zoom,
+                            self.canvas_rect.center().y - center.y * self.viewport.zoom,
+                        ]);
+                    }
+                    let label = self.document.find_node(&next_id)
+                        .map(|n| n.display_label().to_string())
+                        .unwrap_or_default();
+                    let dir = if is_shift { "upstream" } else { "downstream" };
+                    self.status_message = Some((
+                        format!("Navigated {} to \"{}\"", dir, label),
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    let dir = if is_shift { "incoming" } else { "outgoing" };
+                    self.status_message = Some((
+                        format!("No {} connections from this node", dir),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
         }
 
         // F2 = rename: focus the label editor in the properties panel
@@ -1416,7 +1529,8 @@ impl FlowchartApp {
         {
             self.distribute_nodes_h();
             self.history.push(&self.document);
-            self.status_message = Some(("Distributed H".to_string(), std::time::Instant::now()));
+            let n = self.selection.node_ids.len();
+            self.status_message = Some((format!("Distributed {} nodes horizontally", n), std::time::Instant::now()));
         }
 
         // Shift+V = distribute selected nodes vertically (equal spacing on Y)
@@ -1425,7 +1539,8 @@ impl FlowchartApp {
         {
             self.distribute_nodes_v();
             self.history.push(&self.document);
-            self.status_message = Some(("Distributed V".to_string(), std::time::Instant::now()));
+            let n = self.selection.node_ids.len();
+            self.status_message = Some((format!("Distributed {} nodes vertically", n), std::time::Instant::now()));
         }
 
         // Shift+A = toggle data-flow animation
@@ -1473,7 +1588,8 @@ impl FlowchartApp {
                 self.document.nodes.insert(0, frame);
                 self.selection.select_node(fid);
                 self.history.push(&self.document);
-                self.status_message = Some(("Group frame created".to_string(), std::time::Instant::now()));
+                let n = self.selection.node_ids.len() - 1; // -1 for the frame itself
+                self.status_message = Some((format!("Group frame around {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
             }
         }
 
@@ -1852,7 +1968,8 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some(("Distributed evenly".to_string(), std::time::Instant::now()));
+                let n = selected.len();
+                self.status_message = Some((format!("{} nodes spaced evenly", n), std::time::Instant::now()));
             }
         }
 

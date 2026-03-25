@@ -840,6 +840,7 @@ impl FlowchartApp {
                             egui::Button::new(select_text)
                                 .fill(if self.tool == Tool::Select { self.theme.surface1 } else { self.theme.surface0 }),
                         )
+                        .on_hover_text("Select & move nodes (V) — click to select, drag to move, box-select multiple")
                         .clicked()
                     {
                         self.tool = Tool::Select;
@@ -850,6 +851,7 @@ impl FlowchartApp {
                             egui::Button::new(connect_text)
                                 .fill(if self.tool == Tool::Connect { self.theme.surface1 } else { self.theme.surface0 }),
                         )
+                        .on_hover_text("Connect nodes (E) — drag from a port on one node to another")
                         .clicked()
                     {
                         self.tool = Tool::Connect;
@@ -869,12 +871,12 @@ impl FlowchartApp {
                 self.draw_section_header(ui, "Mode");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let modes = [
-                        (DiagramMode::Flowchart, "Flow"),
-                        (DiagramMode::ER, "ER"),
-                        (DiagramMode::FigJam, "FigJam"),
+                    let modes: [(DiagramMode, &str, &str); 3] = [
+                        (DiagramMode::Flowchart, "Flow", "Flowchart mode — process flows, architecture, and decision trees"),
+                        (DiagramMode::ER, "ER", "Entity-Relationship mode — database schema diagrams"),
+                        (DiagramMode::FigJam, "FigJam", "FigJam mode — sticky notes, brainstorming, and ideation"),
                     ];
-                    for (mode, label) in modes {
+                    for (mode, label, hint) in modes {
                         let is_active = self.diagram_mode == mode;
                         let text = if is_active {
                             egui::RichText::new(label).size(11.0).strong().color(self.theme.accent)
@@ -886,6 +888,7 @@ impl FlowchartApp {
                                 egui::Button::new(text)
                                     .fill(if is_active { self.theme.surface1 } else { self.theme.surface0 }),
                             )
+                            .on_hover_text(hint)
                             .clicked()
                         {
                             self.diagram_mode = mode;
@@ -1124,15 +1127,15 @@ impl FlowchartApp {
     }
 
     fn draw_flowchart_shapes(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let shapes = [
-            (NodeShape::Rectangle, "Rectangle"),
-            (NodeShape::RoundedRect, "Rounded"),
-            (NodeShape::Diamond, "Diamond"),
-            (NodeShape::Circle, "Circle"),
-            (NodeShape::Parallelogram, "Parallel"),
-            (NodeShape::Hexagon, "Hexagon"),
-            (NodeShape::Connector, "Connector"),
-            (NodeShape::Callout, "Callout"),
+        let shapes: [(NodeShape, &str, &str); 8] = [
+            (NodeShape::Rectangle, "Rectangle", "Process step — click to place, drag to canvas"),
+            (NodeShape::RoundedRect, "Rounded", "Rounded step — softer look for general steps"),
+            (NodeShape::Diamond, "Diamond", "Decision point — yes/no branching logic"),
+            (NodeShape::Circle, "Circle", "State or event — start/end markers"),
+            (NodeShape::Parallelogram, "Parallel", "Input/output — data entry or display"),
+            (NodeShape::Hexagon, "Hexagon", "Phase or milestone — preparation step"),
+            (NodeShape::Connector, "Connector", "Note or annotation — inline comment"),
+            (NodeShape::Callout, "Callout", "Speech bubble — user quotes and remarks"),
         ];
 
         let available_width = ui.available_width();
@@ -1144,12 +1147,17 @@ impl FlowchartApp {
             ui.horizontal(|ui| {
                 for j in 0..2 {
                     if i + j < shapes.len() {
-                        let (shape, name) = shapes[i + j];
-                        let response = self.draw_shape_button(ui, shape, name, btn_width, btn_height);
+                        let (shape, name, hint) = shapes[i + j];
+                        let response = self.draw_shape_button(ui, shape, name, btn_width, btn_height)
+                            .on_hover_text(hint);
                         if response.clicked() {
                             let center_screen = self.canvas_rect.center();
                             let center_canvas = self.viewport.screen_to_canvas(center_screen);
-                            let node = Node::new(shape, center_canvas);
+                            let smart_label = self.document.next_label_for_shape(shape);
+                            let mut node = Node::new(shape, center_canvas);
+                            if let NodeKind::Shape { ref mut label, .. } = node.kind {
+                                *label = smart_label;
+                            }
                             self.selection.clear();
                             self.selection.node_ids.insert(node.id);
                             self.document.nodes.push(node);
