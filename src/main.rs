@@ -22,11 +22,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Render a .spec file to SVG without opening the GUI
+    /// Render a .spec file to SVG/PNG/PDF/Mermaid without opening the GUI
     Render {
         input: PathBuf,
         #[arg(short, long)]
         out: PathBuf,
+        /// Output format: svg, png, pdf, mermaid (default: svg)
+        #[arg(long, default_value = "svg")]
+        format: String,
     },
     /// Validate HRF syntax and report errors
     Validate {
@@ -56,13 +59,31 @@ enum Commands {
         #[arg(long, default_value = "")]
         api_key: String,
     },
-    /// Watch a directory and regenerate SVG on file changes
+    /// Watch a directory and regenerate output on file changes
     Watch {
         directory: PathBuf,
         #[arg(long)]
         out: PathBuf,
         #[arg(long, default_value = "")]
         template: String,
+        /// Output format: svg, png, pdf, mermaid (default: svg)
+        #[arg(long, default_value = "svg")]
+        format: String,
+    },
+    /// List or export built-in diagram templates
+    Templates {
+        #[command(subcommand)]
+        subcommand: TemplatesCmd,
+    },
+    /// Convert between HRF, spec (JSON), and Mermaid formats
+    Convert {
+        input: PathBuf,
+        /// Target format: hrf, spec, mermaid
+        #[arg(long)]
+        to: String,
+        /// Output file (omit to write to stdout for text formats)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
     },
     /// Start local HTTP render server (POST /render → SVG)
     Serve {
@@ -71,12 +92,25 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum TemplatesCmd {
+    /// List all built-in templates grouped by category
+    List,
+    /// Print a template's HRF content (use --out to write to a file)
+    Get {
+        /// Template name (case-insensitive, e.g. "Architecture")
+        name: String,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
+}
+
 fn main() -> eframe::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Render { input, out }) => {
-            cli_render(input, out);
+        Some(Commands::Render { input, out, format }) => {
+            cli_render(input, out, &format);
             return Ok(());
         }
         Some(Commands::Validate { input }) => {
@@ -95,12 +129,19 @@ fn main() -> eframe::Result<()> {
             cli_generate(&template, &model, &endpoint, &api_key);
             return Ok(());
         }
-        Some(Commands::Watch {
-            directory,
-            out,
-            template,
-        }) => {
-            cli_watch(directory, out, &template);
+        Some(Commands::Watch { directory, out, template, format }) => {
+            cli_watch(directory, out, &template, &format);
+            return Ok(());
+        }
+        Some(Commands::Templates { subcommand }) => {
+            match subcommand {
+                TemplatesCmd::List => cli_templates_list(),
+                TemplatesCmd::Get { name, out } => cli_templates_get(&name, out.as_deref()),
+            }
+            return Ok(());
+        }
+        Some(Commands::Convert { input, to, out }) => {
+            cli_convert(input, &to, out.as_deref());
             return Ok(());
         }
         Some(Commands::Serve { port }) => {
@@ -112,10 +153,22 @@ fn main() -> eframe::Result<()> {
 
     // GUI mode (no subcommand)
     let startup_file = cli.file;
+
+    // Load app icon so eframe doesn't replace the .icns with a blank icon at runtime.
+    let icon = {
+        let bytes = include_bytes!("../assets/icon.iconset/icon_256x256.png");
+        let img = image::load_from_memory(bytes)
+            .expect("bundled icon PNG is valid")
+            .into_rgba8();
+        let (w, h) = img.dimensions();
+        egui::IconData { rgba: img.into_raw(), width: w, height: h }
+    };
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 860.0])
-            .with_title("openDraftly"),
+            .with_title("openDraftly")
+            .with_icon(std::sync::Arc::new(icon)),
         ..Default::default()
     };
     eframe::run_native(
@@ -125,15 +178,37 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-fn cli_render(input: PathBuf, out: PathBuf) {
+fn cli_render(input: PathBuf, out: PathBuf, format: &str) {
     let spec = std::fs::read_to_string(&input)
         .unwrap_or_else(|e| { eprintln!("Error reading {:?}: {}", input, e); std::process::exit(1); });
     let mut doc = crate::specgraph::hrf::parse_hrf(&spec)
         .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); });
     crate::specgraph::layout::auto_layout(&mut doc);
-    crate::export::export_svg(&doc, &out)
-        .unwrap_or_else(|e| { eprintln!("Export error: {}", e); std::process::exit(1); });
-    println!("Rendered {:?} → {:?}", input, out);
+
+    match format {
+        "svg" => {
+            crate::export::export_svg(&doc, &out)
+                .unwrap_or_else(|e| { eprintln!("Export error: {}", e); std::process::exit(1); });
+        }
+        "png" => {
+            crate::export::export_png(&doc, &out)
+                .unwrap_or_else(|e| { eprintln!("Export error: {}", e); std::process::exit(1); });
+        }
+        "pdf" => {
+            crate::export::export_pdf(&doc, &out)
+                .unwrap_or_else(|e| { eprintln!("Export error: {}", e); std::process::exit(1); });
+        }
+        "mermaid" => {
+            let mermaid = crate::app::export_mermaid::to_mermaid(&doc);
+            std::fs::write(&out, mermaid)
+                .unwrap_or_else(|e| { eprintln!("Write error: {}", e); std::process::exit(1); });
+        }
+        other => {
+            eprintln!("Unknown format {:?}. Valid formats: svg, png, pdf, mermaid", other);
+            std::process::exit(1);
+        }
+    }
+    println!("Rendered {:?} → {:?} ({})", input, out, format);
 }
 
 fn cli_validate(input: PathBuf) {
@@ -277,11 +352,11 @@ fn cli_generate(template: &str, model: &str, endpoint: &str, api_key_flag: &str)
     }
 }
 
-fn cli_watch(directory: PathBuf, out: PathBuf, template: &str) {
+fn cli_watch(directory: PathBuf, out: PathBuf, template: &str, format: &str) {
     use notify::{Watcher, RecursiveMode};
     use std::sync::mpsc::channel;
 
-    println!("Watching {:?} → {:?}", directory, out);
+    println!("Watching {:?} → {:?} ({})", directory, out, format);
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(tx)
         .unwrap_or_else(|e| { eprintln!("Watch error: {}", e); std::process::exit(1); });
@@ -289,27 +364,101 @@ fn cli_watch(directory: PathBuf, out: PathBuf, template: &str) {
         .unwrap_or_else(|e| { eprintln!("Watch error: {}", e); std::process::exit(1); });
 
     // Initial render
-    regenerate_watch(&directory, &out, template);
+    regenerate_watch(&directory, &out, template, format);
 
     for event in rx.into_iter().flatten() {
-        if event.paths.iter().any(|p| p.extension().is_some_and(|e| e == "spec")) {
+        if event.paths.iter().any(|p| p.extension().is_some_and(|e| e == "spec" || e == "hrf")) {
             println!("Change detected — regenerating...");
-            regenerate_watch(&directory, &out, template);
+            regenerate_watch(&directory, &out, template, format);
         }
     }
 }
 
-fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &str) {
+fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &str, format: &str) {
     let mut spec_files: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "spec"))
+        .filter(|p| p.extension().is_some_and(|x| x == "spec" || x == "hrf"))
         .collect();
     spec_files.sort();
     if let Some(spec_path) = spec_files.into_iter().next() {
-        cli_render(spec_path, out.to_path_buf());
+        cli_render(spec_path, out.to_path_buf(), format);
+    }
+}
+
+fn cli_templates_list() {
+    use crate::templates::TEMPLATES;
+    let mut current_category = "";
+    for t in TEMPLATES {
+        if t.category != current_category {
+            current_category = t.category;
+            println!("\n{}:", current_category);
+        }
+        println!("  {:20}  {}", t.name, t.description);
+    }
+    println!();
+}
+
+fn cli_templates_get(name: &str, out: Option<&std::path::Path>) {
+    use crate::templates::TEMPLATES;
+    let name_lower = name.to_lowercase();
+    let template = TEMPLATES.iter().find(|t| t.name.to_lowercase() == name_lower)
+        .unwrap_or_else(|| {
+            eprintln!("Template {:?} not found. Run `templates list` to see available templates.", name);
+            std::process::exit(1);
+        });
+    match out {
+        Some(path) => {
+            std::fs::write(path, template.content)
+                .unwrap_or_else(|e| { eprintln!("Write error: {}", e); std::process::exit(1); });
+            println!("Wrote {} template to {:?}", template.name, path);
+        }
+        None => print!("{}", template.content),
+    }
+}
+
+fn cli_convert(input: PathBuf, to: &str, out: Option<&std::path::Path>) {
+    let src = std::fs::read_to_string(&input)
+        .unwrap_or_else(|e| { eprintln!("Error reading {:?}: {}", input, e); std::process::exit(1); });
+
+    // Detect input format by extension
+    let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let doc = match ext {
+        "hrf" | "spec" if ext == "hrf" => {
+            crate::specgraph::hrf::parse_hrf(&src)
+                .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); })
+        }
+        _ => {
+            // Try HRF parse first, then JSON
+            crate::specgraph::hrf::parse_hrf(&src)
+                .or_else(|_| serde_json::from_str::<crate::model::FlowchartDocument>(&src).map_err(|e| e.to_string()))
+                .unwrap_or_else(|_| {
+                    eprintln!("Could not parse {:?} as HRF or spec JSON. Specify a .hrf or .spec file.", input);
+                    std::process::exit(1);
+                })
+        }
+    };
+
+    let output_text = match to {
+        "hrf" => crate::specgraph::hrf::export_hrf(&doc, ""),
+        "spec" => serde_json::to_string_pretty(&doc)
+            .unwrap_or_else(|e| { eprintln!("Serialization error: {}", e); std::process::exit(1); }),
+        "mermaid" => crate::app::export_mermaid::to_mermaid(&doc),
+        other => {
+            eprintln!("Unknown target format {:?}. Valid formats: hrf, spec, mermaid", other);
+            std::process::exit(1);
+        }
+    };
+
+    match out {
+        Some(path) => {
+            std::fs::write(path, &output_text)
+                .unwrap_or_else(|e| { eprintln!("Write error: {}", e); std::process::exit(1); });
+            println!("Converted {:?} → {:?} ({})", input, path, to);
+        }
+        None => print!("{}", output_text),
     }
 }
 
