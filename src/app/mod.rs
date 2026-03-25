@@ -447,6 +447,9 @@ impl FlowchartApp {
                             format!("Opened {name}"),
                             std::time::Instant::now(),
                         ));
+                        app.push_recent(path.clone());
+                        app.current_file_path = Some(path);
+                        save_recent_files(&app.recent_files);
                     }
                     Err(e) => {
                         app.status_message = Some((
@@ -659,6 +662,41 @@ impl FlowchartApp {
     pub(crate) fn push_recent(&mut self, path: std::path::PathBuf) {
         push_recent_list(&mut self.recent_files, path);
     }
+
+    /// Saves the current document to `path`. Updates `current_file_path` and `recent_files`.
+    /// Toasts only if the path changed (avoids spam for repeated Cmd+S).
+    pub(crate) fn save_to_path(&mut self, path: std::path::PathBuf) {
+        let fallback_title = self.current_file_path.as_ref()
+            .and_then(|p| p.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled Diagram".to_string());
+        let hrf = crate::specgraph::hrf::export_hrf_ex(&self.document, &fallback_title, None);
+        match std::fs::write(&path, &hrf) {
+            Ok(()) => {
+                let is_new_path = self.current_file_path.as_ref() != Some(&path);
+                self.push_recent(path.clone());
+                self.current_file_path = Some(path);
+                save_recent_files(&self.recent_files);
+                self.autosave_dirty = false;
+                if is_new_path {
+                    let fname = self.current_file_path.as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    self.status_message = Some((
+                        format!("Saved to {fname}"),
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+            Err(e) => {
+                self.status_message = Some((
+                    format!("Save failed: {e}"),
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -792,14 +830,14 @@ impl eframe::App for FlowchartApp {
             ctx.request_repaint();
         }
 
-        // Dynamic window title: show node/edge count
+        // Dynamic window title: filename + optional dirty mark + node/edge count
         let n = self.document.nodes.len();
         let e = self.document.edges.len();
-        let title = if n == 0 {
-            "Light Figma".to_string()
-        } else {
-            format!("Light Figma — {n}N {e}E")
-        };
+        let filename = self.current_file_path.as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned());
+        let dirty = self.autosave_dirty && self.current_file_path.is_some();
+        let title = compute_window_title(filename.as_deref(), dirty, n, e);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         self.draw_find_replace(ctx);
@@ -941,6 +979,17 @@ fn push_recent_list(recent: &mut Vec<std::path::PathBuf>, path: std::path::PathB
     recent.retain(|p| p != &path);
     recent.insert(0, path);
     recent.truncate(10);
+}
+
+/// Computes the window title string. Extracted for unit-testability.
+fn compute_window_title(filename: Option<&str>, dirty: bool, nodes: usize, edges: usize) -> String {
+    let dirty_mark = if dirty { "•" } else { "" };
+    match (filename, nodes) {
+        (Some(f), 0) => format!("{f}{dirty_mark}"),
+        (Some(f), _) => format!("{f}{dirty_mark} — {nodes}N {edges}E"),
+        (None,    0) => "Light Figma".to_string(),
+        (None,    _) => format!("Light Figma — {nodes}N {edges}E"),
+    }
 }
 
 /// Returns true if the path has a .spec or .yaml extension (case-insensitive).
@@ -1100,5 +1149,50 @@ mod drop_tests {
         let s = p.to_string_lossy();
         assert!(s.contains("light-figma"), "expected 'light-figma' in {s}");
         assert!(s.ends_with("recent-files.json"), "expected 'recent-files.json' suffix in {s}");
+    }
+
+    #[test]
+    fn test_compute_window_title_no_file_no_nodes() {
+        let t = super::compute_window_title(None, false, 0, 0);
+        assert_eq!(t, "Light Figma");
+    }
+
+    #[test]
+    fn test_compute_window_title_no_file_with_nodes() {
+        let t = super::compute_window_title(None, false, 3, 2);
+        assert_eq!(t, "Light Figma — 3N 2E");
+    }
+
+    #[test]
+    fn test_compute_window_title_with_file_no_nodes() {
+        let t = super::compute_window_title(Some("arch.spec"), false, 0, 0);
+        assert_eq!(t, "arch.spec");
+    }
+
+    #[test]
+    fn test_compute_window_title_with_file_dirty() {
+        let t = super::compute_window_title(Some("arch.spec"), true, 5, 3);
+        assert_eq!(t, "arch.spec• — 5N 3E");
+    }
+
+    #[test]
+    fn test_save_to_path_round_trip() {
+        use crate::specgraph::hrf::{parse_hrf, export_hrf_ex};
+        let hrf = "## Nodes\n- [a] Alpha\n- [b] Beta\n\n## Flow\na --> b\n";
+        let mut doc = parse_hrf(hrf).expect("parse");
+        crate::specgraph::layout::auto_layout(&mut doc);
+        let orig_nodes = doc.nodes.len();
+        let orig_edges = doc.edges.len();
+
+        let path = std::env::temp_dir().join("lf_test_save.spec");
+        let content = export_hrf_ex(&doc, "Test", None);
+        std::fs::write(&path, &content).expect("write");
+
+        let read_back = std::fs::read_to_string(&path).expect("read");
+        let doc2 = parse_hrf(&read_back).expect("re-parse");
+        assert_eq!(doc2.nodes.len(), orig_nodes);
+        assert_eq!(doc2.edges.len(), orig_edges);
+
+        let _ = std::fs::remove_file(&path);
     }
 }
