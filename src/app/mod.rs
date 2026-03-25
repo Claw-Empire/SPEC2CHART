@@ -284,6 +284,10 @@ pub struct FlowchartApp {
     pub(crate) show_restore_prompt: bool,
     /// Status string shown in statusbar: e.g. "Autosaved 14:32"
     pub(crate) autosave_status: Option<String>,
+    /// Path of the currently open file; None if unsaved.
+    pub(crate) current_file_path: Option<std::path::PathBuf>,
+    /// Recently opened/saved files, newest first. Max 10 entries. Persisted.
+    pub(crate) recent_files: Vec<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -422,6 +426,8 @@ impl FlowchartApp {
                         .unwrap_or(false)
             },
             autosave_status: None,
+            current_file_path: None,
+            recent_files: load_recent_files(),
         }
     }
 
@@ -646,6 +652,12 @@ impl FlowchartApp {
                 self.autosave_last_time = std::time::Instant::now();
             }
         }
+    }
+
+    /// Prepend path to recent_files, deduplicating and capping at 10.
+    /// Does NOT call save_recent_files — callers persist after calling this.
+    pub(crate) fn push_recent(&mut self, path: std::path::PathBuf) {
+        push_recent_list(&mut self.recent_files, path);
     }
 }
 
@@ -872,6 +884,7 @@ impl eframe::App for FlowchartApp {
             }
         }
     }
+
 }
 
 /// Returns the platform-specific path for the autosave recovery file.
@@ -893,6 +906,41 @@ fn autosave_path() -> std::path::PathBuf {
             std::path::PathBuf::from(home).join(".local").join("share")
         });
     base.join("light-figma").join("autosave.json")
+}
+
+/// Returns the platform-specific path for the recent-files list.
+fn recent_files_path() -> std::path::PathBuf {
+    autosave_path()
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("recent-files.json")
+}
+
+/// Loads recent files from disk. Returns empty vec on any error.
+fn load_recent_files() -> Vec<std::path::PathBuf> {
+    let path = recent_files_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<std::path::PathBuf>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Serializes recent files to disk. Silently ignores all errors.
+fn save_recent_files(files: &[std::path::PathBuf]) {
+    if let Ok(json) = serde_json::to_string(files) {
+        let path = recent_files_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+/// Pure push logic extracted for unit-testing without constructing FlowchartApp.
+fn push_recent_list(recent: &mut Vec<std::path::PathBuf>, path: std::path::PathBuf) {
+    recent.retain(|p| p != &path);
+    recent.insert(0, path);
+    recent.truncate(10);
 }
 
 /// Returns true if the path has a .spec or .yaml extension (case-insensitive).
@@ -1014,5 +1062,43 @@ mod drop_tests {
         let result = read_dropped_content(&file);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("file path unavailable"));
+    }
+
+    #[test]
+    fn test_push_recent_deduplicates() {
+        let mut recent: Vec<std::path::PathBuf> = Vec::new();
+        let p = std::path::PathBuf::from("/tmp/foo.spec");
+        super::push_recent_list(&mut recent, p.clone());
+        super::push_recent_list(&mut recent, p.clone());
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0], p);
+    }
+
+    #[test]
+    fn test_push_recent_prepends() {
+        let mut recent: Vec<std::path::PathBuf> = Vec::new();
+        let a = std::path::PathBuf::from("/tmp/a.spec");
+        let b = std::path::PathBuf::from("/tmp/b.spec");
+        super::push_recent_list(&mut recent, a.clone());
+        super::push_recent_list(&mut recent, b.clone());
+        assert_eq!(recent[0], b); // newest first
+        assert_eq!(recent[1], a);
+    }
+
+    #[test]
+    fn test_push_recent_caps_at_10() {
+        let mut recent: Vec<std::path::PathBuf> = Vec::new();
+        for i in 0..12u32 {
+            super::push_recent_list(&mut recent, std::path::PathBuf::from(format!("/tmp/{i}.spec")));
+        }
+        assert_eq!(recent.len(), 10);
+    }
+
+    #[test]
+    fn test_recent_files_path_contains_app_dir() {
+        let p = super::recent_files_path();
+        let s = p.to_string_lossy();
+        assert!(s.contains("light-figma"), "expected 'light-figma' in {s}");
+        assert!(s.ends_with("recent-files.json"), "expected 'recent-files.json' suffix in {s}");
     }
 }
