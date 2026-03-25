@@ -666,8 +666,7 @@ impl FlowchartApp {
     /// Saves the current document to `path`. Updates `current_file_path` and `recent_files`.
     /// Toasts only if the path changed (avoids spam for repeated Cmd+S).
     pub(crate) fn save_to_path(&mut self, path: std::path::PathBuf) {
-        let fallback_title = self.current_file_path.as_ref()
-            .and_then(|p| p.file_stem())
+        let fallback_title = path.file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "Untitled Diagram".to_string());
         let hrf = crate::specgraph::hrf::export_hrf_ex(&self.document, &fallback_title, None);
@@ -1176,7 +1175,7 @@ mod drop_tests {
     }
 
     #[test]
-    fn test_save_to_path_round_trip() {
+    fn test_export_hrf_round_trip() {
         use crate::specgraph::hrf::{parse_hrf, export_hrf_ex};
         let hrf = "## Nodes\n- [a] Alpha\n- [b] Beta\n\n## Flow\na --> b\n";
         let mut doc = parse_hrf(hrf).expect("parse");
