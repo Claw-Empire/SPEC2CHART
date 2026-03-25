@@ -75,6 +75,7 @@ impl super::FlowchartApp {
                             ui.heading("Recent");
                             ui.add_space(4.0);
                             let mut to_remove: Vec<std::path::PathBuf> = Vec::new();
+                            let mut not_found_msg: Option<String> = None;
                             for path in &self.recent_files {
                                 let fname = path.file_name()
                                     .map(|n| n.to_string_lossy().into_owned())
@@ -102,6 +103,7 @@ impl super::FlowchartApp {
                                         selected_content = Some(GallerySelection::RecentFile(path.clone()));
                                         keep_open = false;
                                     } else {
+                                        not_found_msg = Some(format!("File not found: {}", path.display()));
                                         to_remove.push(path.clone());
                                     }
                                 }
@@ -110,6 +112,9 @@ impl super::FlowchartApp {
                             if !to_remove.is_empty() {
                                 self.recent_files.retain(|p| !to_remove.contains(p));
                                 super::save_recent_files(&self.recent_files);
+                            }
+                            if let Some(msg) = not_found_msg {
+                                self.status_message = Some((msg, std::time::Instant::now()));
                             }
                             ui.add_space(16.0);
                         }
