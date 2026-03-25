@@ -974,38 +974,7 @@ impl FlowchartApp {
                 // before Window::show. Nothing mutates self.recent_files between that build and this
                 // dispatch (single-threaded, synchronous egui). Index is valid for this frame.
                 if let Some(path) = self.recent_files.get(idx).cloned() {
-                    match std::fs::read_to_string(&path) {
-                        Ok(content) => match crate::specgraph::hrf::parse_hrf(&content) {
-                            Ok(mut doc) => {
-                                crate::specgraph::layout::auto_layout(&mut doc);
-                                self.history.push(&self.document);
-                                self.document = doc;
-                                self.autosave_dirty = false;
-                                self.selection.clear();
-                                self.pending_fit = true;
-                                let fname = path.file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                self.push_recent(path.clone());
-                                self.current_file_path = Some(path);
-                                super::save_recent_files(&self.recent_files);
-                                self.status_message = Some((format!("Opened {fname}"), std::time::Instant::now()));
-                            }
-                            Err(e) => {
-                                self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
-                            }
-                        },
-                        Err(e) => {
-                            let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                            if e.kind() == std::io::ErrorKind::NotFound {
-                                self.recent_files.retain(|p| p != &path);
-                                super::save_recent_files(&self.recent_files);
-                                self.status_message = Some((format!("File not found: {}", path.display()), std::time::Instant::now()));
-                            } else {
-                                self.status_message = Some((format!("Could not open {fname}: {e}"), std::time::Instant::now()));
-                            }
-                        }
-                    }
+                    self.open_recent_file(path);
                 }
             }
         }

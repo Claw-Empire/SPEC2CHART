@@ -449,6 +449,7 @@ impl FlowchartApp {
                         ));
                         app.push_recent(path.clone());
                         app.current_file_path = Some(path);
+                        app.autosave_dirty = false;
                         save_recent_files(&app.recent_files);
                     }
                     Err(e) => {
@@ -663,6 +664,43 @@ impl FlowchartApp {
         push_recent_list(&mut self.recent_files, path);
     }
 
+    /// Opens a recent file by path. Handles parse errors, file-not-found pruning,
+    /// and updates document state, history, current_file_path, and recent list.
+    pub(crate) fn open_recent_file(&mut self, path: std::path::PathBuf) {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match crate::specgraph::hrf::parse_hrf(&content) {
+                Ok(mut doc) => {
+                    crate::specgraph::layout::auto_layout(&mut doc);
+                    self.history.push(&self.document);
+                    self.document = doc;
+                    self.autosave_dirty = false;
+                    self.selection.clear();
+                    self.pending_fit = true;
+                    let fname = path.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    self.push_recent(path.clone());
+                    self.current_file_path = Some(path);
+                    save_recent_files(&self.recent_files);
+                    self.status_message = Some((format!("Opened {fname}"), std::time::Instant::now()));
+                }
+                Err(e) => {
+                    self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                }
+            },
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    self.recent_files.retain(|p| p != &path);
+                    save_recent_files(&self.recent_files);
+                    self.status_message = Some((format!("File not found: {}", path.display()), std::time::Instant::now()));
+                } else {
+                    let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.status_message = Some((format!("Could not open {fname}: {e}"), std::time::Instant::now()));
+                }
+            }
+        }
+    }
+
     /// Saves the current document to `path`. Updates `current_file_path` and `recent_files`.
     /// Toasts only if the path changed (avoids spam for repeated Cmd+S).
     pub(crate) fn save_to_path(&mut self, path: std::path::PathBuf) {
@@ -741,6 +779,7 @@ impl eframe::App for FlowchartApp {
                         Ok(mut doc) => {
                             crate::specgraph::layout::auto_layout(&mut doc);
                             self.history.push(&self.document);
+                            self.current_file_path = None;
                             self.autosave_dirty = true;
                             self.document = doc;
                             self.selection.clear();
@@ -754,44 +793,14 @@ impl eframe::App for FlowchartApp {
                 }
                 GallerySelection::EmptyCanvas => {
                     self.history.push(&self.document);
+                    self.current_file_path = None;
                     self.autosave_dirty = true;
                     self.document = crate::model::FlowchartDocument::default();
                     self.selection.clear();
                     self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
                 }
                 GallerySelection::RecentFile(path) => {
-                    match std::fs::read_to_string(&path) {
-                        Ok(content) => match crate::specgraph::hrf::parse_hrf(&content) {
-                            Ok(mut doc) => {
-                                crate::specgraph::layout::auto_layout(&mut doc);
-                                self.history.push(&self.document);
-                                self.autosave_dirty = false;
-                                self.document = doc;
-                                self.selection.clear();
-                                self.pending_fit = true;
-                                let fname = path.file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                self.push_recent(path.clone());
-                                self.current_file_path = Some(path);
-                                save_recent_files(&self.recent_files);
-                                self.status_message = Some((format!("Opened {fname}"), std::time::Instant::now()));
-                            }
-                            Err(e) => {
-                                self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
-                            }
-                        },
-                        Err(e) => {
-                            let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                            if e.kind() == std::io::ErrorKind::NotFound {
-                                self.recent_files.retain(|p| p != &path);
-                                save_recent_files(&self.recent_files);
-                                self.status_message = Some((format!("File not found: {fname}"), std::time::Instant::now()));
-                            } else {
-                                self.status_message = Some((format!("Could not open {fname}: {e}"), std::time::Instant::now()));
-                            }
-                        }
-                    }
+                    self.open_recent_file(path);
                 }
             }
         }
