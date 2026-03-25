@@ -34,3 +34,4 @@ strip = true
 name = "openDraftly"
 identifier = "com.opendraftly.app"
 category = "public.app-category.graphics-design"
+icon = ["assets/icon.icns"]
