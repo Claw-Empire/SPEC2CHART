@@ -781,11 +781,15 @@ impl eframe::App for FlowchartApp {
                                 self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
                             }
                         },
-                        Err(_) => {
+                        Err(e) => {
                             let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                            self.status_message = Some((format!("File not found: {fname}"), std::time::Instant::now()));
-                            self.recent_files.retain(|p| p != &path);
-                            save_recent_files(&self.recent_files);
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                self.recent_files.retain(|p| p != &path);
+                                save_recent_files(&self.recent_files);
+                                self.status_message = Some((format!("File not found: {fname}"), std::time::Instant::now()));
+                            } else {
+                                self.status_message = Some((format!("Could not open {fname}: {e}"), std::time::Instant::now()));
+                            }
                         }
                     }
                 }

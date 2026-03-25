@@ -81,7 +81,12 @@ impl super::FlowchartApp {
                                     .unwrap_or_else(|| path.to_string_lossy().into_owned());
                                 let full = {
                                     let s = path.to_string_lossy();
-                                    if s.len() > 40 { format!("…{}", &s[s.len()-39..]) } else { s.into_owned() }
+                                    let chars_vec: Vec<char> = s.chars().collect();
+                                    if chars_vec.len() > 40 {
+                                        format!("…{}", chars_vec[chars_vec.len()-39..].iter().collect::<String>())
+                                    } else {
+                                        s.into_owned()
+                                    }
                                 };
                                 let exists = path.exists();
                                 let label = if exists {
