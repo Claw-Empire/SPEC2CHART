@@ -90,7 +90,7 @@ let hrf = export_hrf_ex(&self.document, &fallback_title, None);
    e. self.autosave_dirty = false
    f. if is_new_path { show toast "Saved to <filename>" }
       // Cmd+S to already-known path is silent to avoid toast spam
-      // Cmd+Shift+S (Save As) always passes a path != old path, so always toasts
+      // Cmd+Shift+S (Save As) usually toasts; silent only if user Save-As'd to the already-open path
 5. On failure: toast "Save failed: <os error>"; leave state unchanged.
 ```
 
@@ -106,15 +106,17 @@ Does NOT call `save_recent_files`. Callers persist after calling this.
 
 ### `new_with_file` update
 
-Inside the `Ok(mut doc) => { ... }` arm of `new_with_file` (around `src/app/mod.rs:444`), after `app.pending_fit = true`, add:
+Inside the `Ok(mut doc) => { ... }` arm of `new_with_file`, add these lines **at the very end of the arm** — after the `app.status_message = Some(...)` assignment (currently the last statement in the arm, around `src/app/mod.rs:443`), immediately before the closing `}` of the `Ok` arm:
 
 ```rust
-app.push_recent(path.clone());    // clone: push_recent takes PathBuf by value
-app.current_file_path = Some(path); // move: consumes path (last use)
+app.push_recent(path.clone());      // clone: push_recent takes PathBuf by value
+app.current_file_path = Some(path); // move: consumes path (last use in this arm)
 save_recent_files(&app.recent_files);
 ```
 
-Note: `path` is the variable bound by the outer `if let Some(path) = file` at the top of `new_with_file`. It is still in scope inside the `Ok` arm. Do not place these lines after the outer `if let` block — `path` would be out of scope. `push_recent` receives a clone so `path` remains valid for `Some(path)` on the next line.
+**Do not insert before the `status_message` block.** The existing code at lines 437–443 borrows `path` (via `path.file_name()`) to build the status message string. Moving `path` into `Some(path)` before that block would cause a use-after-move compile error. Placing the lines at the end of the arm means `path.file_name()` runs first (shared borrow), the borrow ends, and then `path` is safely cloned and moved.
+
+Note: `path` is bound by the outer `if let Some(path) = file` at the top of `new_with_file` and remains in scope throughout the entire `Ok` arm. Do not place these lines after the outer `if let` block — `path` would be out of scope.
 
 ---
 
@@ -262,7 +264,9 @@ struct PaletteEntry {
 }
 ```
 
-All existing `build_entries()` call sites change `label: "text"` → `label: "text".into()`. This is a purely mechanical change; `&'static str` coerces to `Cow::Borrowed` via `Into`. All existing code that reads `entry.label` continues to work because `Cow<'static, str>` dereferences to `&str`.
+All existing `build_entries()` call sites change `label: "text"` → `label: "text".into()`. This is a purely mechanical change; `&'static str` coerces to `Cow::Borrowed` via `Into`. All existing code that reads `entry.label` continues to work:
+- Deref-based access (e.g., `.to_lowercase()` in the filter closure) works via `Deref<Target=str>`.
+- `RichText::new(entry.label)` compiles because `Cow<'static, str>` implements `Into<String>` (via `impl From<Cow<'_, str>> for String`), satisfying the `impl Into<String>` bound on `RichText::new`.
 
 ### Entry injection
 
@@ -291,12 +295,31 @@ The indices in `OpenRecentFile(i)` are stable for the lifetime of this frame bec
 
 ### Ranking
 
-Two filtered lists, concatenated for display:
+Replace the existing `matches` construction block (currently around `command_palette.rs:116–124`) with:
 
-1. **Recent file matches:** filter `recent_entries` by filename containing the query (case-insensitive); take up to 5 when query is empty, all matches when non-empty.
-2. **Built-in command matches:** filter `build_entries()` results by the query as before.
+```rust
+let entries = build_entries();  // static built-ins (unchanged)
 
-Concatenate: recent matches first, then built-in matches. When query is empty: show up to 5 recents then all built-ins. Ties within each group preserve insertion order.
+// Filter recent entries
+let recent_limit = if query.is_empty() { 5 } else { recent_entries.len() };
+let recent_matches: Vec<&PaletteEntry> = recent_entries.iter()
+    .filter(|e| query.is_empty() || e.label.to_lowercase().contains(&query_lc))
+    .take(recent_limit)
+    .collect();
+
+// Filter built-in entries (same logic as current code)
+let builtin_matches: Vec<&PaletteEntry> = entries.iter()
+    .filter(|e| query.is_empty() || e.label.to_lowercase().contains(&query_lc)
+                                 || e.category.to_lowercase().contains(&query_lc))
+    .collect();
+
+// Concatenate: recents first, then built-ins
+let matches: Vec<&PaletteEntry> = recent_matches.into_iter()
+    .chain(builtin_matches)
+    .collect();
+```
+
+`max_idx` at the line immediately after (currently `let max_idx = matches.len().saturating_sub(1)`) uses the combined `matches.len()`, so cursor clamping, arrow-key navigation, and enter-press dispatch all operate on the full merged list without changes to those lines.
 
 ---
 
