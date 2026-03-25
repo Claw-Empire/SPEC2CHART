@@ -11,7 +11,7 @@ use eframe::egui;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "light-figma", about = "Lightweight diagramming tool")]
+#[command(name = "open-atlas", about = "openAtlas — lightweight diagramming tool")]
 struct Cli {
     /// Optional .spec or .hrf file to open on launch
     file: Option<PathBuf>,
@@ -115,11 +115,11 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 860.0])
-            .with_title("Light Figma"),
+            .with_title("openAtlas"),
         ..Default::default()
     };
     eframe::run_native(
-        "Light Figma",
+        "openAtlas",
         options,
         Box::new(move |cc| Ok(Box::new(app::FlowchartApp::new_with_file(cc, startup_file)))),
     )
@@ -152,7 +152,7 @@ fn cli_validate(input: PathBuf) {
 
 fn cli_schema(template: &str) {
     let schema = format!(
-        "HRF (Human-Readable Format) for light-figma diagrams.\n\
+        "HRF (Human-Readable Format) for openAtlas diagrams.\n\
          Template: {}\n\
          \n\
          SYNTAX:\n\
@@ -320,7 +320,7 @@ fn cli_serve(port: u16) {
         eprintln!("Failed to start server on {}: {}", addr, e);
         std::process::exit(1);
     });
-    println!("light-figma render server listening on http://localhost:{}", port);
+    println!("openAtlas render server listening on http://localhost:{}", port);
     println!("POST /render with HRF spec body → returns SVG");
 
     for request in server.incoming_requests() {

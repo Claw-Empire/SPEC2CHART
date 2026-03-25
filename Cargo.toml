@@ -1,11 +1,11 @@
 [package]
-name = "light-figma"
+name = "open-atlas"
 version = "0.3.0"
 edition = "2021"
-description = "A Figma-inspired flowchart application"
+description = "openAtlas — lightweight diagramming tool"
 
 [lib]
-name = "light_figma"
+name = "open_atlas"
 path = "src/lib.rs"
 
 [dependencies]
@@ -31,6 +31,6 @@ codegen-units = 1
 strip = true
 
 [package.metadata.bundle]
-name = "Light Figma"
-identifier = "com.lightfigma.app"
+name = "openAtlas"
+identifier = "com.openatlas.app"
 category = "public.app-category.graphics-design"
