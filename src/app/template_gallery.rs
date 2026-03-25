@@ -5,13 +5,21 @@
 
 use crate::templates::{Template, TEMPLATES};
 
+/// Returned by `draw_template_gallery` to indicate what the user selected.
+#[derive(Debug)]
+pub(crate) enum GallerySelection {
+    Template(String),                   // HRF content from a built-in template
+    RecentFile(std::path::PathBuf),     // path chosen from recents
+    EmptyCanvas,                        // "New empty canvas" button
+}
+
 impl super::FlowchartApp {
     /// Draw the template gallery overlay.
     ///
-    /// Returns `Some(content)` when the user selects a template (content is the
-    /// raw HRF string, or empty for "Empty Canvas"). Returns `None` every frame
-    /// while the gallery is closed or while the user is still browsing.
-    pub(crate) fn draw_template_gallery(&mut self, ctx: &egui::Context) -> Option<String> {
+    /// Returns `Some(GallerySelection)` when the user makes a choice. Returns
+    /// `None` every frame while the gallery is closed or while the user is still
+    /// browsing.
+    pub(crate) fn draw_template_gallery(&mut self, ctx: &egui::Context) -> Option<GallerySelection> {
         if !self.show_template_gallery {
             return None;
         }
@@ -21,7 +29,7 @@ impl super::FlowchartApp {
             return None;
         }
 
-        let mut selected_content: Option<String> = None;
+        let mut selected_content: Option<GallerySelection> = None;
 
         // Dim the canvas behind the gallery window
         let screen_rect = ctx.screen_rect();
@@ -62,6 +70,45 @@ impl super::FlowchartApp {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        // Recent files section — shown only when there are recents
+                        if !self.recent_files.is_empty() {
+                            ui.heading("Recent");
+                            ui.add_space(4.0);
+                            let mut to_remove: Vec<std::path::PathBuf> = Vec::new();
+                            for path in &self.recent_files {
+                                let fname = path.file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                                let full = {
+                                    let s = path.to_string_lossy();
+                                    if s.len() > 40 { format!("…{}", &s[s.len()-39..]) } else { s.into_owned() }
+                                };
+                                let exists = path.exists();
+                                let label = if exists {
+                                    egui::RichText::new(format!("{fname}\n{full}")).size(12.0)
+                                } else {
+                                    egui::RichText::new(format!("{fname} (not found)\n{full}"))
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(200, 100, 60))
+                                };
+                                let btn = egui::Button::new(label).min_size([280.0, 44.0].into());
+                                if ui.add(btn).clicked() {
+                                    if exists {
+                                        selected_content = Some(GallerySelection::RecentFile(path.clone()));
+                                        keep_open = false;
+                                    } else {
+                                        to_remove.push(path.clone());
+                                    }
+                                }
+                            }
+                            // Deferred removal: avoid mutating recent_files inside the closure
+                            if !to_remove.is_empty() {
+                                self.recent_files.retain(|p| !to_remove.contains(p));
+                                super::save_recent_files(&self.recent_files);
+                            }
+                            ui.add_space(16.0);
+                        }
+
                         // Blank canvas option at the top
                         ui.heading("Blank");
                         ui.add_space(4.0);
@@ -71,7 +118,7 @@ impl super::FlowchartApp {
                             )
                             .min_size([140.0, 60.0].into());
                             if ui.add(btn).on_hover_text("Start with a blank canvas").clicked() {
-                                selected_content = Some(String::new());
+                                selected_content = Some(GallerySelection::EmptyCanvas);
                                 keep_open = false;
                             }
                         });
@@ -108,7 +155,7 @@ impl super::FlowchartApp {
                                             .on_hover_text(template.description)
                                             .clicked()
                                         {
-                                            selected_content = Some(template.content.to_string());
+                                            selected_content = Some(GallerySelection::Template(template.content.to_string()));
                                             keep_open = false;
                                         }
                                         ui.label(

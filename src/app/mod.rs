@@ -733,29 +733,62 @@ impl eframe::App for FlowchartApp {
         self.draw_goto_overlay(ctx);
 
         // Template gallery: loads and parses the selected template
-        if let Some(content) = self.draw_template_gallery(ctx) {
-            if !content.is_empty() {
-                match crate::specgraph::hrf::parse_hrf(&content) {
-                    Ok(mut doc) => {
-                        crate::specgraph::layout::auto_layout(&mut doc);
-                        self.history.push(&self.document);
-                        self.autosave_dirty = true;
-                        self.document = doc;
-                        self.selection.clear();
-                        self.pending_fit = true;
-                        self.status_message = Some(("Template loaded".to_string(), std::time::Instant::now()));
-                    }
-                    Err(e) => {
-                        self.status_message = Some((format!("Template error: {}", e), std::time::Instant::now()));
+        if let Some(selection) = self.draw_template_gallery(ctx) {
+            use crate::app::template_gallery::GallerySelection;
+            match selection {
+                GallerySelection::Template(content) => {
+                    match crate::specgraph::hrf::parse_hrf(&content) {
+                        Ok(mut doc) => {
+                            crate::specgraph::layout::auto_layout(&mut doc);
+                            self.history.push(&self.document);
+                            self.autosave_dirty = true;
+                            self.document = doc;
+                            self.selection.clear();
+                            self.pending_fit = true;
+                            self.status_message = Some(("Template loaded".to_string(), std::time::Instant::now()));
+                        }
+                        Err(e) => {
+                            self.status_message = Some((format!("Template error: {}", e), std::time::Instant::now()));
+                        }
                     }
                 }
-            } else {
-                // Empty canvas
-                self.history.push(&self.document);
-                self.autosave_dirty = true;
-                self.document = crate::model::FlowchartDocument::default();
-                self.selection.clear();
-                self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
+                GallerySelection::EmptyCanvas => {
+                    self.history.push(&self.document);
+                    self.autosave_dirty = true;
+                    self.document = crate::model::FlowchartDocument::default();
+                    self.selection.clear();
+                    self.status_message = Some(("New empty canvas".to_string(), std::time::Instant::now()));
+                }
+                GallerySelection::RecentFile(path) => {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => match crate::specgraph::hrf::parse_hrf(&content) {
+                            Ok(mut doc) => {
+                                crate::specgraph::layout::auto_layout(&mut doc);
+                                self.history.push(&self.document);
+                                self.autosave_dirty = false;
+                                self.document = doc;
+                                self.selection.clear();
+                                self.pending_fit = true;
+                                let fname = path.file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                self.push_recent(path.clone());
+                                self.current_file_path = Some(path);
+                                save_recent_files(&self.recent_files);
+                                self.status_message = Some((format!("Opened {fname}"), std::time::Instant::now()));
+                            }
+                            Err(e) => {
+                                self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                            }
+                        },
+                        Err(_) => {
+                            let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                            self.status_message = Some((format!("File not found: {fname}"), std::time::Instant::now()));
+                            self.recent_files.retain(|p| p != &path);
+                            save_recent_files(&self.recent_files);
+                        }
+                    }
+                }
             }
         }
 
