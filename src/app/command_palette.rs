@@ -94,6 +94,10 @@ enum PaletteAction {
     CollapseAll,
     ExpandAll,
     InvertSelection,
+    SelectSimilarShape,
+    SelectSimilarTag,
+    SelectSimilarSection,
+    QuickStats,
     OpenRecentFile(usize),
 }
 
@@ -1002,6 +1006,72 @@ impl FlowchartApp {
                 let n = self.selection.node_ids.len();
                 self.status_message = Some((format!("Selection inverted — {} node{} selected", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
             }
+            PaletteAction::SelectSimilarShape => {
+                if let Some(&ref_id) = self.selection.node_ids.iter().next() {
+                    if let Some(ref_node) = self.document.find_node(&ref_id) {
+                        let ref_shape = match &ref_node.kind {
+                            crate::model::NodeKind::Shape { shape, .. } => Some(*shape),
+                            _ => None,
+                        };
+                        if let Some(shape) = ref_shape {
+                            let shape_name = shape.default_label();
+                            self.selection.node_ids.clear();
+                            for node in &self.document.nodes {
+                                if let crate::model::NodeKind::Shape { shape: s, .. } = &node.kind {
+                                    if *s == shape { self.selection.node_ids.insert(node.id); }
+                                }
+                            }
+                            let n = self.selection.node_ids.len();
+                            self.status_message = Some((format!("Selected {} {} node{}", n, shape_name, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                        }
+                    }
+                }
+            }
+            PaletteAction::SelectSimilarTag => {
+                if let Some(&ref_id) = self.selection.node_ids.iter().next() {
+                    if let Some(ref_node) = self.document.find_node(&ref_id) {
+                        let ref_tag = ref_node.tag;
+                        self.selection.node_ids.clear();
+                        for node in &self.document.nodes {
+                            if node.tag == ref_tag { self.selection.node_ids.insert(node.id); }
+                        }
+                        let tag_label = ref_tag.map(|t| t.label()).unwrap_or("no tag");
+                        let n = self.selection.node_ids.len();
+                        self.status_message = Some((format!("Selected {} node{} with tag \"{}\"", n, if n == 1 { "" } else { "s" }, tag_label), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::SelectSimilarSection => {
+                if let Some(&ref_id) = self.selection.node_ids.iter().next() {
+                    if let Some(ref_node) = self.document.find_node(&ref_id) {
+                        let ref_section = ref_node.section_name.clone();
+                        self.selection.node_ids.clear();
+                        for node in &self.document.nodes {
+                            if node.section_name == ref_section { self.selection.node_ids.insert(node.id); }
+                        }
+                        let sec_label = if ref_section.is_empty() { "no section" } else { &ref_section };
+                        let n = self.selection.node_ids.len();
+                        self.status_message = Some((format!("Selected {} node{} in \"{}\"", n, if n == 1 { "" } else { "s" }, sec_label), std::time::Instant::now()));
+                    }
+                }
+            }
+            PaletteAction::QuickStats => {
+                let total_nodes = self.document.nodes.len();
+                let total_edges = self.document.edges.len();
+                let frames = self.document.nodes.iter().filter(|n| n.is_frame).count();
+                let orphans = self.document.nodes.iter().filter(|n| {
+                    !n.is_frame && !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id)
+                }).count();
+                let sections: std::collections::HashSet<&str> = self.document.nodes.iter()
+                    .filter(|n| !n.section_name.is_empty())
+                    .map(|n| n.section_name.as_str())
+                    .collect();
+                let mut msg = format!("{} nodes, {} edges", total_nodes, total_edges);
+                if frames > 0 { msg.push_str(&format!(", {} frames", frames)); }
+                if !sections.is_empty() { msg.push_str(&format!(", {} sections", sections.len())); }
+                if orphans > 0 { msg.push_str(&format!(", {} unconnected", orphans)); }
+                self.status_message = Some((msg, std::time::Instant::now()));
+            }
             PaletteAction::CollapseAll => {
                 let mut count = 0;
                 for node in &mut self.document.nodes {
@@ -1075,6 +1145,11 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⬚", label: "Select all".into(),                category: "Select",  action: PaletteAction::SelectAll },
         PaletteEntry { icon: "⊘", label: "Deselect all".into(),              category: "Select",  action: PaletteAction::Deselect },
         PaletteEntry { icon: "⇄", label: "Invert selection".into(),          category: "Select",  action: PaletteAction::InvertSelection },
+        PaletteEntry { icon: "◇", label: "Select similar shape".into(),       category: "Select",  action: PaletteAction::SelectSimilarShape },
+        PaletteEntry { icon: "●", label: "Select similar tag".into(),         category: "Select",  action: PaletteAction::SelectSimilarTag },
+        PaletteEntry { icon: "§", label: "Select similar section".into(),     category: "Select",  action: PaletteAction::SelectSimilarSection },
+        // Info
+        PaletteEntry { icon: "ℹ", label: "Quick diagram stats".into(),        category: "Info",    action: PaletteAction::QuickStats },
         // Diagram
         PaletteEntry { icon: "⬡", label: "Switch to Flowchart mode".into(),  category: "Diagram", action: PaletteAction::SwitchToFlowchart },
         PaletteEntry { icon: "◫", label: "Switch to ER mode".into(),         category: "Diagram", action: PaletteAction::SwitchToER },

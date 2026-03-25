@@ -686,14 +686,17 @@ impl FlowchartApp {
                         ],
                     ),
                     (
-                        "Selection",
+                        "Selection & Navigation",
                         &[
                             ("⌘A", "Select all"),
+                            ("⌘⇧A", "Select connected nodes"),
                             ("Escape", "Deselect"),
                             ("Del / Backspace", "Delete selected"),
                             ("Arrow keys", "Nudge 1 px  (⇧ = 10 px)"),
+                            ("Tab / ⇧Tab", "Navigate to next/previous connected node"),
                             ("⇧H / ⇧V", "Distribute selected horizontally / vertically"),
                             ("⌘G", "Group into frame"),
+                            ("⌘K → Select Similar", "Select nodes with same shape, tag, or section"),
                         ],
                     ),
                     (

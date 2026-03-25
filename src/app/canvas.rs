@@ -1687,7 +1687,24 @@ impl FlowchartApp {
                     let canvas_pos = self.viewport.screen_to_canvas(mouse);
                     if let Some(target) = self.hit_test_port(canvas_pos) {
                         if source.node_id != target.node_id {
-                            let edge = Edge::new(*source, target);
+                            let mut edge = Edge::new(*source, target);
+                            // Smart edge label: suggest based on source node shape
+                            if let Some(src_node) = self.document.find_node(&source.node_id) {
+                                if let crate::model::NodeKind::Shape { shape, .. } = &src_node.kind {
+                                    edge.label = match shape {
+                                        crate::model::NodeShape::Diamond => {
+                                            // For decision diamonds, alternate Yes/No
+                                            let existing_from_src = self.document.edges.iter()
+                                                .filter(|e| e.source.node_id == source.node_id)
+                                                .count();
+                                            if existing_from_src == 0 { "Yes".to_string() }
+                                            else if existing_from_src == 1 { "No".to_string() }
+                                            else { String::new() }
+                                        }
+                                        _ => String::new(),
+                                    };
+                                }
+                            }
                             self.document.edges.push(edge);
                             self.history.push(&self.document);
                         }

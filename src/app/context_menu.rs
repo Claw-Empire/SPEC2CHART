@@ -155,6 +155,25 @@ impl FlowchartApp {
     fn context_menu_node(&mut self, ui: &mut egui::Ui, node_id: NodeId) {
         self.selection.select_node(node_id);
 
+        // Node header with name and connection info
+        if let Some(node) = self.document.find_node(&node_id) {
+            let label = node.display_label();
+            let conn_in = self.document.edges.iter().filter(|e| e.target.node_id == node_id).count();
+            let conn_out = self.document.edges.iter().filter(|e| e.source.node_id == node_id).count();
+            let subtitle = if conn_in > 0 || conn_out > 0 {
+                format!("  {}in {}out", conn_in, conn_out)
+            } else {
+                String::new()
+            };
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(label).size(11.0).strong().color(self.theme.text_primary));
+                if !subtitle.is_empty() {
+                    ui.label(egui::RichText::new(&subtitle).size(9.0).color(self.theme.text_dim));
+                }
+            });
+            ui.separator();
+        }
+
         // Quick-color row
         ui.label(egui::RichText::new("Fill").size(9.5).color(self.theme.text_dim));
         let mut color_pick: Option<[u8; 4]> = None;
@@ -205,7 +224,11 @@ impl FlowchartApp {
                 let (dx, dy) = if is_tb { (0.0_f32, src.size[1] + 80.0) } else { (src.size[0] + 100.0, 0.0_f32) };
                 let new_pos = egui::Pos2::new(src.position[0] + dx, src.position[1] + dy);
                 let shape = match &src.kind { NodeKind::Shape { shape, .. } => *shape, _ => NodeShape::RoundedRect };
+                let smart_label = self.document.next_label_for_shape(shape);
                 let mut child = Node::new(shape, new_pos);
+                if let NodeKind::Shape { ref mut label, .. } = child.kind {
+                    *label = smart_label;
+                }
                 child.size = src.size;
                 child.style = src.style.clone();
                 child.section_name = src.section_name.clone();
