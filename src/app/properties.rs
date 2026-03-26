@@ -517,6 +517,31 @@ impl FlowchartApp {
                             }
                         });
                     }
+                    // Priority quick-set buttons
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Priority").size(9.5).color(theme.text_dim));
+                        ui.add_space(4.0);
+                        let priorities: &[(u8, &str, Color32)] = &[
+                            (0, "—", theme.text_dim),
+                            (1, "P1", Color32::from_rgb(243, 139, 168)),
+                            (2, "P2", Color32::from_rgb(250, 179, 135)),
+                            (3, "P3", Color32::from_rgb(137, 180, 250)),
+                            (4, "P4", Color32::from_rgb(166, 227, 161)),
+                        ];
+                        for &(val, label, col) in priorities {
+                            let is_active = node.priority == val;
+                            let text = egui::RichText::new(label).size(9.5).color(
+                                if is_active { col } else { theme.text_dim.gamma_multiply(0.6) }
+                            );
+                            let btn = egui::Button::new(text)
+                                .fill(if is_active { theme.surface1 } else { egui::Color32::TRANSPARENT })
+                                .corner_radius(egui::CornerRadius::same(3));
+                            if ui.add(btn).clicked() {
+                                node.priority = val;
+                            }
+                        }
+                    });
 
                     // Section (groups node with colored background on canvas)
                     ui.add_space(8.0);
@@ -573,6 +598,21 @@ impl FlowchartApp {
                         // snap to 0 if very small
                         if node.progress < 0.01 { node.progress = 0.0; }
                     }
+                    // Quick-set progress buttons
+                    ui.horizontal(|ui| {
+                        for &(label, val) in &[("0%", 0.0_f32), ("25%", 0.25), ("50%", 0.5), ("75%", 0.75), ("100%", 1.0)] {
+                            let is_active = (node.progress - val).abs() < 0.02;
+                            let text = egui::RichText::new(label).size(9.5).color(
+                                if is_active { theme.accent } else { theme.text_dim }
+                            );
+                            let btn = egui::Button::new(text)
+                                .fill(if is_active { theme.surface1 } else { egui::Color32::TRANSPARENT })
+                                .corner_radius(egui::CornerRadius::same(3));
+                            if ui.add(btn).clicked() {
+                                node.progress = val;
+                            }
+                        }
+                    });
 
                     // Comment field (also accessible via Cmd+M)
                     ui.add_space(8.0);

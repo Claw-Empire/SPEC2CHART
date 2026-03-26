@@ -67,6 +67,11 @@ impl FlowchartApp {
             Tool::Select  => "Select",
             Tool::Connect => "Connect",
         };
+        let tool_hint: Option<&str> = match self.tool {
+            Tool::Connect => Some("drag port → port to connect"),
+            Tool::Select if sel_count == 0 => Some("click node or box-select"),
+            _ => None,
+        };
 
         let mode_label = match self.diagram_mode {
             DiagramMode::Flowchart => "Flowchart",
@@ -84,13 +89,22 @@ impl FlowchartApp {
             )
             .show(ctx, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    // Tool
+                    // Tool + hint
                     pill(ui, tool_label, accent, accent_glow);
+                    if let Some(hint) = tool_hint {
+                        ui.add_space(4.0);
+                        label(ui, hint, text_dim);
+                    }
                     ui.add_space(8.0);
                     // Mode
                     separator(ui, surface1);
                     ui.add_space(8.0);
                     label(ui, mode_label, text_secondary);
+                    // Focus mode indicator
+                    if self.focus_mode {
+                        ui.add_space(4.0);
+                        pill(ui, "FOCUS", Color32::from_rgb(203, 166, 247), Color32::from_rgba_unmultiplied(203, 166, 247, 40));
+                    }
                     // 3D indicator
                     if matches!(self.view_mode, ViewMode::ThreeD) {
                         ui.add_space(6.0);

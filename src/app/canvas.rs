@@ -1169,6 +1169,27 @@ impl FlowchartApp {
             }
         }
 
+        // Focus mode: dim nodes not connected to the current selection
+        if self.focus_mode && !self.selection.node_ids.is_empty() {
+            let selected: std::collections::HashSet<NodeId> = self.selection.node_ids.clone();
+            let mut related: std::collections::HashSet<NodeId> = selected.clone();
+            for e in &self.document.edges {
+                if selected.contains(&e.source.node_id) { related.insert(e.target.node_id); }
+                if selected.contains(&e.target.node_id) { related.insert(e.source.node_id); }
+            }
+            for node in &self.document.nodes {
+                if related.contains(&node.id) { continue; }
+                let sp = self.viewport.canvas_to_screen(node.pos());
+                let ss = node.size_vec() * self.viewport.zoom;
+                let sr = Rect::from_min_size(sp, ss);
+                if sr.expand(20.0).intersects(canvas_rect) {
+                    let cr = CornerRadius::same(node.style.corner_radius as u8);
+                    let dim = self.theme.canvas_bg.gamma_multiply(0.65);
+                    painter.rect_filled(sr.expand(2.0), cr, dim);
+                }
+            }
+        }
+
         // Connectivity heatmap overlay
         if self.show_heatmap && !self.document.nodes.is_empty() {
             self.draw_heatmap_overlay(&painter, canvas_rect);

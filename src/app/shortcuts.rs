@@ -657,6 +657,7 @@ impl FlowchartApp {
         if ctx.input(|i| i.key_pressed(Key::Num0) && i.modifiers.matches_exact(cmd)) {
             self.zoom_target = 1.0;
             self.pan_target = Some([0.0, 0.0]);
+            self.status_message = Some(("View reset to 100% — Cmd+1 to fit all".to_string(), std::time::Instant::now()));
         }
 
         // Cmd+Shift+> = increase font size for selected nodes
@@ -767,6 +768,37 @@ impl FlowchartApp {
                 self.inline_node_edit = Some((dup_id, String::new()));
                 self.history.push(&self.document);
                 self.status_message = Some(("Duplicated and connected — type to label".to_string(), std::time::Instant::now()));
+            }
+        }
+
+        // Cmd+/ = toggle done state (progress 100% + Ok tag, or revert to 0% + no tag)
+        if ctx.input(|i| i.key_pressed(Key::Slash) && i.modifiers.matches_exact(cmd))
+            && !self.selection.node_ids.is_empty()
+        {
+            let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
+            let mut marked = 0;
+            let mut unmarked = 0;
+            for id in &ids {
+                if let Some(node) = self.document.find_node_mut(id) {
+                    let is_done = node.progress >= 1.0 || matches!(node.tag, Some(crate::model::NodeTag::Ok));
+                    if is_done {
+                        node.progress = 0.0;
+                        node.tag = None;
+                        unmarked += 1;
+                    } else {
+                        node.progress = 1.0;
+                        node.tag = Some(crate::model::NodeTag::Ok);
+                        marked += 1;
+                    }
+                }
+            }
+            self.history.push(&self.document);
+            if marked > 0 && unmarked == 0 {
+                self.status_message = Some((format!("Marked {} node{} as done", marked, if marked == 1 { "" } else { "s" }), std::time::Instant::now()));
+            } else if unmarked > 0 && marked == 0 {
+                self.status_message = Some((format!("Unmarked {} node{}", unmarked, if unmarked == 1 { "" } else { "s" }), std::time::Instant::now()));
+            } else {
+                self.status_message = Some((format!("Toggled {} node{}", marked + unmarked, if marked + unmarked == 1 { "" } else { "s" }), std::time::Instant::now()));
             }
         }
 

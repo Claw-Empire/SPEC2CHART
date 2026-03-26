@@ -707,6 +707,7 @@ impl FlowchartApp {
                             ("⌘C / ⌘V", "Copy / Paste (nodes + edges)"),
                             ("⌘D", "Duplicate selected"),
                             ("⌘⇧D", "Duplicate + connect (chain workflow)"),
+                            ("⌘/", "Toggle done (mark/unmark as complete)"),
                             ("⌘B / ⌘I", "Toggle bold / italic"),
                             ("⌘⇧H", "Collapse / expand selected nodes"),
                             ("⌘L", "Auto-layout (hierarchical)"),

@@ -100,6 +100,7 @@ enum PaletteAction {
     QuickStats,
     SelectOrphans,
     RandomizeColors,
+    ResetView,
     OpenRecentFile(usize),
 }
 
@@ -413,7 +414,14 @@ impl FlowchartApp {
 
             PaletteAction::ToggleGrid             => { self.show_grid = !self.show_grid; }
             PaletteAction::ToggleSnap             => { self.snap_to_grid = !self.snap_to_grid; }
-            PaletteAction::ToggleFocusMode        => { self.focus_mode = !self.focus_mode; }
+            PaletteAction::ToggleFocusMode        => {
+                self.focus_mode = !self.focus_mode;
+                if self.focus_mode {
+                    self.status_message = Some(("Focus mode on — unrelated nodes dimmed".to_string(), std::time::Instant::now()));
+                } else {
+                    self.status_message = Some(("Focus mode off".to_string(), std::time::Instant::now()));
+                }
+            }
             PaletteAction::TogglePresentation     => { self.presentation_mode = !self.presentation_mode; }
             PaletteAction::ToggleFlowAnimation    => { self.show_flow_animation = !self.show_flow_animation; }
             PaletteAction::ToggleDarkMode         => { self.toggle_dark_mode(ctx); }
@@ -1074,6 +1082,11 @@ impl FlowchartApp {
                 if orphans > 0 { msg.push_str(&format!(", {} unconnected", orphans)); }
                 self.status_message = Some((msg, std::time::Instant::now()));
             }
+            PaletteAction::ResetView => {
+                self.zoom_target = 1.0;
+                self.pan_target = Some([0.0, 0.0]);
+                self.status_message = Some(("View reset to 100% — Cmd+1 to fit all".to_string(), std::time::Instant::now()));
+            }
             PaletteAction::SelectOrphans => {
                 self.selection.clear();
                 for node in &self.document.nodes {
@@ -1198,6 +1211,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "§", label: "Select similar section".into(),     category: "Select",  action: PaletteAction::SelectSimilarSection },
         // Info
         PaletteEntry { icon: "ℹ", label: "Quick diagram stats".into(),        category: "Info",    action: PaletteAction::QuickStats },
+        PaletteEntry { icon: "⊙", label: "Reset view to 100%".into(),         category: "View",    action: PaletteAction::ResetView },
         PaletteEntry { icon: "○", label: "Select orphan (unconnected) nodes".into(), category: "Select", action: PaletteAction::SelectOrphans },
         PaletteEntry { icon: "🎨", label: "Randomize colors of selected".into(),  category: "Edit",    action: PaletteAction::RandomizeColors },
         // Diagram
