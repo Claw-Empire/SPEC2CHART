@@ -247,6 +247,35 @@ impl FlowchartApp {
                             });
                         ui.add_space(6.0);
                     }
+                    // Power tips for active diagrams
+                    if q.is_empty() && !self.document.nodes.is_empty() {
+                        let power_tips = [
+                            "Tab / Shift+Tab — navigate connected nodes by keyboard",
+                            "Cmd+Shift+D — duplicate node and auto-connect (chain workflow)",
+                            "Cmd+/ — toggle done/undone on selected nodes",
+                            "Focus mode — dim unrelated nodes to concentrate on a subgraph",
+                            "Cmd+Shift+F — pin search filter to keep dimming while editing",
+                            "Select Similar — find all nodes with same shape, tag, or section",
+                            "Select Orphans — find unconnected nodes in your diagram",
+                        ];
+                        // Rotate tips: show 2 at a time based on seconds
+                        let idx = (std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() / 8) as usize;
+                        let tip1 = power_tips[idx % power_tips.len()];
+                        let tip2 = power_tips[(idx + 1) % power_tips.len()];
+                        Frame::NONE
+                            .fill(surface0)
+                            .corner_radius(egui::CornerRadius::same(6))
+                            .inner_margin(Margin { left: 12, right: 12, top: 6, bottom: 6 })
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("Tip").size(9.5).strong().color(accent.gamma_multiply(0.7)));
+                                ui.label(RichText::new(format!("  {}", tip1)).size(10.5).color(text_dim));
+                                ui.label(RichText::new(format!("  {}", tip2)).size(10.5).color(text_dim));
+                            });
+                        ui.add_space(4.0);
+                    }
 
                     let mut last_cat = "";
                     for (i, entry) in matches.iter().enumerate() {

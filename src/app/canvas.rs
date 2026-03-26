@@ -6098,10 +6098,17 @@ impl FlowchartApp {
                 let final_text = text.clone();
                 if let Some(node) = self.document.find_node_mut(&node_id) {
                     match &mut node.kind {
-                        NodeKind::Shape { label, .. } => *label = final_text,
-                        NodeKind::Text { content } => *content = final_text,
-                        NodeKind::Entity { name, .. } => *name = final_text,
-                        NodeKind::StickyNote { text: t, .. } => *t = final_text,
+                        NodeKind::Shape { label, .. } => *label = final_text.clone(),
+                        NodeKind::Text { content } => *content = final_text.clone(),
+                        NodeKind::Entity { name, .. } => *name = final_text.clone(),
+                        NodeKind::StickyNote { text: t, .. } => *t = final_text.clone(),
+                    }
+                    // Auto-resize: expand node width to fit label text + padding
+                    let font_size = node.style.font_size.max(13.0);
+                    let char_width = font_size * 0.6; // approximate character width
+                    let text_width = final_text.len() as f32 * char_width + 32.0; // 32px padding
+                    if text_width > node.size[0] && !node.collapsed {
+                        node.size[0] = text_width.min(400.0); // cap at 400px
                     }
                 }
                 self.inline_node_edit = None;

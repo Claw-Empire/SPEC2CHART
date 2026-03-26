@@ -2186,17 +2186,17 @@ impl FlowchartApp {
             painter.ctx().request_repaint_after(std::time::Duration::from_millis(16));
         }
 
-        // Edge label (skip at very low zoom — illegible below ~0.45)
-        if !edge.label.is_empty() && self.viewport.zoom > 0.45 {
+        // Edge label (visible at lower zoom now thanks to background pill)
+        if !edge.label.is_empty() && self.viewport.zoom > 0.35 {
             let mid = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
-            let font_size = (12.0 * self.viewport.zoom).clamp(8.0, 24.0);
+            let font_size = (13.0 * self.viewport.zoom).clamp(10.0, 24.0);
             if font_size > 4.0 {
                 let galley = painter.layout_no_wrap(
                     edge.label.clone(),
                     FontId::proportional(font_size),
                     edge_color,
                 );
-                let text_rect = Rect::from_center_size(mid, galley.size()).expand2(Vec2::new(5.0, 3.0));
+                let text_rect = Rect::from_center_size(mid, galley.size()).expand2(Vec2::new(6.0, 3.0));
                 // Subtle drop shadow
                 painter.rect_filled(
                     text_rect.translate(Vec2::new(1.0, 1.5)),
@@ -2205,11 +2205,14 @@ impl FlowchartApp {
                 );
                 // Background pill
                 painter.rect_filled(text_rect, CornerRadius::same(5), self.theme.edge_label_bg);
-                // Border on selected
-                if is_selected {
-                    painter.rect_stroke(text_rect, CornerRadius::same(5),
-                        Stroke::new(1.0, self.theme.accent.gamma_multiply(0.6)), StrokeKind::Outside);
-                }
+                // Subtle border for contrast (always, not just when selected)
+                let border_color = if is_selected {
+                    self.theme.accent.gamma_multiply(0.6)
+                } else {
+                    edge_color.gamma_multiply(0.15)
+                };
+                painter.rect_stroke(text_rect, CornerRadius::same(5),
+                    Stroke::new(0.5, border_color), StrokeKind::Outside);
                 painter.text(mid, Align2::CENTER_CENTER, &edge.label,
                     FontId::proportional(font_size), edge_color);
             }
