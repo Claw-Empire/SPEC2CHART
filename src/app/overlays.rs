@@ -705,7 +705,8 @@ impl FlowchartApp {
                             ("⌘Z", "Undo"),
                             ("⌘⇧Z", "Redo"),
                             ("⌘C / ⌘V", "Copy / Paste (nodes + edges)"),
-                            ("⌘D", "Duplicate"),
+                            ("⌘D", "Duplicate selected"),
+                            ("⌘⇧D", "Duplicate + connect (chain workflow)"),
                             ("⌘B / ⌘I", "Toggle bold / italic"),
                             ("⌘⇧H", "Collapse / expand selected nodes"),
                             ("⌘L", "Auto-layout (hierarchical)"),
@@ -930,6 +931,28 @@ impl FlowchartApp {
                                 err_color.gamma_multiply(0.7),
                                 egui::RichText::new(snippet).size(10.0).monospace(),
                             );
+                        });
+                    }
+                    // "Did you mean?" hints for common mistakes
+                    let hint_color = Color32::from_rgb(249, 226, 175);
+                    let err_lower = err.to_lowercase();
+                    let hint: Option<&str> = if err_lower.contains("unexpected") && err_lower.contains("arrow") {
+                        Some("Tip: edges go in ## Flow section, e.g.  alpha --> beta: label")
+                    } else if err_lower.contains("unknown tag") || err_lower.contains("invalid tag") {
+                        Some("Tip: tags use {curly braces}, e.g. {done} {wip} {icon:🚀}")
+                    } else if err_lower.contains("duplicate") {
+                        Some("Tip: each [id] must be unique within the document")
+                    } else if err_lower.contains("not found") || err_lower.contains("undefined") {
+                        Some("Tip: ensure the node [id] is defined in ## Nodes before referencing it in ## Flow")
+                    } else if err_lower.contains("expected") && err_lower.contains("section") {
+                        Some("Tip: sections start with ## (e.g. ## Config, ## Nodes, ## Flow)")
+                    } else {
+                        None
+                    };
+                    if let Some(h) = hint {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.add_space(12.0);
+                            ui.colored_label(hint_color.gamma_multiply(0.8), egui::RichText::new(h).size(10.0).italics());
                         });
                     }
                     ui.add_space(4.0);

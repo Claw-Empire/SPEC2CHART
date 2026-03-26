@@ -731,6 +731,45 @@ impl FlowchartApp {
             self.status_message = Some((format!("Duplicated {} node{}", n_duped, if n_duped == 1 { "" } else { "s" }), std::time::Instant::now()));
         }
 
+        // Cmd+Shift+D = duplicate selected node AND connect original → duplicate
+        let cmd_shift = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::D) && i.modifiers.matches_exact(cmd_shift))
+            && self.selection.node_ids.len() == 1
+        {
+            let src_id = *self.selection.node_ids.iter().next().unwrap();
+            if let Some(src) = self.document.find_node(&src_id).cloned() {
+                let is_tb = matches!(self.document.layout_dir.as_str(), "TB" | "BT");
+                let (dx, dy, src_side, tgt_side) = if is_tb {
+                    (0.0_f32, src.size[1] + 80.0, crate::model::PortSide::Bottom, crate::model::PortSide::Top)
+                } else {
+                    (src.size[0] + 100.0, 0.0_f32, crate::model::PortSide::Right, crate::model::PortSide::Left)
+                };
+                let new_pos = egui::Pos2::new(src.position[0] + dx, src.position[1] + dy);
+                let shape = match &src.kind { crate::model::NodeKind::Shape { shape, .. } => *shape, _ => crate::model::NodeShape::RoundedRect };
+                let smart_label = self.document.next_label_for_shape(shape);
+                let mut dup = crate::model::Node::new(shape, new_pos);
+                if let crate::model::NodeKind::Shape { ref mut label, .. } = dup.kind {
+                    *label = smart_label;
+                }
+                dup.size = src.size;
+                dup.style = src.style.clone();
+                dup.section_name = src.section_name.clone();
+                let dup_id = dup.id;
+                self.document.nodes.push(dup);
+                // Create connecting edge
+                let edge = crate::model::Edge::new(
+                    crate::model::Port { node_id: src_id, side: src_side },
+                    crate::model::Port { node_id: dup_id, side: tgt_side },
+                );
+                self.document.edges.push(edge);
+                self.selection.clear();
+                self.selection.select_node(dup_id);
+                self.inline_node_edit = Some((dup_id, String::new()));
+                self.history.push(&self.document);
+                self.status_message = Some(("Duplicated and connected — type to label".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Escape = deselect
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.selection.clear();

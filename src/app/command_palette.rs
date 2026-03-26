@@ -98,6 +98,8 @@ enum PaletteAction {
     SelectSimilarTag,
     SelectSimilarSection,
     QuickStats,
+    SelectOrphans,
+    RandomizeColors,
     OpenRecentFile(usize),
 }
 
@@ -1072,6 +1074,52 @@ impl FlowchartApp {
                 if orphans > 0 { msg.push_str(&format!(", {} unconnected", orphans)); }
                 self.status_message = Some((msg, std::time::Instant::now()));
             }
+            PaletteAction::SelectOrphans => {
+                self.selection.clear();
+                for node in &self.document.nodes {
+                    if node.is_frame { continue; }
+                    let connected = self.document.edges.iter()
+                        .any(|e| e.source.node_id == node.id || e.target.node_id == node.id);
+                    if !connected {
+                        self.selection.node_ids.insert(node.id);
+                    }
+                }
+                let n = self.selection.node_ids.len();
+                if n == 0 {
+                    self.status_message = Some(("All nodes are connected — no orphans found".to_string(), std::time::Instant::now()));
+                } else {
+                    self.status_message = Some((format!("Selected {} unconnected node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                }
+            }
+            PaletteAction::RandomizeColors => {
+                let palette: &[[u8; 4]] = &[
+                    [137, 180, 250, 255], // blue
+                    [166, 227, 161, 255], // green
+                    [243, 139, 168, 255], // red
+                    [249, 226, 175, 255], // yellow
+                    [203, 166, 247, 255], // purple
+                    [148, 226, 213, 255], // teal
+                    [250, 179, 135, 255], // orange
+                    [245, 194, 231, 255], // pink
+                    [180, 190, 254, 255], // lavender
+                    [116, 199, 236, 255], // sapphire
+                ];
+                let ids: Vec<crate::model::NodeId> = self.selection.node_ids.iter().copied().collect();
+                if ids.is_empty() {
+                    self.status_message = Some(("Select nodes first, then randomize".to_string(), std::time::Instant::now()));
+                } else {
+                    for (i, id) in ids.iter().enumerate() {
+                        if let Some(node) = self.document.find_node_mut(id) {
+                            let color = palette[i % palette.len()];
+                            node.style.fill_color = color;
+                            node.style.text_color = super::theme::auto_contrast_text(color);
+                        }
+                    }
+                    self.history.push(&self.document);
+                    let n = ids.len();
+                    self.status_message = Some((format!("Applied {} distinct colors", n.min(palette.len())), std::time::Instant::now()));
+                }
+            }
             PaletteAction::CollapseAll => {
                 let mut count = 0;
                 for node in &mut self.document.nodes {
@@ -1150,6 +1198,8 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "§", label: "Select similar section".into(),     category: "Select",  action: PaletteAction::SelectSimilarSection },
         // Info
         PaletteEntry { icon: "ℹ", label: "Quick diagram stats".into(),        category: "Info",    action: PaletteAction::QuickStats },
+        PaletteEntry { icon: "○", label: "Select orphan (unconnected) nodes".into(), category: "Select", action: PaletteAction::SelectOrphans },
+        PaletteEntry { icon: "🎨", label: "Randomize colors of selected".into(),  category: "Edit",    action: PaletteAction::RandomizeColors },
         // Diagram
         PaletteEntry { icon: "⬡", label: "Switch to Flowchart mode".into(),  category: "Diagram", action: PaletteAction::SwitchToFlowchart },
         PaletteEntry { icon: "◫", label: "Switch to ER mode".into(),         category: "Diagram", action: PaletteAction::SwitchToER },

@@ -50,8 +50,17 @@ impl FlowchartApp {
             if let (Some(sn), Some(tn)) = (src_node, tgt_node) {
                 let src = sn.port_position(edge.source.side);
                 let tgt = tn.port_position(edge.target.side);
-                // Use canvas-space CPs (including overrides) for accurate hit testing
+                // Bounding box pre-filter: skip edges whose AABB is far from the test point
                 let (cp1, cp2) = resolve_edge_cps_canvas(edge, src, tgt);
+                let min_x = src.x.min(tgt.x).min(cp1.x).min(cp2.x) - threshold;
+                let max_x = src.x.max(tgt.x).max(cp1.x).max(cp2.x) + threshold;
+                let min_y = src.y.min(tgt.y).min(cp1.y).min(cp2.y) - threshold;
+                let max_y = src.y.max(tgt.y).max(cp1.y).max(cp2.y) + threshold;
+                if canvas_pos.x < min_x || canvas_pos.x > max_x
+                    || canvas_pos.y < min_y || canvas_pos.y > max_y
+                {
+                    continue;
+                }
                 for i in 0..=20 {
                     let t = i as f32 / 20.0;
                     let p = cubic_bezier_point(src, cp1, cp2, tgt, t);
