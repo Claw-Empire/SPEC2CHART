@@ -2272,6 +2272,28 @@ impl FlowchartApp {
             );
         }
 
+        // Edge endpoint tooltip: show source → target on hover when no label (dense diagram aid)
+        if is_hovered && edge.label.is_empty() && edge.comment.is_empty() {
+            let src_name = self.document.find_node(&edge.source.node_id)
+                .map(|n| n.display_label().to_string())
+                .unwrap_or_default();
+            let tgt_name = self.document.find_node(&edge.target.node_id)
+                .map(|n| n.display_label().to_string())
+                .unwrap_or_default();
+            if !src_name.is_empty() || !tgt_name.is_empty() {
+                let mid = cubic_bezier_point(src, cp1, cp2, tgt, 0.5);
+                let hint = format!("{} → {}", src_name, tgt_name);
+                let hint_font = (10.0 * self.viewport.zoom).clamp(9.0, 14.0);
+                let galley = painter.layout_no_wrap(hint.clone(), FontId::proportional(hint_font), self.theme.text_dim);
+                let offset_y = -12.0 * self.viewport.zoom.sqrt();
+                let hint_pos = mid + Vec2::new(0.0, offset_y);
+                let pad = Vec2::new(5.0, 2.0);
+                let bg_rect = Rect::from_center_size(hint_pos, galley.size() + pad * 2.0);
+                painter.rect_filled(bg_rect, CornerRadius::same(4), self.theme.tooltip_bg);
+                painter.text(hint_pos, Align2::CENTER_CENTER, &hint, FontId::proportional(hint_font), self.theme.text_dim);
+            }
+        }
+
         // Direction tick-marks at 25% and 75% along selected edges
         if is_selected && !edge.style.orthogonal {
             for t in [0.25_f32, 0.75] {

@@ -103,6 +103,7 @@ enum PaletteAction {
     ResetView,
     SelectAllEdges,
     SelectEdgesOfSelection,
+    CopyLabelsToClipboard,
     OpenRecentFile(usize),
 }
 
@@ -366,9 +367,12 @@ impl FlowchartApp {
                 for id in &node_ids { self.document.remove_node(id); }
                 for id in &edge_ids { self.document.remove_edge(id); }
                 if !node_ids.is_empty() || !edge_ids.is_empty() {
+                    let mut parts = Vec::new();
+                    if !node_ids.is_empty() { parts.push(format!("{} node{}", node_ids.len(), if node_ids.len() == 1 { "" } else { "s" })); }
+                    if !edge_ids.is_empty() { parts.push(format!("{} edge{}", edge_ids.len(), if edge_ids.len() == 1 { "" } else { "s" })); }
                     self.selection.clear();
                     self.history.push(&self.document);
-                    self.status_message = Some(("Deleted".to_string(), std::time::Instant::now()));
+                    self.status_message = Some((format!("Deleted {} — Cmd+Z to undo", parts.join(", ")), std::time::Instant::now()));
                 }
             }
 
@@ -405,8 +409,9 @@ impl FlowchartApp {
                         self.selection.node_ids.insert(node.id);
                         self.document.nodes.push(node);
                     }
+                    let n = self.selection.node_ids.len();
                     self.history.push(&self.document);
-                    self.status_message = Some(("Duplicated".to_string(), std::time::Instant::now()));
+                    self.status_message = Some((format!("Duplicated {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
                 }
             }
 
@@ -1113,6 +1118,24 @@ impl FlowchartApp {
                 if orphans > 0 { msg.push_str(&format!(", {} unconnected", orphans)); }
                 self.status_message = Some((msg, std::time::Instant::now()));
             }
+            PaletteAction::CopyLabelsToClipboard => {
+                let labels: Vec<String> = if self.selection.node_ids.is_empty() {
+                    self.document.nodes.iter().map(|n| n.display_label().to_string()).collect()
+                } else {
+                    self.selection.node_ids.iter()
+                        .filter_map(|id| self.document.find_node(id))
+                        .map(|n| n.display_label().to_string())
+                        .collect()
+                };
+                if labels.is_empty() {
+                    self.status_message = Some(("No nodes to copy labels from".to_string(), std::time::Instant::now()));
+                } else {
+                    let text = labels.join("\n");
+                    ctx.copy_text(text);
+                    let n = labels.len();
+                    self.status_message = Some((format!("Copied {} label{} to clipboard", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                }
+            }
             PaletteAction::SelectAllEdges => {
                 self.selection.edge_ids.clear();
                 for edge in &self.document.edges {
@@ -1267,6 +1290,7 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "◇", label: "Select similar shape".into(),       category: "Select",  action: PaletteAction::SelectSimilarShape },
         PaletteEntry { icon: "●", label: "Select similar tag".into(),         category: "Select",  action: PaletteAction::SelectSimilarTag },
         PaletteEntry { icon: "§", label: "Select similar section".into(),     category: "Select",  action: PaletteAction::SelectSimilarSection },
+        PaletteEntry { icon: "📋", label: "Copy labels to clipboard".into(),   category: "Edit",    action: PaletteAction::CopyLabelsToClipboard },
         PaletteEntry { icon: "↔", label: "Select all edges".into(),           category: "Select",  action: PaletteAction::SelectAllEdges },
         PaletteEntry { icon: "⇌", label: "Select edges of selected nodes".into(), category: "Select", action: PaletteAction::SelectEdgesOfSelection },
         // Info
