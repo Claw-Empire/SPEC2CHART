@@ -882,6 +882,22 @@ impl FlowchartApp {
             }
         }
 
+        // Cmd+Shift+F = toggle persistent search filter
+        let cmd_shift_f = Modifiers { shift: true, ..cmd };
+        if ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd_shift_f)) {
+            if self.persist_search_filter {
+                self.persist_search_filter = false;
+                self.status_message = Some(("Search filter unpinned".to_string(), std::time::Instant::now()));
+            } else if !self.search_query.is_empty() {
+                self.persist_search_filter = true;
+                self.show_search = false;
+                self.status_message = Some((format!("Search filter pinned: \"{}\"", self.search_query), std::time::Instant::now()));
+            } else {
+                self.show_search = true;
+                self.status_message = Some(("Type a search query, then Cmd+Shift+F to pin it".to_string(), std::time::Instant::now()));
+            }
+        }
+
         // Cmd+N = open template gallery
         if ctx.input(|i| i.key_pressed(Key::N) && i.modifiers.matches_exact(cmd)) {
             self.show_template_gallery = !self.show_template_gallery;

@@ -201,12 +201,30 @@ impl FlowchartApp {
                                 };
                                 match result {
                                     Ok(()) => {
+                                        let fname = path.file_name()
+                                            .map(|f| f.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| label.to_string());
+                                        let size_str = std::fs::metadata(&path)
+                                            .map(|m| {
+                                                let bytes = m.len();
+                                                if bytes < 1024 { format!("{} B", bytes) }
+                                                else if bytes < 1024 * 1024 { format!("{:.1} KB", bytes as f64 / 1024.0) }
+                                                else { format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)) }
+                                            })
+                                            .unwrap_or_default();
+                                        let n = self.document.nodes.len();
+                                        let e = self.document.edges.len();
                                         self.status_message = Some((
-                                            format!("Exported {}!", label),
+                                            format!("Exported {} ({}) — {} nodes, {} edges", fname, size_str, n, e),
                                             std::time::Instant::now(),
                                         ));
                                     }
-                                    Err(e) => eprintln!("Export error: {}", e),
+                                    Err(e) => {
+                                        self.status_message = Some((
+                                            format!("Export failed: {}", e),
+                                            std::time::Instant::now(),
+                                        ));
+                                    }
                                 }
                             }
                         }
@@ -335,9 +353,19 @@ impl FlowchartApp {
                             match result {
                                 Ok(content) => match std::fs::write(&path, &content) {
                                     Ok(()) => {
-                                        let fmt = if is_hrf { "Spec" } else { "YAML" };
+                                        let fmt = if is_hrf { "HRF spec" } else { "YAML" };
+                                        let fname = path.file_name()
+                                            .map(|f| f.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| fmt.to_string());
+                                        let size_str = std::fs::metadata(&path)
+                                            .map(|m| {
+                                                let bytes = m.len();
+                                                if bytes < 1024 { format!("{} B", bytes) }
+                                                else { format!("{:.1} KB", bytes as f64 / 1024.0) }
+                                            })
+                                            .unwrap_or_default();
                                         self.status_message = Some((
-                                            format!("Exported {}!", fmt),
+                                            format!("Exported {} ({}) — {} nodes, {} edges", fname, size_str, self.document.nodes.len(), self.document.edges.len()),
                                             std::time::Instant::now(),
                                         ));
                                     }

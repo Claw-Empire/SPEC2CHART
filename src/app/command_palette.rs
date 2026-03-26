@@ -101,6 +101,8 @@ enum PaletteAction {
     SelectOrphans,
     RandomizeColors,
     ResetView,
+    SelectAllEdges,
+    SelectEdgesOfSelection,
     OpenRecentFile(usize),
 }
 
@@ -1082,6 +1084,33 @@ impl FlowchartApp {
                 if orphans > 0 { msg.push_str(&format!(", {} unconnected", orphans)); }
                 self.status_message = Some((msg, std::time::Instant::now()));
             }
+            PaletteAction::SelectAllEdges => {
+                self.selection.edge_ids.clear();
+                for edge in &self.document.edges {
+                    self.selection.edge_ids.insert(edge.id);
+                }
+                let n = self.selection.edge_ids.len();
+                self.status_message = Some((format!("Selected all {} edge{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+            }
+            PaletteAction::SelectEdgesOfSelection => {
+                let sel_nodes = &self.selection.node_ids;
+                if sel_nodes.is_empty() {
+                    self.status_message = Some(("Select nodes first, then use this to select their edges".to_string(), std::time::Instant::now()));
+                } else {
+                    self.selection.edge_ids.clear();
+                    for edge in &self.document.edges {
+                        if sel_nodes.contains(&edge.source.node_id) && sel_nodes.contains(&edge.target.node_id) {
+                            self.selection.edge_ids.insert(edge.id);
+                        }
+                    }
+                    let n = self.selection.edge_ids.len();
+                    if n == 0 {
+                        self.status_message = Some(("No edges between selected nodes".to_string(), std::time::Instant::now()));
+                    } else {
+                        self.status_message = Some((format!("Selected {} edge{} between nodes", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                    }
+                }
+            }
             PaletteAction::ResetView => {
                 self.zoom_target = 1.0;
                 self.pan_target = Some([0.0, 0.0]);
@@ -1209,6 +1238,8 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "◇", label: "Select similar shape".into(),       category: "Select",  action: PaletteAction::SelectSimilarShape },
         PaletteEntry { icon: "●", label: "Select similar tag".into(),         category: "Select",  action: PaletteAction::SelectSimilarTag },
         PaletteEntry { icon: "§", label: "Select similar section".into(),     category: "Select",  action: PaletteAction::SelectSimilarSection },
+        PaletteEntry { icon: "↔", label: "Select all edges".into(),           category: "Select",  action: PaletteAction::SelectAllEdges },
+        PaletteEntry { icon: "⇌", label: "Select edges of selected nodes".into(), category: "Select", action: PaletteAction::SelectEdgesOfSelection },
         // Info
         PaletteEntry { icon: "ℹ", label: "Quick diagram stats".into(),        category: "Info",    action: PaletteAction::QuickStats },
         PaletteEntry { icon: "⊙", label: "Reset view to 100%".into(),         category: "View",    action: PaletteAction::ResetView },

@@ -708,6 +708,7 @@ impl FlowchartApp {
                             ("⌘D", "Duplicate selected"),
                             ("⌘⇧D", "Duplicate + connect (chain workflow)"),
                             ("⌘/", "Toggle done (mark/unmark as complete)"),
+                            ("⌘⇧F", "Pin/unpin search filter"),
                             ("⌘B / ⌘I", "Toggle bold / italic"),
                             ("⌘⇧H", "Collapse / expand selected nodes"),
                             ("⌘L", "Auto-layout (hierarchical)"),

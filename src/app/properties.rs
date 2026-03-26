@@ -1512,11 +1512,23 @@ impl FlowchartApp {
     fn draw_multi_selection_tools(&mut self, ui: &mut egui::Ui, sel_nodes: usize, total: usize) {
         let theme = self.theme.clone();
         let sel_edges = self.selection.edge_ids.len();
-        ui.label(
-            egui::RichText::new(format!("{} items selected", total))
-                .size(13.0)
-                .color(theme.text_secondary),
-        );
+        // Descriptive header
+        let header = if sel_nodes > 0 && sel_edges > 0 {
+            format!("{} node{} + {} edge{} selected",
+                sel_nodes, if sel_nodes == 1 { "" } else { "s" },
+                sel_edges, if sel_edges == 1 { "" } else { "s" })
+        } else if sel_edges > 0 {
+            format!("{} edge{} selected", sel_edges, if sel_edges == 1 { "" } else { "s" })
+        } else {
+            format!("{} node{} selected", sel_nodes, if sel_nodes == 1 { "" } else { "s" })
+        };
+        ui.label(egui::RichText::new(&header).size(13.0).color(theme.text_secondary));
+        // Hint about bulk editable properties
+        if sel_nodes >= 2 {
+            ui.add_space(2.0);
+            ui.label(egui::RichText::new("Bulk edit: fill color, tag, section, priority below")
+                .size(9.5).italics().color(theme.text_dim));
+        }
         ui.add_space(8.0);
 
         // Path inspection + quick connect: when exactly 2 nodes selected
