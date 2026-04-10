@@ -849,6 +849,22 @@ pub struct ImportHints {
     /// `expand_palette` during `parse_hrf` and consumed by lint. Never
     /// serialized.
     pub palette_definition_usage: Vec<(String, usize)>,
+    /// Raw values supplied for the `flow` / `layout` / `direction` config
+    /// keys that did NOT match any known direction (TB/BT/LR/RL and their
+    /// aliases). The parser silently defaults to TB on unknown values, so
+    /// `flow = TR` (typo for TB) used to fall through without a warning.
+    /// Used by `lint` to emit "did you mean" hints. Pair is
+    /// (raw_value, canonical_suggestion). Never serialized.
+    pub unknown_layout_direction: Vec<(String, String)>,
+    /// Unrecognized `{src-port:X}` / `{sport:X}` / `{tgt-port:X}` /
+    /// `{tport:X}` values. The parser silently fell back to the default
+    /// Bottom/Top side on unknown values, so `{src-port:topleft}` or
+    /// `{sport:cent}` used to vanish without a warning and cause edges to
+    /// connect at the wrong attachment point. Pair is
+    /// (kind, raw_value) where kind is "src" or "tgt" so lint can
+    /// describe the location. Suggestion is attached lazily by lint from
+    /// the fixed (top/bottom/left/right) vocabulary. Never serialized.
+    pub invalid_port_side_values: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

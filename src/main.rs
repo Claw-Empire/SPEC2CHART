@@ -1550,6 +1550,34 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Unknown `flow = X` / `layout = X` config values: the parser used to
+    // silently default to TB when the direction was unrecognized
+    // (`flow = TR` typo → TB, no warning). Now records the raw value so
+    // we can emit a did-you-mean hint. Frequent typo mode: users mix up
+    // LR/RL and TB/BT constantly.
+    for (raw, suggestion) in &doc.import_hints.unknown_layout_direction {
+        warnings.push(format!(
+            "Unknown layout direction `{}` — did you mean `{}`? (valid: TB, BT, LR, RL)",
+            raw, suggestion
+        ));
+    }
+
+    // Invalid `{src-port:X}` / `{tgt-port:X}` values: unknown values used
+    // to silently fall back to the default Bottom/Top port, causing edges
+    // to connect at the wrong attachment point without any warning. Now
+    // records the raw value + kind so we can emit a did-you-mean hint.
+    {
+        use crate::specgraph::hrf::suggest_port_side;
+        for (kind, raw) in &doc.import_hints.invalid_port_side_values {
+            let kind_desc = if kind == "src" { "source" } else { "target" };
+            let suggestion = suggest_port_side(raw).unwrap_or("top");
+            warnings.push(format!(
+                "Invalid {} port side `{}` — did you mean `{}`? (valid: top, bottom, left, right)",
+                kind_desc, raw, suggestion
+            ));
+        }
+    }
+
     // Duplicate parallel edges: same (source, target, label) tuple appearing
     // more than once. Almost always a copy-paste typo in `## Flow` — the two
     // edges get drawn on top of each other and look like one, so the user has
@@ -2644,6 +2672,268 @@ mod cli_tests {
             !label_to_ids.contains_key("cluster"),
             "frame labels must not be counted toward duplicates"
         );
+    }
+
+    #[test]
+    fn test_suggest_port_side_exact_matches_return_none() {
+        use crate::specgraph::hrf::suggest_port_side;
+        for known in ["top", "bottom", "left", "right", "TOP", "Left"] {
+            assert_eq!(suggest_port_side(known), None, "known '{known}'");
+        }
+    }
+
+    #[test]
+    fn test_suggest_port_side_compass_aliases() {
+        use crate::specgraph::hrf::suggest_port_side;
+        assert_eq!(suggest_port_side("north"), Some("top"));
+        assert_eq!(suggest_port_side("south"), Some("bottom"));
+        assert_eq!(suggest_port_side("west"), Some("left"));
+        assert_eq!(suggest_port_side("east"), Some("right"));
+        assert_eq!(suggest_port_side("n"), Some("top"));
+        assert_eq!(suggest_port_side("sw"), Some("bottom"));
+    }
+
+    #[test]
+    fn test_suggest_port_side_diagonal_fallbacks() {
+        use crate::specgraph::hrf::suggest_port_side;
+        // Diagonals fall back to the nearest cardinal; we only need them
+        // to route to SOMETHING valid so the user still gets a hint.
+        assert_eq!(suggest_port_side("topleft"), Some("top"));
+        assert_eq!(suggest_port_side("top-left"), Some("top"));
+        assert_eq!(suggest_port_side("bottomright"), Some("bottom"));
+        assert_eq!(suggest_port_side("center"), Some("top"));
+    }
+
+    #[test]
+    fn test_suggest_port_side_typos() {
+        use crate::specgraph::hrf::suggest_port_side;
+        assert_eq!(suggest_port_side("bottm"), Some("bottom"));
+        assert_eq!(suggest_port_side("rigt"), Some("right"));
+        assert_eq!(suggest_port_side("lef"), Some("left"));
+        assert_eq!(suggest_port_side("topp"), Some("top"));
+    }
+
+    #[test]
+    fn test_suggest_port_side_rejects_junk() {
+        use crate::specgraph::hrf::suggest_port_side;
+        assert_eq!(suggest_port_side(""), None);
+        assert_eq!(suggest_port_side("xy"), None);
+        assert_eq!(suggest_port_side("xyzzypuzzle"), None);
+    }
+
+    #[test]
+    fn test_parse_captures_invalid_port_side() {
+        // `{sport:cent}` used to fall back to Bottom silently. Now it
+        // must show up in import_hints.invalid_port_side_values.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b {sport:cent} {tport:nope}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let invalid = &doc.import_hints.invalid_port_side_values;
+        assert_eq!(invalid.len(), 2, "expected two invalid port sides");
+        assert!(invalid.iter().any(|(k, v)| k == "src" && v == "cent"));
+        assert!(invalid.iter().any(|(k, v)| k == "tgt" && v == "nope"));
+    }
+
+    #[test]
+    fn test_parse_known_port_side_does_not_populate_invalid() {
+        // Canonical port-side values must NOT populate the invalid list.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b {sport:right} {tport:left}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert!(
+            doc.import_hints.invalid_port_side_values.is_empty(),
+            "known port sides should not populate invalid list, got: {:?}",
+            doc.import_hints.invalid_port_side_values
+        );
+    }
+
+    #[test]
+    fn test_lint_invalid_port_side_via_cli() {
+        // End-to-end: invalid port side surfaces as a warning with the
+        // "did you mean" phrasing.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b {sport:bottm}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("port_invalid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_port = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Invalid source port side")
+                && s.contains("bottm")
+                && s.contains("did you mean")
+                && s.contains("bottom")
+        });
+        assert!(has_port, "expected invalid-port warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_valid_port_side_not_flagged_via_cli() {
+        // Canonical port side must NOT fire the warning.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b {sport:right}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("port_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_port = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("Invalid") && w.as_str().unwrap_or("").contains("port side")
+        });
+        assert!(!has_port, "valid port side must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_suggest_layout_direction_short_typos() {
+        use crate::specgraph::hrf::suggest_layout_direction;
+        // Single-character typos on 2-letter codes resolve confidently.
+        assert_eq!(suggest_layout_direction("TR"), Some("TB"));
+        assert_eq!(suggest_layout_direction("BR"), Some("BT"));
+        assert_eq!(suggest_layout_direction("LF"), Some("LR"));
+        assert_eq!(suggest_layout_direction("RR"), Some("RL"));
+    }
+
+    #[test]
+    fn test_suggest_layout_direction_long_form_typos() {
+        use crate::specgraph::hrf::suggest_layout_direction;
+        // Long forms with a typo collapse to the canonical short code.
+        assert_eq!(suggest_layout_direction("TOP-BOTOM"), Some("TB"));
+        assert_eq!(suggest_layout_direction("LEFT-RIGTH"), Some("LR"));
+        assert_eq!(suggest_layout_direction("HORIZNTAL"), Some("LR"));
+    }
+
+    #[test]
+    fn test_suggest_layout_direction_exact_matches_return_none() {
+        use crate::specgraph::hrf::suggest_layout_direction;
+        for known in ["TB", "BT", "LR", "RL", "tb", "Lr"] {
+            assert_eq!(
+                suggest_layout_direction(known),
+                None,
+                "exact-match direction '{known}' must not get a suggestion"
+            );
+        }
+    }
+
+    #[test]
+    fn test_suggest_layout_direction_rejects_unrelated_junk() {
+        use crate::specgraph::hrf::suggest_layout_direction;
+        assert_eq!(suggest_layout_direction(""), None);
+        assert_eq!(suggest_layout_direction("XYZZY"), None);
+        assert_eq!(suggest_layout_direction("DIAGONAL"), None);
+    }
+
+    #[test]
+    fn test_parse_captures_unknown_layout_direction() {
+        // `flow = TR` must populate import_hints.unknown_layout_direction
+        // with the raw value and a TB suggestion, and still default to TB.
+        let spec = "## Config\nflow = TR\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.layout_dir, "TB", "unknown dir should fall back to TB");
+        let unknown = &doc.import_hints.unknown_layout_direction;
+        assert_eq!(unknown.len(), 1, "expected one unknown-direction entry");
+        assert_eq!(unknown[0].0, "TR");
+        assert_eq!(unknown[0].1, "TB");
+    }
+
+    #[test]
+    fn test_parse_known_direction_does_not_populate_unknown() {
+        // Canonical `flow = LR` must NOT populate the unknown list.
+        let spec = "## Config\nflow = LR\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.layout_dir, "LR");
+        assert!(
+            doc.import_hints.unknown_layout_direction.is_empty(),
+            "known direction should not populate unknown list, got: {:?}",
+            doc.import_hints.unknown_layout_direction
+        );
+    }
+
+    #[test]
+    fn test_lint_unknown_layout_direction_via_cli() {
+        // End-to-end: `flow = TR` should surface as a warning via lint --json,
+        // with the "did you mean TB" phrasing.
+        let spec = "## Config\nflow = TR\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("flow_dir_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dir = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Unknown layout direction")
+                && s.contains("TR")
+                && s.contains("did you mean")
+                && s.contains("TB")
+        });
+        assert!(has_dir, "expected unknown-direction warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_known_layout_direction_not_flagged() {
+        // `flow = TB` must not fire the warning.
+        let spec = "## Config\nflow = TB\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("flow_dir_ok_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dir = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("Unknown layout direction")
+        });
+        assert!(!has_dir, "known direction must not fire, got: {stdout}");
     }
 
     #[test]

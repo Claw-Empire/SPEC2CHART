@@ -1011,7 +1011,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         };
                         last_flow_edge_ids.clear();
                         for expanded_line in &lines_to_parse {
-                            let edges = parse_flow_line_chain(expanded_line.trim(), &id_map, &label_map, line_num)?;
+                            let edges = parse_flow_line_chain(
+                                expanded_line.trim(),
+                                &id_map,
+                                &label_map,
+                                line_num,
+                                &mut doc.import_hints.invalid_port_side_values,
+                            )?;
                             for edge in edges {
                                 last_flow_edge_ids.push(edge.id);
                                 doc.edges.push(edge);
@@ -1354,13 +1360,29 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 };
             }
             "flow" | "layout" | "direction" | "layout-dir" | "layout_dir" => {
-                let dir = match val.to_uppercase().as_str() {
-                    "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => "LR",
-                    "RL" | "RIGHT-LEFT" | "RIGHT_LEFT" => "RL",
-                    "BT" | "BOTTOM-TOP" | "BOTTOM_TOP" | "UP" => "BT",
-                    _ => "TB", // default top-to-bottom
+                let upper = val.to_uppercase();
+                let dir = match upper.as_str() {
+                    "TB" | "TOP-BOTTOM" | "TOP_BOTTOM" | "DOWN" | "VERTICAL" => Some("TB"),
+                    "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => Some("LR"),
+                    "RL" | "RIGHT-LEFT" | "RIGHT_LEFT" => Some("RL"),
+                    "BT" | "BOTTOM-TOP" | "BOTTOM_TOP" | "UP" => Some("BT"),
+                    _ => None,
                 };
-                doc.layout_dir = dir.to_string();
+                match dir {
+                    Some(d) => doc.layout_dir = d.to_string(),
+                    None => {
+                        // Silent-default failure mode: unknown direction used
+                        // to silently become "TB". Record the raw value +
+                        // best-effort suggestion so lint can surface it.
+                        let suggestion = suggest_layout_direction(&upper)
+                            .unwrap_or("TB")
+                            .to_string();
+                        doc.import_hints
+                            .unknown_layout_direction
+                            .push((val.to_string(), suggestion));
+                        doc.layout_dir = "TB".to_string();
+                    }
+                }
             }
             // auto-z: automatically assign z offsets from topological layer ordering
             "auto-z" | "auto_z" | "z-auto" | "auto-layers" | "3d-auto" => {
@@ -2366,6 +2388,7 @@ fn parse_flow_line_chain(
     id_map: &HashMap<String, NodeId>,
     label_map: &HashMap<String, NodeId>,
     line_num: usize,
+    invalid_port_sides: &mut Vec<(String, String)>,
 ) -> Result<Vec<Edge>, String> {
     // Normalize arrow variants to "-->":
     //   "->"  → "-->"   (shorter alias)
@@ -2534,17 +2557,27 @@ fn parse_flow_line_chain(
         };
         let mut src_side = PortSide::Bottom;
         let mut tgt_side = PortSide::Top;
-        // Pre-scan for port overrides before creating port structs
+        // Pre-scan for port overrides before creating port structs.
+        // Unknown port values used to vanish silently; now we record them
+        // into import_hints so `lint` can surface a did-you-mean warning.
         for etag in &edge_tags {
             if etag.starts_with("src-port:") || etag.starts_with("sport:") {
                 let key_len = if etag.starts_with("src-port:") { 9 } else { 6 };
-                if let Some(ps) = tag_to_port_side(&etag[key_len..]) {
-                    src_side = ps;
+                let raw = &etag[key_len..];
+                match tag_to_port_side(raw) {
+                    Some(ps) => src_side = ps,
+                    None => {
+                        invalid_port_sides.push(("src".to_string(), raw.to_string()));
+                    }
                 }
             } else if etag.starts_with("tgt-port:") || etag.starts_with("tport:") {
                 let key_len = if etag.starts_with("tgt-port:") { 9 } else { 6 };
-                if let Some(ps) = tag_to_port_side(&etag[key_len..]) {
-                    tgt_side = ps;
+                let raw = &etag[key_len..];
+                match tag_to_port_side(raw) {
+                    Some(ps) => tgt_side = ps,
+                    None => {
+                        invalid_port_sides.push(("tgt".to_string(), raw.to_string()));
+                    }
                 }
             }
         }
@@ -3659,6 +3692,168 @@ pub(crate) fn tag_to_shape_opt(tag: &str) -> Option<NodeShape> {
 /// `allow(dead_code)`: consumed by the `bin` target (cli_lint), but the
 /// `lib` target doesn't reference it internally.
 #[allow(dead_code)]
+/// Suggest the closest known port side (`top`, `bottom`, `left`, `right`)
+/// for an unrecognized `{src-port:X}` / `{tgt-port:X}` value. Common
+/// mistakes: `topleft`, `nw`, `cent`, `west`, `side`. Returns None when
+/// the input is empty or too far to safely suggest.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_port_side(raw: &str) -> Option<&'static str> {
+    const KNOWN: &[&str] = &["top", "bottom", "left", "right"];
+    let lower = raw.trim().to_lowercase();
+    if lower.is_empty() { return None; }
+    if KNOWN.iter().any(|k| *k == lower) { return None; }
+
+    // Compass/diagonal aliases → best canonical port. These substitutions
+    // cover the most common "wrong but obviously intended" inputs.
+    match lower.as_str() {
+        "n" | "north" | "up" | "above" => return Some("top"),
+        "s" | "south" | "down" | "below" => return Some("bottom"),
+        "w" | "west" => return Some("left"),
+        "e" | "east" => return Some("right"),
+        "topleft" | "top-left" | "top_left" | "nw" => return Some("top"),
+        "topright" | "top-right" | "top_right" | "ne" => return Some("top"),
+        "bottomleft" | "bottom-left" | "bottom_left" | "sw" => return Some("bottom"),
+        "bottomright" | "bottom-right" | "bottom_right" | "se" => return Some("bottom"),
+        "center" | "centre" | "middle" | "cent" => return Some("top"),
+        _ => {}
+    }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    // Fall through to fuzzy matching for ordinary typos (`bottm`, `rigt`).
+    // Length-scaled max distance so short words don't get over-matched.
+    let max_d = match lower.len() {
+        0..=2 => return None,
+        3 => 1,
+        4..=7 => 2,
+        _ => 3,
+    };
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN {
+        let d = distance(&lower, cand);
+        if d == 0 { return None; }
+        if d <= max_d && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, cand));
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
+/// Suggest the closest known layout direction for an unrecognized
+/// `flow = X` / `layout = X` config value. Targets the four canonical
+/// codes (TB/BT/LR/RL) plus their common long forms. For very short
+/// 2-letter inputs (e.g. `TR`, `DP`) we compare against the 2-letter
+/// codes only since edit distance on longer forms would blow up.
+/// Returns None when the input is empty or too far from any known
+/// value to safely suggest.
+#[allow(dead_code)]
+pub fn suggest_layout_direction(raw: &str) -> Option<&'static str> {
+    const SHORT_CODES: &[&str] = &["TB", "BT", "LR", "RL"];
+    let upper = raw.trim().to_uppercase();
+    if upper.is_empty() {
+        return None;
+    }
+    // Exact match should never arrive here (the caller already consumed
+    // it), but be defensive.
+    if SHORT_CODES.iter().any(|c| *c == upper) {
+        return None;
+    }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    // For 2-letter inputs: single-character typo gives distance 1 which
+    // is a confident match. Distance 2 on 2-letter strings is useless
+    // (it's just a different word entirely), so cap at 1. Several 2-letter
+    // typos are equidistant from two codes (e.g. "RR" ↔ LR & RL both at
+    // distance 1). Break ties by preferring the candidate whose first
+    // character matches the input's first character — this is the more
+    // natural "closest" match from the user's mental model.
+    if upper.len() == 2 {
+        let first = upper.as_bytes()[0];
+        // Score: lower is better. (distance, 0 if first char matches else 1)
+        let mut best: Option<((usize, u8), &'static str)> = None;
+        for &code in SHORT_CODES {
+            let d = distance(&upper, code);
+            if d > 1 { continue; }
+            let first_match_penalty = if code.as_bytes()[0] == first { 0u8 } else { 1u8 };
+            let key = (d, first_match_penalty);
+            if best.map(|(bk, _)| key < bk).unwrap_or(true) {
+                best = Some((key, code));
+            }
+        }
+        return best.map(|(_, c)| c);
+    }
+
+    // For longer inputs, match against the short codes AND the canonical
+    // long forms. Any close match returns the SHORT form (canonical).
+    const LONG_FORMS: &[(&str, &str)] = &[
+        ("TOP-BOTTOM", "TB"),
+        ("TOP_BOTTOM", "TB"),
+        ("VERTICAL", "TB"),
+        ("DOWN", "TB"),
+        ("BOTTOM-TOP", "BT"),
+        ("BOTTOM_TOP", "BT"),
+        ("UP", "BT"),
+        ("LEFT-RIGHT", "LR"),
+        ("LEFT_RIGHT", "LR"),
+        ("HORIZONTAL", "LR"),
+        ("RIGHT-LEFT", "RL"),
+        ("RIGHT_LEFT", "RL"),
+    ];
+    let mut best: Option<(usize, &'static str)> = None;
+    for (long, canonical) in LONG_FORMS {
+        let d = distance(&upper, long);
+        if d <= 2 && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, *canonical));
+        }
+    }
+    // Also try direct short-code distance (for things like "TBX" or "LRR")
+    for &code in SHORT_CODES {
+        let d = distance(&upper, code);
+        if d <= 1 && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, code));
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
 pub fn suggest_shape_alias(tag: &str) -> Option<&'static str> {
     const KNOWN_SHAPE_ALIASES: &[&str] = &[
         "rectangle", "rounded", "diamond", "decision", "circle", "oval",
