@@ -1344,6 +1344,85 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 }
                 continue;
             }
+            // Numeric tag silent drop: `{opacity:50%}`, `{border:thick}`,
+            // `{w:auto}`, `{x:left}`, etc. These arms used to call
+            // `.parse::<f32>().ok()` with no else branch, silently swallowing
+            // anything the user wrote. The parser now pushes unresolved
+            // values to unknown_tags; this arm surfaces them with a message
+            // that names the expected type so the user can fix the input.
+            //
+            // `opacity:` accepts either a 0.0–1.0 float or a 0–100 number
+            // (auto-divided by 100 in the parser); the message reflects both.
+            // Order matters: longer prefixes must come before shorter ones
+            // (`font-size:`/`text-size:` before `fs:`/`fontsize:`/`textsize:`;
+            // `radius:` before `r:`; `border:` before `b:` if that existed).
+            let numeric_prefix_match = [
+                ("opacity:",   "0.0–1.0 float or 0–100 number"),
+                ("alpha:",     "0.0–1.0 float or 0–100 number"),
+                ("border:",    "number (border width)"),
+                ("font-size:", "number (font size in px)"),
+                ("text-size:", "number (font size in px)"),
+                ("fontsize:",  "number (font size in px)"),
+                ("textsize:",  "number (font size in px)"),
+                ("fs:",        "number (font size in px)"),
+                ("radius:",    "number (corner radius in px)"),
+                ("corner:",    "number (corner radius in px)"),
+                ("r:",         "number (corner radius in px)"),
+                ("w:",         "number (width)"),
+                ("h:",         "number (height)"),
+                ("x:",         "number (x coordinate)"),
+                ("y:",         "number (y coordinate)"),
+            ]
+                .iter()
+                .find_map(|(p, desc)| tag.strip_prefix(p).map(|_| (*p, *desc)));
+            if let Some((prefix, desc)) = numeric_prefix_match {
+                warnings.push(format!(
+                    "Node {}: unresolved {{{}}} — expected {} after `{}`",
+                    id_str, tag, desc, prefix
+                ));
+                continue;
+            }
+            // Status typo: `{status:doen}` → `{status:done}`. The parser's
+            // `status:` arm used to fall through to `tag_to_node_tag(other)`
+            // which returned None for typos, silently dropping the tag.
+            // Parser now pushes unresolved status values to unknown_tags;
+            // `suggest_status_value` points users at the closest canonical
+            // spelling from the shared status vocabulary.
+            if let Some(rest) = tag.strip_prefix("status:") {
+                let rest_trimmed = rest.trim();
+                if let Some(suggestion) =
+                    crate::specgraph::hrf::suggest_status_value(rest_trimmed)
+                {
+                    warnings.push(format!(
+                        "Node {}: unknown status {{{}}} — did you mean {{status:{}}}?",
+                        id_str, tag, suggestion
+                    ));
+                } else {
+                    warnings.push(format!(
+                        "Node {}: unknown status {{{}}} — not a recognized status value",
+                        id_str, tag
+                    ));
+                }
+                continue;
+            }
+            // Shorthand numeric tags: `{size:WxH}` and `{pos:X,Y}`. These
+            // expect structured formats (not a single number); a dedicated
+            // arm emits a message naming the shape so users see the silent
+            // drop on `{size:big}`, `{size:200}` (missing `x`), etc.
+            if tag.starts_with("size:") {
+                warnings.push(format!(
+                    "Node {}: unresolved {{{}}} — expected `{{size:WxH}}` where W and H are numbers",
+                    id_str, tag
+                ));
+                continue;
+            }
+            if tag.starts_with("pos:") {
+                warnings.push(format!(
+                    "Node {}: unresolved {{{}}} — expected `{{pos:X,Y}}` where X and Y are numbers",
+                    id_str, tag
+                ));
+                continue;
+            }
             // Unresolved color reference: the parser's `fill:`/`color:`/
             // `border-color:`/`stroke:` arms now push tags whose rest does
             // not resolve via `tag_to_fill_color` (palette expansion already
@@ -4270,6 +4349,194 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_numeric_opacity_non_numeric_via_cli() {
+        // `{opacity:50%}` and `{opacity:half}` are common user mistakes the
+        // parser used to silently swallow via `.parse::<f32>().ok()`. Both
+        // should now surface as unresolved numeric-tag warnings naming the
+        // expected value type.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {opacity:50%}\n\
+                    - [b] Beta {opacity:half}\n\
+                    - [c] Gamma {opacity:0.5}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("opacity_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // Both typo cases must be flagged.
+        let has_pct = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("opacity:50%") && s.contains("expected") && s.contains("opacity:")
+        });
+        let has_word = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("opacity:half") && s.contains("expected") && s.contains("opacity:")
+        });
+        assert!(has_pct, "expected opacity:50% typo warning, got: {stdout}");
+        assert!(has_word, "expected opacity:half typo warning, got: {stdout}");
+        // The valid `opacity:0.5` must NOT be flagged.
+        let has_valid = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("opacity:0.5")
+        });
+        assert!(!has_valid, "valid opacity:0.5 should not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_numeric_border_non_numeric_via_cli() {
+        // `{border:thick}` is the common mistake — border takes a numeric
+        // width, not a descriptive keyword.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {border:thick}\n\
+                    - [b] Beta {border:2.5}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("border_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("border:thick")
+                && s.contains("expected")
+                && s.contains("border width")
+        });
+        assert!(has, "expected border:thick typo warning, got: {stdout}");
+        // Valid `border:2.5` must NOT be flagged.
+        let has_valid = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("border:2.5")
+        });
+        assert!(!has_valid, "valid border:2.5 should not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_numeric_size_non_numeric_via_cli() {
+        // `{w:auto}` and `{h:abc}` and `{x:left}` / `{y:top}` are common
+        // silent drops that should be surfaced as numeric-tag warnings.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {w:auto}\n\
+                    - [b] Beta {h:abc}\n\
+                    - [c] Gamma {x:left}\n\
+                    - [d] Delta {y:top}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("size_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for (needle, expected_kind) in [
+            ("w:auto", "width"),
+            ("h:abc", "height"),
+            ("x:left", "x coordinate"),
+            ("y:top", "y coordinate"),
+        ] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(needle) && s.contains("expected") && s.contains(expected_kind)
+            });
+            assert!(has, "expected `{needle}` warning mentioning `{expected_kind}`, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_numeric_exact_values_no_warning_via_cli() {
+        // Exact numeric values (opacity 0.5, border 2.5, w/h/x/y as numbers)
+        // must NOT be flagged. Guards against regression where the new
+        // unknown_tag path accidentally fires for valid input.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {opacity:0.5}\n\
+                    - [b] Beta {opacity:50}\n\
+                    - [c] Gamma {alpha:0.2}\n\
+                    - [d] Delta {border:2.5}\n\
+                    - [e] Epsilon {w:200} {h:120}\n\
+                    - [f] Foxtrot {x:50} {y:100}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n\
+                    e --> f\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("numeric_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // None of these numeric tag values should appear as unresolved warnings.
+        for needle in ["opacity:0.5", "opacity:50", "alpha:0.2", "border:2.5",
+                       "w:200", "h:120", "x:50", "y:100"] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("unresolved") && s.contains(needle)
+            });
+            assert!(!has, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_unresolved_text_color_typo_via_cli() {
         // `{text-color:blu}` should suggest `{text-color:blue}`. Previously
         // the color lint walk only checked `fill:`/`color:`/`border-color:`/
@@ -4307,6 +4574,74 @@ mod cli_tests {
                 && s.contains("text-color:blue")
         });
         assert!(has, "expected text-color typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_numeric_size_shorthand_silent_drop_via_cli() {
+        // `{size:big}` used to silently drop (no `x` separator or bad parts).
+        let spec = "## Nodes\n\
+                    - [a] Alpha {size:big}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("size_big_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("size:big") && s.contains("WxH")
+        });
+        assert!(has, "expected size shorthand warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_numeric_font_size_silent_drop_via_cli() {
+        // `{font-size:large}` used to silently drop.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {font-size:large}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("font_size_large_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("font-size:large") && s.contains("font size")
+        });
+        assert!(has, "expected font-size numeric warning, got: {stdout}");
     }
 
     #[test]

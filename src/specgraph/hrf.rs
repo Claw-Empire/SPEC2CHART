@@ -2809,19 +2809,37 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 unknown_tags.push(tag.to_string());
             }
         } else if let Some(rest) = tag.strip_prefix("size:") {
-            // {size:200x80} shorthand for {w:200} {h:80}
+            // {size:200x80} shorthand for {w:200} {h:80}. Non-numeric or
+            // malformed values (`{size:auto}`, `{size:big}`, `{size:200}` no
+            // x, `{size:200xbig}`) must not silently drop — preserve for
+            // cli_lint numeric warning.
             let dims = rest.trim();
-            if let Some(x_pos) = dims.find('x') {
-                width_override  = dims[..x_pos].parse::<f32>().ok();
-                height_override = dims[x_pos+1..].parse::<f32>().ok();
+            let parsed = dims.find('x').and_then(|x_pos| {
+                let w = dims[..x_pos].trim().parse::<f32>().ok()?;
+                let h = dims[x_pos+1..].trim().parse::<f32>().ok()?;
+                Some((w, h))
+            });
+            if let Some((w, h)) = parsed {
+                width_override = Some(w);
+                height_override = Some(h);
+            } else {
+                unknown_tags.push(tag.to_string());
             }
         } else if let Some(rest) = tag.strip_prefix("pos:") {
-            // {pos:100,200} shorthand for {x:100} {y:200} + pinned
+            // {pos:100,200} shorthand for {x:100} {y:200} + pinned.
+            // Same silent-drop concern as {size:...}.
             let coords = rest.trim();
-            if let Some(comma) = coords.find(',') {
-                pos_x = coords[..comma].trim().parse::<f32>().ok();
-                pos_y = coords[comma+1..].trim().parse::<f32>().ok();
-                if pos_x.is_some() && pos_y.is_some() { pinned = true; }
+            let parsed = coords.find(',').and_then(|comma| {
+                let x = coords[..comma].trim().parse::<f32>().ok()?;
+                let y = coords[comma+1..].trim().parse::<f32>().ok()?;
+                Some((x, y))
+            });
+            if let Some((x, y)) = parsed {
+                pos_x = Some(x);
+                pos_y = Some(y);
+                pinned = true;
+            } else {
+                unknown_tags.push(tag.to_string());
             }
         } else if let Some(rest) = tag.strip_prefix("w:") {
             match rest.trim().parse::<f32>() {
@@ -2857,7 +2875,10 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             height_override = Some(180.0);
         } else if tag.starts_with("r:") || tag.starts_with("radius:") || tag.starts_with("corner:") {
             let colon = tag.find(':').unwrap();
-            corner_radius = tag[colon+1..].trim().parse::<f32>().ok();
+            match tag[colon+1..].trim().parse::<f32>() {
+                Ok(v) => corner_radius = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if tag == "rounded" || tag == "round" {
             corner_radius = Some(12.0);
         } else if tag == "pill-shape" {
@@ -2968,6 +2989,14 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 other => {
                     if let Some(nt) = tag_to_node_tag(other) {
                         node_tag = Some(nt);
+                    } else {
+                        // Unresolved property-style status value (e.g.
+                        // `{status:doen}` — typo of `done`). Previously the
+                        // tag silently dropped via `tag_to_node_tag` None,
+                        // wiping user intent. Preserve the raw tag so
+                        // `cli_lint` can emit a did-you-mean suggestion
+                        // against the canonical status vocabulary.
+                        unknown_tags.push(tag.to_string());
                     }
                 }
             }
@@ -3017,11 +3046,17 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             }
         } else if tag.starts_with("font-size:") || tag.starts_with("fs:") || tag.starts_with("fontsize:") || tag.starts_with("text-size:") || tag.starts_with("textsize:") {
             let colon = tag.find(':').unwrap();
-            font_size_override = tag[colon+1..].trim().parse::<f32>().ok();
+            match tag[colon+1..].trim().parse::<f32>() {
+                Ok(v) => font_size_override = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if let Some(val_str) = tag.strip_prefix("opacity:").or_else(|| tag.strip_prefix("alpha:")) {
-            if let Ok(v) = val_str.trim().parse::<f32>() {
-                // Accept 0-100 percentage or 0.0-1.0 float
-                opacity_override = Some(if v > 1.0 { v / 100.0 } else { v });
+            match val_str.trim().parse::<f32>() {
+                Ok(v) => {
+                    // Accept 0-100 percentage or 0.0-1.0 float
+                    opacity_override = Some(if v > 1.0 { v / 100.0 } else { v });
+                }
+                Err(_) => unknown_tags.push(tag.to_string()),
             }
         } else if tag == "hidden" || tag == "invisible" {
             opacity_override = Some(0.0);
@@ -4013,6 +4048,63 @@ pub fn suggest_fill_color_name(raw: &str) -> Option<&'static str> {
         // cases (`bleu` → `blue`, `gren` → `green`) without producing
         // false-positive pairs like `red` → `teal`.
         if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical status value for a possibly-misspelled
+/// `{status:foo}` tag. Returns None on exact match, empty input, or no
+/// close candidate (distance > 2). The vocabulary mirrors the accepted
+/// spellings in `parse_node_line`'s status arm plus the `tag_to_node_tag`
+/// fallthrough — every returned suggestion is guaranteed to parse cleanly
+/// after substitution.
+pub fn suggest_status_value(raw: &str) -> Option<&'static str> {
+    const KNOWN_STATUSES: &[&str] = &[
+        // progress-bucket aliases
+        "done", "complete", "completed", "finished",
+        "wip", "in-progress", "doing", "active",
+        "review", "in-review", "reviewing",
+        "blocked", "stuck", "failed", "error",
+        "todo", "pending", "backlog", "queued",
+        // tag_to_node_tag fallthroughs
+        "critical", "warning", "ok", "info", "danger", "success",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_STATUSES {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // exact match = already valid
+        // Length-scaled cutoff: short words (<= 4 chars) need stricter
+        // matching to avoid false positives like `info` → `todo` (d=3).
+        let max_d = if cand.len() <= 4 { 1 } else { 2 };
+        if d <= max_d {
             match best {
                 Some((best_d, _)) if d >= best_d => {}
                 _ => best = Some((d, cand)),
