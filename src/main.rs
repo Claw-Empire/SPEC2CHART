@@ -1431,7 +1431,15 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
             // the built-in color vocabulary.
             // Order matters: longer prefixes must come before shorter ones
             // (`text-color:` before `color:`, `border-color:` before `color:`).
-            let color_prefix_match = ["border-color:", "text-color:", "fill:", "stroke:", "color:"]
+            // `frame-color:`, `frame-fill:`, `bg-color:` target the group
+            // frame background; include them so typos surface the same way
+            // as fill/border/text color typos. Longer prefixes listed first
+            // so `frame-color:` doesn't partial-match `color:`.
+            let color_prefix_match = [
+                "frame-color:", "frame-fill:", "bg-color:",
+                "border-color:", "text-color:",
+                "fill:", "stroke:", "color:",
+            ]
                 .iter()
                 .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
             if let Some((prefix, rest)) = color_prefix_match {
@@ -1553,6 +1561,25 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                         edge_label, tag
                     ));
                 }
+                continue;
+            }
+            // Edge numeric silent-drop detection: `{bend:X}`, `{weight:X}`,
+            // and `{w:X}` each previously parsed with `.ok()` and silently
+            // dropped non-numeric input. The parser now preserves the raw
+            // tag; surface it with a targeted message so the user knows
+            // which field was malformed.
+            let edge_numeric_match = [
+                ("bend:",   "number in -1.0..=1.0 (curve bend)"),
+                ("weight:", "number (edge weight)"),
+                ("w:",      "number (edge weight shorthand)"),
+            ]
+                .iter()
+                .find_map(|(p, desc)| tag.strip_prefix(p).map(|_| (*p, *desc)));
+            if let Some((prefix, desc)) = edge_numeric_match {
+                warnings.push(format!(
+                    "Edge {}: unresolved {{{}}} — expected {} after `{}`",
+                    edge_label, tag, desc, prefix
+                ));
                 continue;
             }
             let suggestion = crate::specgraph::hrf::suggest_edge_style_alias(tag)
@@ -4537,6 +4564,285 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_status_typo_via_cli() {
+        // `{status:doen}` should warn and suggest `{status:done}`. Previously
+        // the parser's `status:` arm fell through to `tag_to_node_tag` which
+        // returned None for unrecognized values, silently dropping the tag.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:doen}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("status:doen")
+                && s.contains("did you mean")
+                && s.contains("status:done")
+        });
+        assert!(has, "expected status:doen typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_status_typo_multi_char_via_cli() {
+        // `{status:blokced}` has d=2 from `blocked` — should still suggest.
+        // Also tests `in-progres` (missing final s) and `revew` (missing i).
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:blokced}\n\
+                    - [b] Beta {status:in-progres}\n\
+                    - [c] Gamma {status:revew}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_multi_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for (needle, expected) in [
+            ("status:blokced", "status:blocked"),
+            ("status:in-progres", "status:in-progress"),
+            ("status:revew", "status:review"),
+        ] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(needle) && s.contains("did you mean") && s.contains(expected)
+            });
+            assert!(has, "expected `{needle}` → `{expected}` warning, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_status_no_suggestion_via_cli() {
+        // `{status:qwerty}` has no close match — fallback warning must fire.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:qwerty}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("status:qwerty") && s.contains("not a recognized status value")
+        });
+        assert!(has, "expected fallback status warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_status_exact_values_no_warning_via_cli() {
+        // Canonical status values and accepted synonyms must NOT trigger
+        // the unknown-status warning. Covers the main vocabulary buckets:
+        // done, wip, review, blocked, todo, plus info (via tag_to_node_tag).
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:done}\n\
+                    - [b] Beta {status:wip}\n\
+                    - [c] Gamma {status:review}\n\
+                    - [d] Delta {status:blocked}\n\
+                    - [e] Epsilon {status:todo}\n\
+                    - [f] Foxtrot {status:in-progress}\n\
+                    - [g] Golf {status:info}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n\
+                    e --> f\n\
+                    f --> g\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown status")
+        });
+        assert!(!has, "canonical status values must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_edge_bend_non_numeric_via_cli() {
+        // Edge `{bend:medium}` previously parsed with `.ok()` and was
+        // silently dropped. Parser now pushes the raw tag to
+        // edge.unknown_tags; cli_lint emits a numeric-expected warning.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b {bend:medium}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_bend_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("bend:medium") && s.contains("curve bend")
+        });
+        assert!(has, "expected bend numeric warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_edge_weight_non_numeric_via_cli() {
+        // Edge `{weight:heavy}` and `{w:thick}` both silently dropped
+        // pre-fix. Each should now trigger a dedicated warning.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n\
+                    ## Flow\n\
+                    a --> b {weight:heavy}\n\
+                    b --> c {w:thick}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_weight_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_weight = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("weight:heavy") && s.contains("edge weight")
+        });
+        let has_w = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("w:thick") && s.contains("edge weight")
+        });
+        assert!(has_weight, "expected weight:heavy warning, got: {stdout}");
+        assert!(has_w, "expected w:thick warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_edge_numeric_valid_values_no_warning_via_cli() {
+        // Valid numeric values for bend/weight/w must NOT trigger the
+        // unknown-edge warning. Regression guard for legit diagrams.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n\
+                    - [d] Delta\n\
+                    ## Flow\n\
+                    a --> b {bend:0.5}\n\
+                    b --> c {weight:2}\n\
+                    c --> d {w:3}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_numeric_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            (s.contains("bend:") || s.contains("weight:") || s.contains("w:"))
+                && s.contains("unresolved")
+        });
+        assert!(!bad, "valid numeric edge values must not warn, got: {stdout}");
+    }
+
+    #[test]
     fn test_lint_unresolved_text_color_typo_via_cli() {
         // `{text-color:blu}` should suggest `{text-color:blue}`. Previously
         // the color lint walk only checked `fill:`/`color:`/`border-color:`/
@@ -4574,6 +4880,48 @@ mod cli_tests {
                 && s.contains("text-color:blue")
         });
         assert!(has, "expected text-color typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_frame_color_typo_via_cli() {
+        // `{frame-color:blu}` should suggest `{frame-color:blue}`. The
+        // parser's frame-color/frame-fill/bg-color arm used to silently
+        // drop unresolved values; now it preserves them in unknown_tags
+        // and cli_lint surfaces the typo via the shared color walk.
+        // frame-color applies at the node level via `{frame}`; test a
+        // frame-tagged container node directly.
+        let spec = "## Nodes\n\
+                    - [team] Team {frame} {frame-color:blu}\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("frame_color_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("frame-color:blu")
+                && s.contains("did you mean")
+                && s.contains("frame-color:blue")
+        });
+        assert!(has, "expected frame-color typo warning, got: {stdout}");
     }
 
     #[test]
@@ -4642,135 +4990,6 @@ mod cli_tests {
             s.contains("font-size:large") && s.contains("font size")
         });
         assert!(has, "expected font-size numeric warning, got: {stdout}");
-    }
-
-    #[test]
-    fn test_lint_status_typo_via_cli() {
-        // `{status:doen}` should suggest `{status:done}`. Previously the
-        // parser's status: arm fell through to tag_to_node_tag, which
-        // returned None and silently dropped the tag. Now the parser
-        // preserves unknown values and cli_lint suggests the closest
-        // canonical spelling (`done`).
-        let spec = "## Nodes\n\
-                    - [a] Alpha {status:doen}\n\
-                    - [b] Beta {status:blokced}\n\
-                    ## Flow\n\
-                    a --> b\n";
-        let uid = uuid::Uuid::new_v4();
-        let tmp = std::env::temp_dir().join(format!("status_typo_{}.spec", uid));
-        std::fs::write(&tmp, spec).unwrap();
-        let bin = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .map(|p| p.join("open-draftly"));
-        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
-        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
-        let out = std::process::Command::new(&bin)
-            .args(["lint", "--json", tmp.to_str().unwrap()])
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let _ = std::fs::remove_file(&tmp);
-        let v: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
-        let warnings = v["warnings"].as_array().expect("warnings array");
-        let has_done = warnings.iter().any(|w| {
-            let s = w.as_str().unwrap_or("");
-            s.contains("status:doen")
-                && s.contains("did you mean")
-                && s.contains("status:done")
-        });
-        assert!(has_done, "expected status:doen → status:done warning, got: {stdout}");
-        let has_blocked = warnings.iter().any(|w| {
-            let s = w.as_str().unwrap_or("");
-            s.contains("status:blokced")
-                && s.contains("did you mean")
-                && s.contains("status:blocked")
-        });
-        assert!(has_blocked, "expected status:blokced → status:blocked warning, got: {stdout}");
-    }
-
-    #[test]
-    fn test_lint_status_no_suggestion_via_cli() {
-        // `{status:qwertyuiop}` has no close match — fallback warning
-        // still fires so the silent drop is visible.
-        let spec = "## Nodes\n\
-                    - [a] Alpha {status:qwertyuiop}\n\
-                    - [b] Beta\n\
-                    ## Flow\n\
-                    a --> b\n";
-        let uid = uuid::Uuid::new_v4();
-        let tmp = std::env::temp_dir().join(format!("status_nosug_{}.spec", uid));
-        std::fs::write(&tmp, spec).unwrap();
-        let bin = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .map(|p| p.join("open-draftly"));
-        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
-        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
-        let out = std::process::Command::new(&bin)
-            .args(["lint", "--json", tmp.to_str().unwrap()])
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let _ = std::fs::remove_file(&tmp);
-        let v: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
-        let warnings = v["warnings"].as_array().expect("warnings array");
-        let has = warnings.iter().any(|w| {
-            let s = w.as_str().unwrap_or("");
-            s.contains("status:qwertyuiop")
-                && s.contains("not a recognized status value")
-        });
-        assert!(has, "expected fallback status warning, got: {stdout}");
-    }
-
-    #[test]
-    fn test_lint_status_exact_values_no_warning_via_cli() {
-        // Canonical + accepted-synonym status values must NOT warn.
-        // Guards against a regression where a valid spelling accidentally
-        // gets classified as a typo.
-        let spec = "## Nodes\n\
-                    - [a] Alpha {status:done}\n\
-                    - [b] Beta {status:wip}\n\
-                    - [c] Gamma {status:blocked}\n\
-                    - [d] Delta {status:review}\n\
-                    - [e] Epsilon {status:todo}\n\
-                    - [f] Foxtrot {status:completed}\n\
-                    - [g] Golf {status:in-progress}\n\
-                    ## Flow\n\
-                    a --> b\n\
-                    b --> c\n\
-                    c --> d\n\
-                    d --> e\n\
-                    e --> f\n\
-                    f --> g\n";
-        let uid = uuid::Uuid::new_v4();
-        let tmp = std::env::temp_dir().join(format!("status_exact_{}.spec", uid));
-        std::fs::write(&tmp, spec).unwrap();
-        let bin = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .map(|p| p.join("open-draftly"));
-        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
-        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
-        let out = std::process::Command::new(&bin)
-            .args(["lint", "--json", tmp.to_str().unwrap()])
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let _ = std::fs::remove_file(&tmp);
-        let v: serde_json::Value = serde_json::from_str(&stdout)
-            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
-        let warnings = v["warnings"].as_array().expect("warnings array");
-        let has = warnings.iter().any(|w| {
-            let s = w.as_str().unwrap_or("");
-            s.contains("unknown status")
-        });
-        assert!(!has, "canonical status values must not warn, got: {stdout}");
     }
 
     #[test]

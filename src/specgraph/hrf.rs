@@ -2602,13 +2602,17 @@ fn parse_flow_line_chain(
                     edge.unknown_tags.push(etag.clone());
                 }
             } else if let Some(rest) = etag.strip_prefix("bend:") {
-                if let Ok(b) = rest.trim().parse::<f32>() {
-                    edge.style.curve_bend = b.clamp(-1.0, 1.0);
+                match rest.trim().parse::<f32>() {
+                    Ok(b) => edge.style.curve_bend = b.clamp(-1.0, 1.0),
+                    Err(_) => edge.unknown_tags.push(etag.clone()),
                 }
             } else if let Some(v) = etag.strip_prefix("weight:").or_else(|| etag.strip_prefix("w:")) {
-                if let Ok(w) = v.trim().parse::<f32>() {
-                    // weight 1=1.5px, 2=3px, 3=5px, 4+=7px
-                    edge.style.width = (w * 1.8).clamp(1.0, 9.0);
+                match v.trim().parse::<f32>() {
+                    Ok(w) => {
+                        // weight 1=1.5px, 2=3px, 3=5px, 4+=7px
+                        edge.style.width = (w * 1.8).clamp(1.0, 9.0);
+                    }
+                    Err(_) => edge.unknown_tags.push(etag.clone()),
                 }
             } else if let Some(rest) = etag.strip_prefix("from:") {
                 edge.source_label = rest.trim().to_string();
@@ -3076,11 +3080,16 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 gradient_angle = Some(a);
             }
         } else if tag.starts_with("frame-color:") || tag.starts_with("frame-fill:") || tag.starts_with("bg-color:") {
-            // {frame-color:#rrggbb} — override group frame background color
+            // {frame-color:#rrggbb} — override group frame background color.
+            // Unresolved values (`{frame-color:primry}` — palette typo, bad
+            // hex) must surface through cli_lint's did-you-mean walk rather
+            // than silently dropping.
             let colon = tag.find(':').unwrap();
             let v = tag[colon+1..].trim();
             if let Some(c) = parse_hex_color(v).or_else(|| tag_to_fill_color(v)) {
                 frame_color_override = Some(c);
+            } else {
+                unknown_tags.push(tag.to_string());
             }
         } else if tag == "collapsed" || tag == "collapse" || tag == "compact" || tag == "pill" {
             collapsed = true;
@@ -4101,10 +4110,11 @@ pub fn suggest_status_value(raw: &str) -> Option<&'static str> {
     for &cand in KNOWN_STATUSES {
         let d = distance(&raw_lower, cand);
         if d == 0 { return None; } // exact match = already valid
-        // Length-scaled cutoff: short words (<= 4 chars) need stricter
-        // matching to avoid false positives like `info` → `todo` (d=3).
-        let max_d = if cand.len() <= 4 { 1 } else { 2 };
-        if d <= max_d {
+        // Uniform distance-2 cutoff. Length-scaling (stricter for short
+        // words) was tried but incorrectly dropped valid `doen` → `done`
+        // transpositions. The status vocabulary is hand-curated so
+        // cross-bucket collisions stay at d >= 3 (`info` → `todo` = 3).
+        if d <= 2 {
             match best {
                 Some((best_d, _)) if d >= best_d => {}
                 _ => best = Some((d, cand)),
