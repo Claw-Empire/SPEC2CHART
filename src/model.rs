@@ -837,6 +837,18 @@ pub struct ImportHints {
     /// silently forked into two frames (e.g. `{group:backend}` × 3 and
     /// `{group:bakcend}` × 1 → two frames, no warning). Never serialized.
     pub inline_group_name_counts: Vec<(String, usize)>,
+    /// `## Style` template definitions seen during pre-scan, with the number
+    /// of times each one was expanded (`{primary}` → body). Used by `lint` to
+    /// flag dead-code styles (defined but never referenced). Populated by
+    /// `expand_styles` during `parse_hrf` and consumed by lint. Never
+    /// serialized.
+    pub style_definition_usage: Vec<(String, usize)>,
+    /// `## Palette` color definitions seen during pre-scan, with the number
+    /// of times each one was expanded (`{fill:accent}` → `{fill:#hex}`).
+    /// Used by `lint` to flag dead-code palette entries. Populated by
+    /// `expand_palette` during `parse_hrf` and consumed by lint. Never
+    /// serialized.
+    pub palette_definition_usage: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

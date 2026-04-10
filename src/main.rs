@@ -1536,6 +1536,20 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Unused `## Palette` entries: same pattern as unused styles above, but
+    // for color names. A palette entry with 0 expansions across `{fill:}`,
+    // `{color:}`, `{border-color:}`, and `{stroke:}` is dead code. Common
+    // post-refactor leftover — users rename "primary" to "accent", update
+    // references, forget to update the palette definition.
+    for (name, count) in &doc.import_hints.palette_definition_usage {
+        if *count == 0 {
+            warnings.push(format!(
+                "Palette color `{}` is defined in ## Palette but never referenced — dead code",
+                name
+            ));
+        }
+    }
+
     // Duplicate parallel edges: same (source, target, label) tuple appearing
     // more than once. Almost always a copy-paste typo in `## Flow` — the two
     // edges get drawn on top of each other and look like one, so the user has
@@ -3135,6 +3149,84 @@ mod cli_tests {
             s.contains("ghost") && s.contains("dead code")
         });
         assert!(has_dead, "expected dead-code warning for ghost, got: {}", stdout);
+    }
+
+    #[test]
+    fn test_unused_palette_color_captured_in_usage() {
+        // A palette entry referenced by nodes should have nonzero count, an
+        // unreferenced one should have count 0.
+        let spec = "## Palette\nprimary = #0000ff\nghost = #888888\n\n\
+                    ## Nodes\n- [a] A {fill:primary}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let usage = &doc.import_hints.palette_definition_usage;
+        assert_eq!(usage.len(), 2, "should track both palette entries");
+        let primary = usage.iter().find(|(n, _)| n == "primary").map(|(_, c)| *c).unwrap_or(0);
+        let ghost = usage.iter().find(|(n, _)| n == "ghost").map(|(_, c)| *c).unwrap_or(usize::MAX);
+        assert_eq!(primary, 1, "primary referenced via {{fill:primary}}");
+        assert_eq!(ghost, 0, "ghost never referenced");
+    }
+
+    #[test]
+    fn test_palette_counted_across_multiple_tag_types() {
+        // One palette name referenced via both {fill:} and {stroke:} should
+        // count as 2 usages — not be flagged as dead code.
+        let spec = "## Palette\naccent = #ff8800\n\n## Nodes\n\
+                    - [a] A {fill:accent}\n- [b] B {stroke:accent}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let count = doc
+            .import_hints
+            .palette_definition_usage
+            .iter()
+            .find(|(n, _)| n == "accent")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        assert_eq!(count, 2, "accent referenced in fill and stroke");
+    }
+
+    #[test]
+    fn test_palette_usage_empty_when_no_palette_section() {
+        // Documents without `## Palette` should produce an empty usage vec.
+        let spec = "## Nodes\n- [a] A {fill:#ffffff}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert!(
+            doc.import_hints.palette_definition_usage.is_empty(),
+            "no palette section should produce empty usage, got {:?}",
+            doc.import_hints.palette_definition_usage
+        );
+    }
+
+    #[test]
+    fn test_unused_palette_lint_flag_via_cli() {
+        // End-to-end: a spec with an unreferenced palette entry should
+        // produce a lint warning mentioning the color name and "dead code".
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("unused_palette_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &tmp,
+            "## Palette\nspectre = #cccccc\n\n## Nodes\n- [a] A\n",
+        )
+        .unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dead = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("spectre") && s.contains("Palette") && s.contains("dead code")
+        });
+        assert!(has_dead, "expected dead-code warning for spectre, got: {}", stdout);
     }
 
     #[test]

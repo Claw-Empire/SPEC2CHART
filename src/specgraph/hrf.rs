@@ -207,8 +207,12 @@ use std::collections::HashMap;
 ///
 /// Pre-scan `## Palette` sections and return a palette map + pre-expanded input string
 /// where `{fill:name}` and `{color:name}` are replaced with `{fill:#hex}` / `{color:#hex}`.
-fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
-    let mut palette: HashMap<String, [u8; 4]> = HashMap::new();
+fn expand_palette(
+    input: &str,
+) -> (String, HashMap<String, [u8; 4]>, Vec<(String, usize)>) {
+    // Insertion-ordered list preserves deterministic lint output.
+    let mut palette_order: Vec<(String, [u8; 4])> = Vec::new();
+    let mut palette_idx: HashMap<String, usize> = HashMap::new();
     let mut in_palette = false;
     // First pass: collect palette entries
     for line in input.lines() {
@@ -224,14 +228,22 @@ fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
                 let name = t[..pos].trim().to_lowercase();
                 let val = t[pos+1..].trim();
                 if let Some(color) = tag_to_fill_color(val) {
-                    palette.insert(name, color);
+                    if let Some(&idx) = palette_idx.get(&name) {
+                        palette_order[idx].1 = color;
+                    } else {
+                        palette_idx.insert(name.clone(), palette_order.len());
+                        palette_order.push((name, color));
+                    }
                 }
             }
         }
     }
-    if palette.is_empty() {
-        return (input.to_string(), palette);
+    if palette_order.is_empty() {
+        return (input.to_string(), HashMap::new(), Vec::new());
     }
+    // Track expansion counts per palette name.
+    let mut usage: Vec<usize> = vec![0; palette_order.len()];
+
     // Second pass: expand {fill:name} / {color:name} / {border-color:name} in non-palette lines
     let mut out = String::with_capacity(input.len() + 128);
     let mut in_pal = false;
@@ -246,22 +258,38 @@ fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
         if in_pal { out.push_str(line); out.push('\n'); continue; }
         // Replace palette references inside {fill:name} tags
         let mut expanded = line.to_string();
-        for (name, color) in &palette {
+        for (i, (name, color)) in palette_order.iter().enumerate() {
             let hex = format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]);
-            // Replace all occurrences of {fill:name}, {color:name}, {border-color:name}
+            // Replace all occurrences of {fill:name}, {color:name}, {border-color:name}.
+            // Count matches before replacing so one palette name used in
+            // multiple tag types (e.g. `{fill:accent}` and `{stroke:accent}`)
+            // still accumulates as real usage, not a dead-code candidate.
             for prefix in &["fill:", "color:", "border-color:", "stroke:"] {
                 let search = format!("{{{}{}}}", prefix, name);
+                if !expanded.contains(&search) { continue; }
+                usage[i] += expanded.matches(&search).count();
                 let replace = format!("{{{}{}}}", prefix, hex);
                 expanded = expanded.replace(&search, &replace);
             }
         }
         out.push_str(&expanded); out.push('\n');
     }
-    (out, palette)
+    let palette_map: HashMap<String, [u8; 4]> = palette_order
+        .iter()
+        .map(|(name, color)| (name.clone(), *color))
+        .collect();
+    let usage_vec: Vec<(String, usize)> = palette_order
+        .into_iter()
+        .zip(usage.into_iter())
+        .map(|((name, _color), count)| (name, count))
+        .collect();
+    (out, palette_map, usage_vec)
 }
 
 /// Pre-scan `## Style` sections and return an expanded string where
 /// `{style_name}` references in node lines are replaced with the full tag set.
+/// Also returns a usage-count map keyed by lowercased style name, which lint
+/// consumes to flag unused (dead-code) definitions.
 ///
 /// Example:
 /// ```text
@@ -270,8 +298,10 @@ fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
 /// danger  = {fill:red} {bold}
 /// ```
 /// A node `- [api] API {primary}` becomes `- [api] API {fill:blue} {highlight}`.
-fn expand_styles(input: &str) -> String {
-    let mut styles: HashMap<String, String> = HashMap::new();
+fn expand_styles(input: &str) -> (String, Vec<(String, usize)>) {
+    // Insertion-ordered so lint output is deterministic across runs.
+    let mut styles: Vec<(String, String)> = Vec::new();
+    let mut style_idx: HashMap<String, usize> = HashMap::new();
     let mut in_style = false;
 
     // First pass: collect style definitions
@@ -298,10 +328,22 @@ fn expand_styles(input: &str) -> String {
                     .collect::<Vec<_>>()
                     .join(" ")
             };
-            styles.insert(name, expansion);
+            if let Some(&idx) = style_idx.get(&name) {
+                // Redefinition — last writer wins for the body, preserve order
+                styles[idx].1 = expansion;
+            } else {
+                style_idx.insert(name.clone(), styles.len());
+                styles.push((name, expansion));
+            }
         }
     }
-    if styles.is_empty() { return input.to_string(); }
+    if styles.is_empty() {
+        return (input.to_string(), Vec::new());
+    }
+
+    // Track usage: count `{name}` occurrences we replace outside the style
+    // section. Initialize at 0 and increment per replacement.
+    let mut usage: Vec<usize> = vec![0; styles.len()];
 
     // Second pass: expand {style_name} on non-style-section lines
     let mut out = String::with_capacity(input.len() + 256);
@@ -316,15 +358,26 @@ fn expand_styles(input: &str) -> String {
         }
         if skip { out.push_str(line); out.push('\n'); continue; }
 
-        // Expand any {style_name} references
+        // Expand any {style_name} references. Count actual replacements.
         let mut expanded = line.to_string();
-        for (name, tags) in &styles {
+        for (i, (name, tags)) in styles.iter().enumerate() {
             let pattern = format!("{{{}}}", name);
+            if !expanded.contains(&pattern) { continue; }
+            // Count occurrences before replacement — a line can reference a
+            // style more than once.
+            let count = expanded.matches(&pattern).count();
+            usage[i] += count;
             expanded = expanded.replace(&pattern, tags);
         }
         out.push_str(&expanded); out.push('\n');
     }
-    out
+
+    let usage_vec: Vec<(String, usize)> = styles
+        .into_iter()
+        .zip(usage.into_iter())
+        .map(|((name, _body), count)| (name, count))
+        .collect();
+    (out, usage_vec)
 }
 
 /// Pre-scan `## Layers` sections and expand `{layer:name}` tokens to `{z:N}`.
@@ -417,11 +470,16 @@ fn expand_layers(input: &str) -> String {
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Pre-expand style templates, then palette color names
     let input_with_layers = expand_layers(input);
-    let input_with_styles = expand_styles(&input_with_layers);
-    let (expanded_input, _palette_map) = expand_palette(&input_with_styles);
+    let (input_with_styles, style_usage) = expand_styles(&input_with_layers);
+    let (expanded_input, _palette_map, palette_usage) = expand_palette(&input_with_styles);
     let input = expanded_input.as_str();
 
     let mut doc = FlowchartDocument::default();
+    // Transient: populated by `expand_styles` / `expand_palette`, consumed by
+    // `cli_lint` to flag dead-code template definitions. Kept out of
+    // serialization via the transient ImportHints pattern.
+    doc.import_hints.style_definition_usage = style_usage;
+    doc.import_hints.palette_definition_usage = palette_usage;
     let mut id_map: HashMap<String, NodeId> = HashMap::new();
     // label_map: slugified display label → NodeId for natural-language flow references
     let mut label_map: HashMap<String, NodeId> = HashMap::new();
