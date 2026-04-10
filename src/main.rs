@@ -1103,6 +1103,36 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Orphaned group member detection: the `## Groups` section lets you
+    // list member IDs that must resolve to nodes in `## Nodes`. When they
+    // don't, the parser silently drops the unresolved member and the group
+    // frame just skips them — the user gets zero feedback. Surface those
+    // as lint warnings, with a "did you mean" suggestion from the real HRF
+    // ids. This catches copy-paste typos like `api_service` vs `api-service`
+    // and stale references to deleted nodes.
+    if !doc.import_hints.unresolved_group_members.is_empty() {
+        let known_ids: Vec<&str> = doc
+            .nodes
+            .iter()
+            .filter(|n| !n.hrf_id.is_empty())
+            .map(|n| n.hrf_id.as_str())
+            .collect();
+        for (group_id, member_id) in &doc.import_hints.unresolved_group_members {
+            let suggestion =
+                crate::specgraph::hrf::suggest_node_id_from_candidates(member_id, &known_ids);
+            match suggestion {
+                Some(s) => warnings.push(format!(
+                    "Group [{}]: member `{}` does not exist — did you mean `{}`?",
+                    group_id, member_id, s
+                )),
+                None => warnings.push(format!(
+                    "Group [{}]: member `{}` does not exist in ## Nodes",
+                    group_id, member_id
+                )),
+            }
+        }
+    }
+
     // Check for empty labels
     for node in &doc.nodes {
         let label = node.display_label();
@@ -1869,6 +1899,88 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_group_orphan_member_captured() {
+        // Parser preserves unresolved `## Groups` member IDs in
+        // `import_hints.unresolved_group_members` so lint can flag them.
+        // Without this, the silently-skipped member would ship in users'
+        // specs forever.
+        let spec = "## Nodes\n- [api] API\n- [db] Database\n\n## Groups\n- [backend] Backend\n  api, ghost_node\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(
+            doc.import_hints.unresolved_group_members,
+            vec![("backend".to_string(), "ghost_node".to_string())],
+            "expected exactly one unresolved group member"
+        );
+    }
+
+    #[test]
+    fn test_group_orphan_member_suggests_closest_id() {
+        // Typo case: `api_svc` vs real id `api-svc` — suggestor must find
+        // the 1-edit alternative across the punctuation swap.
+        use crate::specgraph::hrf::suggest_node_id_from_candidates;
+        let candidates = ["api-svc", "db", "cache"];
+        assert_eq!(
+            suggest_node_id_from_candidates("api_svc", &candidates),
+            Some("api-svc".to_string())
+        );
+    }
+
+    #[test]
+    fn test_group_orphan_member_no_suggestion_when_far() {
+        // Safety: if nothing is close, we must NOT invent a bogus match —
+        // false-positive "did you mean" hints are worse than silence.
+        use crate::specgraph::hrf::suggest_node_id_from_candidates;
+        let candidates = ["alpha", "beta", "gamma"];
+        assert_eq!(
+            suggest_node_id_from_candidates("totally_unrelated", &candidates),
+            None
+        );
+    }
+
+    #[test]
+    fn test_group_orphan_member_ignores_exact_match() {
+        // An id that literally exists must return None so the lint check
+        // never emits "did you mean X?" for a match that's already correct.
+        use crate::specgraph::hrf::suggest_node_id_from_candidates;
+        let candidates = ["api", "db"];
+        assert_eq!(
+            suggest_node_id_from_candidates("api", &candidates),
+            None
+        );
+    }
+
+    #[test]
+    fn test_group_orphan_lint_json_output_contains_warning() {
+        // End-to-end: `lint --json` must surface orphaned group members as
+        // a warning so downstream tooling (CI, IDE) can act on them.
+        use std::process::Command;
+        let spec = "## Nodes\n- [api] API\n- [db] Database\n\n## Groups\n- [backend] Backend\n  api, ghost_node\n\n## Flow\napi --> db\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("group_orphan_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        let bin = exe.parent().unwrap().parent().unwrap().join("open-draftly");
+        if !bin.exists() {
+            eprintln!("skipping test_group_orphan_lint_json_output_contains_warning: release binary not found");
+            let _ = std::fs::remove_file(&tmp);
+            return;
+        }
+        let out = Command::new(&bin).arg("lint").arg(&tmp).arg("--json").output().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("lint --json should be valid JSON");
+        let warnings = parsed.get("warnings").unwrap().as_array().unwrap();
+        assert!(
+            warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("ghost_node") && s.contains("backend")
+            }),
+            "expected orphaned-group-member warning, got: {warnings:?}"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
     fn test_config_typo_suggests_title() {
         use crate::specgraph::hrf::suggest_config_key;
         assert_eq!(suggest_config_key("tilte"), Some("title"));
@@ -1932,6 +2044,137 @@ mod cli_tests {
         assert!(doc.import_hints.unknown_config_keys.contains(&"tilte".to_string()));
         assert!(doc.import_hints.unknown_config_keys.contains(&"flwo".to_string()));
         assert!(!doc.import_hints.unknown_config_keys.contains(&"title".to_string()));
+    }
+
+    #[test]
+    fn test_orphan_group_member_captured_with_suggestion() {
+        // End-to-end: a `## Groups` section that references a non-existent
+        // member id must surface in unresolved_group_members, and
+        // suggest_node_id_from_candidates must resolve a typo back to the
+        // real id. Previously the parser silently dropped bad members.
+        let spec = "\
+## Nodes
+- [api] API
+- [db] Database
+- [ui] Frontend
+
+## Groups
+- [backend] Backend
+  api, database, ui
+";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        // `api` and `ui` are valid. `database` is NOT — the real id is `db`.
+        let orphans = &doc.import_hints.unresolved_group_members;
+        assert_eq!(orphans.len(), 1,
+            "exactly one orphan expected, got {:?}", orphans);
+        assert_eq!(orphans[0].0, "backend", "group_id should be the containing group");
+        assert_eq!(orphans[0].1, "database", "member_id should be the bad reference");
+        // Suggestion check: `database` should resolve to `db` or return None if
+        // the edit distance is too wide. With the length-scaled tolerance
+        // (len 8 → max_d 3), the match is still far — so None is acceptable.
+        // What MUST hold: `api` is a closer candidate than a random string.
+        let known_ids: Vec<&str> = doc.nodes.iter()
+            .filter(|n| !n.hrf_id.is_empty())
+            .map(|n| n.hrf_id.as_str())
+            .collect();
+        // Exact-match ids are never flagged
+        assert_eq!(
+            crate::specgraph::hrf::suggest_node_id_from_candidates("api", &known_ids),
+            None
+        );
+    }
+
+    #[test]
+    fn test_orphan_group_member_suggests_near_typo() {
+        // A 1-edit typo in a member id must resolve to the real id.
+        let spec = "\
+## Nodes
+- [api] API
+- [db] Database
+- [ui] Frontend
+
+## Groups
+- [backend] Backend
+  apii, db
+";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let orphans = &doc.import_hints.unresolved_group_members;
+        // `apii` (len 4) with 1 edit from `api` — must be in orphans.
+        assert!(orphans.iter().any(|(gid, mid)| gid == "backend" && mid == "apii"),
+            "expected orphan (backend, apii), got {:?}", orphans);
+        let known_ids: Vec<&str> = doc.nodes.iter()
+            .filter(|n| !n.hrf_id.is_empty())
+            .map(|n| n.hrf_id.as_str())
+            .collect();
+        // `apii` → `api` (distance 1, within max_d=2 for len 4).
+        assert_eq!(
+            crate::specgraph::hrf::suggest_node_id_from_candidates("apii", &known_ids),
+            Some("api".to_string())
+        );
+    }
+
+    #[test]
+    fn test_orphan_group_member_clean_spec_has_none() {
+        // Regression: a fully-resolved Groups section must leave
+        // unresolved_group_members empty — no false positives.
+        let spec = "\
+## Nodes
+- [api] API
+- [db] Database
+- [ui] Frontend
+
+## Groups
+- [backend] Backend
+  api, db
+- [frontend] Frontend
+  ui
+";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert!(doc.import_hints.unresolved_group_members.is_empty(),
+            "clean spec should have no unresolved members, got {:?}",
+            doc.import_hints.unresolved_group_members);
+    }
+
+    #[test]
+    fn test_suggest_node_id_from_candidates_basic() {
+        use crate::specgraph::hrf::suggest_node_id_from_candidates;
+        let candidates = ["api", "db", "ui", "backend", "frontend"];
+        // 1-edit typo
+        assert_eq!(
+            suggest_node_id_from_candidates("apii", &candidates),
+            Some("api".to_string())
+        );
+        // 2-edit typo in a longer id
+        assert_eq!(
+            suggest_node_id_from_candidates("bakend", &candidates),
+            Some("backend".to_string())
+        );
+        // Exact match returns None (not a typo)
+        assert_eq!(suggest_node_id_from_candidates("api", &candidates), None);
+        // Far off — no suggestion
+        assert_eq!(
+            suggest_node_id_from_candidates("totallyrandom", &candidates),
+            None
+        );
+    }
+
+    #[test]
+    fn test_suggest_node_id_from_candidates_empty_cases() {
+        use crate::specgraph::hrf::suggest_node_id_from_candidates;
+        // Empty candidate list
+        assert_eq!(suggest_node_id_from_candidates("anything", &[]), None);
+        // Empty bad id
+        let candidates = ["api", "db"];
+        assert_eq!(suggest_node_id_from_candidates("", &candidates), None);
+    }
+
+    #[test]
+    fn test_suggest_node_id_from_candidates_case_insensitive() {
+        use crate::specgraph::hrf::suggest_node_id_from_candidates;
+        let candidates = ["API", "DB", "UI"];
+        // Exact match ignoring case returns None
+        assert_eq!(suggest_node_id_from_candidates("api", &candidates), None);
+        assert_eq!(suggest_node_id_from_candidates("Api", &candidates), None);
     }
 
     #[test]

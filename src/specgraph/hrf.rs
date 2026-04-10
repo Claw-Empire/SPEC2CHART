@@ -1446,7 +1446,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
     }
 
-    // Create frame nodes for each group (after layout so positions are known)
+    // Create frame nodes for each group (after layout so positions are known).
+    // Also record any member IDs that couldn't be resolved to a node so `lint`
+    // can surface them as "did you mean?" warnings — these would otherwise be
+    // silently dropped.
     for (gid, label, fill_color, member_ids) in groups {
         if member_ids.is_empty() { continue; }
         let pad = 24.0_f32;
@@ -1466,6 +1469,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     max_x = max_x.max(x2);
                     max_y = max_y.max(y2);
                 }
+            } else {
+                doc.import_hints
+                    .unresolved_group_members
+                    .push((gid.clone(), mid.clone()));
             }
         }
         if min_x == f32::INFINITY { continue; }
@@ -1490,6 +1497,17 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             if let Some(&nid) = id_map.get(str_id) {
                 inline_group_map.entry(group_name.clone()).or_default().push(nid);
             }
+        }
+        // Record (name, member_count) pairs for `lint` so it can detect
+        // typo-splits where two nearly-identical group names split one
+        // intended frame into two. Sorted for deterministic output.
+        {
+            let mut counts: Vec<(String, usize)> = inline_group_map
+                .iter()
+                .map(|(name, members)| (name.clone(), members.len()))
+                .collect();
+            counts.sort_by(|a, b| a.0.cmp(&b.0));
+            doc.import_hints.inline_group_name_counts = counts;
         }
         let pad = 24.0_f32;
         // Sort for deterministic frame creation order
@@ -3744,6 +3762,63 @@ pub fn suggest_arrow_style(tag: &str) -> Option<&'static str> {
         }
     }
     best.map(|(_, name)| name)
+}
+
+/// Suggest the closest HRF node id from a slice of known candidates for a
+/// given bad id. Unlike `suggest_id` (which builds a `" — did you mean"`
+/// fragment for parser errors), this returns just the best-match id as an
+/// owned `String` so the caller can format the lint message. Returns `None`
+/// when nothing is close enough or the candidate list is empty.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_node_id_from_candidates(bad: &str, candidates: &[&str]) -> Option<String> {
+    if candidates.is_empty() || bad.is_empty() { return None; }
+    let bad_lower = bad.to_ascii_lowercase();
+    if candidates.iter().any(|c| c.to_ascii_lowercase() == bad_lower) {
+        return None;
+    }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    // Tolerance scales with the misspelled id's length so short ids (3-4 chars)
+    // only catch single-edit typos, and longer ids can catch two-edit typos.
+    let max_d = match bad_lower.len() {
+        0..=3 => 1,
+        4..=7 => 2,
+        _ => 3,
+    };
+
+    let mut best: Option<(usize, String)> = None;
+    for cand in candidates {
+        let cand_lower = cand.to_ascii_lowercase();
+        let d = distance(&bad_lower, &cand_lower);
+        if d == 0 { return None; }
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, (*cand).to_string())),
+            }
+        }
+    }
+    best.map(|(_, s)| s)
 }
 
 /// Suggest the closest known `## Config` directive key for a possibly-misspelled

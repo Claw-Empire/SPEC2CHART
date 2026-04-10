@@ -826,6 +826,17 @@ pub struct ImportHints {
     /// "did you mean" hints for typos like `tilte` → `title`. Never serialized
     /// — only populated at parse time and consumed immediately.
     pub unknown_config_keys: Vec<String>,
+    /// Unresolved `## Groups` member IDs: pairs of (group_id, member_id) where
+    /// the member_id did not match any node in `## Nodes`. Used by `lint` to
+    /// warn when a group references a node that doesn't exist. Never
+    /// serialized — populated at parse time and consumed immediately.
+    pub unresolved_group_members: Vec<(String, String)>,
+    /// Inline group names referenced via `{group:X}` / `{cluster:X}` / `{in:X}`
+    /// tags on nodes, with the count of nodes carrying each name. Used by
+    /// `lint` to detect typo-splits where a single intended group got
+    /// silently forked into two frames (e.g. `{group:backend}` × 3 and
+    /// `{group:bakcend}` × 1 → two frames, no warning). Never serialized.
+    pub inline_group_name_counts: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
