@@ -26,6 +26,12 @@ pub const TEMPLATES: &[Template] = &[
         content: include_str!("engineering/ci-cd-pipeline.spec"),
     },
     Template {
+        name: "State Machine",
+        category: "Engineering",
+        description: "Finite state machine with transitions (payment lifecycle example)",
+        content: include_str!("engineering/state-machine.spec"),
+    },
+    Template {
         name: "Threat Model",
         category: "Engineering",
         description: "Security threat model",
