@@ -1183,10 +1183,11 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     edge.comment = rest.trim().to_string();
                 } else {
                     match etag.as_str() {
-                        "dashed" | "dash" => edge.style.dashed = true,
+                        "dashed" | "dash" | "dotted" => edge.style.dashed = true,
                         "glow" | "neon" => edge.style.glow = true,
-                        "animated" | "flow" => edge.style.animated = true,
+                        "animated" | "animate" | "flow" => edge.style.animated = true,
                         "thick" | "bold" => edge.style.width = 5.0,
+                        "thin" => edge.style.width = 1.5,
                         "ortho" | "orthogonal" => edge.style.orthogonal = true,
                         "escalate" | "escalation" | "escalated" => {
                             edge.style.color = [243, 139, 168, 255];
@@ -1201,7 +1202,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                             edge.style.color = [250, 179, 135, 255];
                             edge.style.width = 3.0;
                         }
-                        _ => {}
+                        // Preserve unrecognized bare tags so `lint` can emit
+                        // did-you-mean hints for typos in inline-edge syntax.
+                        _ => edge.unknown_tags.push(etag.clone()),
                     }
                 }
             }
@@ -2522,7 +2525,8 @@ fn parse_flow_line_chain(
                         edge.style.color = [250, 179, 135, 255]; // orange
                         edge.style.width = 3.0;
                     }
-                    _ => {}
+                    // Unrecognized bare tag — preserve for `lint` did-you-mean hints.
+                    _ => edge.unknown_tags.push(etag.clone()),
                 }
             }
         }
@@ -3617,6 +3621,65 @@ pub fn suggest_shape_alias(tag: &str) -> Option<&'static str> {
     best.map(|(_, name)| name)
 }
 
+/// Suggest the closest known edge-style alias for a possibly-misspelled tag.
+/// Mirrors `suggest_shape_alias` but targets edge-style vocabulary: dashed,
+/// dotted, thick, bold, animated, glow, ortho, escalate, resolves, blocks,
+/// and the arrow:* family. Returns None on exact match or when too far.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_edge_style_alias(tag: &str) -> Option<&'static str> {
+    const KNOWN_EDGE_ALIASES: &[&str] = &[
+        "dashed", "dash", "dotted",
+        "glow", "neon",
+        "animated", "animate", "flow",
+        "thick", "bold", "thin",
+        "ortho", "orthogonal",
+        "open", "line",
+        "escalate", "escalation", "escalated",
+        "resolves", "fixes", "closes",
+        "blocks", "blocking",
+    ];
+    let tag_lower = tag.to_ascii_lowercase();
+    let n = tag_lower.len();
+    if !(3..=20).contains(&n) { return None; }
+    // Skip prefixed tags (color:, weight:, bend:, etc.) — those belong to
+    // value-bearing handlers, not the bare-tag match arm.
+    if tag_lower.contains(':') { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_EDGE_ALIASES {
+        let d = distance(&tag_lower, cand);
+        if d == 0 { return None; } // exact match, no suggestion
+        if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
 /// Returns a muted tier-specific fill color for a given z-offset.
 /// Used by the {tier-color} tag and auto-tier-color config option.
 fn z_tier_fill_color(z: f32) -> [u8; 4] {
@@ -4080,6 +4143,58 @@ mod tests {
         let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n\n## Flow\na --> b\nb --> c\n";
         let doc = parse_hrf(spec).expect("unique ids should parse");
         assert_eq!(doc.nodes.len(), 3);
+    }
+
+    #[test]
+    fn test_edge_unknown_tags_preserved_for_lint() {
+        // End-to-end: typo'd edge tags land in edge.unknown_tags.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {dashd} {thik}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert_eq!(doc.edges.len(), 1);
+        let tags = &doc.edges[0].unknown_tags;
+        assert!(tags.contains(&"dashd".to_string()), "got: {:?}", tags);
+        assert!(tags.contains(&"thik".to_string()), "got: {:?}", tags);
+    }
+
+    #[test]
+    fn test_edge_known_tags_not_flagged() {
+        // Valid bare tags should NOT leak into unknown_tags.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {dashed} {thick} {ortho} {glow}\n";
+        let doc = parse_hrf(spec).unwrap();
+        assert!(
+            doc.edges[0].unknown_tags.is_empty(),
+            "known tags leaked: {:?}",
+            doc.edges[0].unknown_tags
+        );
+    }
+
+    #[test]
+    fn test_suggest_edge_style_alias_basic() {
+        assert_eq!(suggest_edge_style_alias("dashd"), Some("dashed"));
+        assert_eq!(suggest_edge_style_alias("thik"), Some("thick"));
+        assert_eq!(suggest_edge_style_alias("animted"), Some("animated"));
+        assert_eq!(suggest_edge_style_alias("escallate"), Some("escalate"));
+    }
+
+    #[test]
+    fn test_suggest_edge_style_alias_exact_match_returns_none() {
+        for known in ["dashed", "thick", "ortho", "glow", "animated", "escalate"] {
+            assert_eq!(suggest_edge_style_alias(known), None, "exact '{known}' should not suggest");
+        }
+    }
+
+    #[test]
+    fn test_suggest_edge_style_alias_unrelated_returns_none() {
+        assert_eq!(suggest_edge_style_alias("totallyrandom"), None);
+        assert_eq!(suggest_edge_style_alias("xyzzy"), None);
+    }
+
+    #[test]
+    fn test_suggest_edge_style_alias_ignores_prefixed() {
+        // Prefixed tags (color:, weight:, ...) should be skipped — they're
+        // value-bearing and not the bare-tag vocabulary we match against.
+        assert_eq!(suggest_edge_style_alias("color:red"), None);
+        assert_eq!(suggest_edge_style_alias("weight:3"), None);
     }
 
     #[test]

@@ -924,6 +924,31 @@ fn cli_lint(input: PathBuf, strict: bool) {
         }
     }
 
+    // Edge-style tag typo detection: mirror the node check on edges, using
+    // the edge-style vocabulary (dashed/dotted/thick/ortho/escalate/...).
+    for edge in &doc.edges {
+        for tag in &edge.unknown_tags {
+            if let Some(suggestion) = crate::specgraph::hrf::suggest_edge_style_alias(tag) {
+                let label = if edge.label.trim().is_empty() {
+                    // Fall back to endpoint hrf_ids so the message is actionable
+                    let src = doc.nodes.iter().find(|n| n.id == edge.source.node_id)
+                        .map(|n| if n.hrf_id.is_empty() { n.display_label().to_string() } else { format!("[{}]", n.hrf_id) })
+                        .unwrap_or_else(|| "?".into());
+                    let tgt = doc.nodes.iter().find(|n| n.id == edge.target.node_id)
+                        .map(|n| if n.hrf_id.is_empty() { n.display_label().to_string() } else { format!("[{}]", n.hrf_id) })
+                        .unwrap_or_else(|| "?".into());
+                    format!("{} → {}", src, tgt)
+                } else {
+                    format!("{:?}", edge.label)
+                };
+                warnings.push(format!(
+                    "Edge {}: unknown tag {{{}}} — did you mean {{{}}}?",
+                    label, tag, suggestion
+                ));
+            }
+        }
+    }
+
     // Check for empty labels
     for node in &doc.nodes {
         let label = node.display_label();
@@ -1467,5 +1492,60 @@ mod cli_tests {
         assert_eq!(a.unknown_tags, vec!["daimond".to_string()]);
         let b = doc.nodes.iter().find(|n| n.hrf_id == "b").unwrap();
         assert!(b.unknown_tags.is_empty(), "known tag should not leak into unknown_tags");
+    }
+
+    #[test]
+    fn test_edge_typo_suggests_dashed() {
+        use crate::specgraph::hrf::suggest_edge_style_alias;
+        assert_eq!(suggest_edge_style_alias("dahsed"), Some("dashed"));
+        assert_eq!(suggest_edge_style_alias("dased"), Some("dashed"));
+    }
+
+    #[test]
+    fn test_edge_typo_suggests_thick_ortho() {
+        use crate::specgraph::hrf::suggest_edge_style_alias;
+        assert_eq!(suggest_edge_style_alias("thikc"), Some("thick"));
+        assert_eq!(suggest_edge_style_alias("othro"), Some("ortho"));
+    }
+
+    #[test]
+    fn test_edge_typo_ignores_known_tags() {
+        use crate::specgraph::hrf::suggest_edge_style_alias;
+        for t in ["dashed", "glow", "thick", "ortho", "escalate", "resolves", "blocks"] {
+            assert_eq!(
+                suggest_edge_style_alias(t),
+                None,
+                "known edge tag '{t}' should not be flagged"
+            );
+        }
+    }
+
+    #[test]
+    fn test_edge_typo_ignores_prefixed_tags() {
+        use crate::specgraph::hrf::suggest_edge_style_alias;
+        // color:/note:/weight: are value-bearing — not bare style tags.
+        assert_eq!(suggest_edge_style_alias("color:#abc"), None);
+        assert_eq!(suggest_edge_style_alias("note:hi"), None);
+        assert_eq!(suggest_edge_style_alias("weight:3"), None);
+    }
+
+    #[test]
+    fn test_edge_typo_unknown_tag_preserved_on_flow_edge() {
+        // End-to-end: typo on a `## Flow` edge lands in edge.unknown_tags.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {dahsed}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.edges.len(), 1);
+        assert_eq!(doc.edges[0].unknown_tags, vec!["dahsed".to_string()]);
+    }
+
+    #[test]
+    fn test_edge_typo_unknown_tag_preserved_on_inline_edge() {
+        // End-to-end: typo on an inline-edge (`- [a] A --> b {tag}`) also
+        // lands in edge.unknown_tags — previously this path silently dropped
+        // unrecognized tags.
+        let spec = "## Nodes\n- [a] A --> b {dahsed}\n- [b] B\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.edges.len(), 1);
+        assert_eq!(doc.edges[0].unknown_tags, vec!["dahsed".to_string()]);
     }
 }
