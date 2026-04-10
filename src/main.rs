@@ -788,6 +788,79 @@ fn cli_lint(input: PathBuf, strict: bool) {
         }
     }
 
+    // Check for very long labels (readability)
+    for node in &doc.nodes {
+        if node.is_frame { continue; }
+        let label_chars = node.display_label().chars().count();
+        if label_chars > 60 {
+            warnings.push(format!(
+                "Node {:?} has a very long label ({} chars) — consider shortening or splitting",
+                node.display_label(), label_chars
+            ));
+        }
+    }
+
+    // Check for unlabeled outgoing edges from decision (diamond) nodes.
+    // Decisions branch, so the branches should be labeled (e.g. yes/no).
+    {
+        use crate::model::{NodeKind, NodeShape};
+        let diamond_ids: std::collections::HashSet<crate::model::NodeId> = doc
+            .nodes
+            .iter()
+            .filter(|n| matches!(&n.kind, NodeKind::Shape { shape: NodeShape::Diamond, .. }))
+            .map(|n| n.id)
+            .collect();
+        if !diamond_ids.is_empty() {
+            // Group by source node to count outgoing branches
+            let mut out_counts: std::collections::HashMap<crate::model::NodeId, (usize, usize)> =
+                std::collections::HashMap::new();
+            for edge in &doc.edges {
+                if diamond_ids.contains(&edge.source.node_id) {
+                    let entry = out_counts.entry(edge.source.node_id).or_insert((0, 0));
+                    entry.0 += 1;
+                    if !edge.label.trim().is_empty() { entry.1 += 1; }
+                }
+            }
+            for (nid, (total, labeled)) in &out_counts {
+                if *total >= 2 && *labeled < *total {
+                    let label = doc.nodes.iter().find(|n| n.id == *nid)
+                        .map(|n| n.display_label().to_string())
+                        .unwrap_or_else(|| "?".into());
+                    warnings.push(format!(
+                        "Decision node {:?} has {} branches but only {} are labeled",
+                        label, total, labeled
+                    ));
+                }
+            }
+        }
+    }
+
+    // Check for inconsistent edge labeling — when SOME outgoing edges of a node
+    // are labeled but others aren't, that's a sign of forgotten labels rather than
+    // a pure hierarchy. (A fully unlabeled fan-out is usually OrgTree-style.)
+    {
+        let mut out_edges: std::collections::HashMap<crate::model::NodeId, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (i, edge) in doc.edges.iter().enumerate() {
+            out_edges.entry(edge.source.node_id).or_default().push(i);
+        }
+        for (nid, edge_idxs) in &out_edges {
+            if edge_idxs.len() < 2 { continue; }
+            let labeled = edge_idxs.iter().filter(|&&i| !doc.edges[i].label.trim().is_empty()).count();
+            let unlabeled = edge_idxs.len() - labeled;
+            // Only flag if mixed (at least one of each)
+            if labeled > 0 && unlabeled > 0 {
+                let label = doc.nodes.iter().find(|n| n.id == *nid)
+                    .map(|n| n.display_label().to_string())
+                    .unwrap_or_else(|| "?".into());
+                warnings.push(format!(
+                    "Node {:?} has inconsistent edge labeling ({} labeled, {} unlabeled)",
+                    label, labeled, unlabeled
+                ));
+            }
+        }
+    }
+
     // Output
     let total = warnings.len() + errors.len();
     if total == 0 {
