@@ -44,6 +44,12 @@ pub const TEMPLATES: &[Template] = &[
         content: include_str!("strategy/user-journey.spec"),
     },
     Template {
+        name: "OKRs",
+        category: "Strategy",
+        description: "Quarterly objectives + key results, rolled up from company mission",
+        content: include_str!("strategy/okrs.spec"),
+    },
+    Template {
         name: "Org Chart",
         category: "Org",
         description: "Organizational chart",
