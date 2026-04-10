@@ -3740,6 +3740,7 @@ fn parse_note_line(line: &str) -> Result<Node, String> {
     let (text, tags) = extract_tags(line);
     let mut color = StickyColor::Yellow;
     let mut z_offset = 0.0f32;
+    let mut unknown_tags: Vec<String> = Vec::new();
 
     for tag in &tags {
         match tag.as_str() {
@@ -3749,16 +3750,28 @@ fn parse_note_line(line: &str) -> Result<Node, String> {
             "purple" | "mauve" | "violet" | "lavender" => color = StickyColor::Purple,
             "yellow" | "warning" | "warn" | "caution" | "orange" | "peach" => color = StickyColor::Yellow,
             _ if tag.starts_with("z:") => {
-                if let Ok(v) = tag[2..].trim().parse::<f32>() {
-                    z_offset = v;
+                // Non-numeric z values (`{z:half}`) used to vanish via
+                // `if let Ok` with no else-branch. Preserve for cli_lint's
+                // numeric_prefix_match did-you-mean walk.
+                match tag[2..].trim().parse::<f32>() {
+                    Ok(v) => z_offset = v,
+                    Err(_) => unknown_tags.push(tag.clone()),
                 }
             }
-            _ => {}
+            _ => {
+                // Unknown sticky note tag (`{blu}`, `{grean}`, `{yelow}`,
+                // `{fill:blue}` — fill: isn't a note primitive). Preserve
+                // for cli_lint's did-you-mean walk. Previously `_ => {}`
+                // silently swallowed these and the user saw the default
+                // yellow color with no feedback.
+                unknown_tags.push(tag.clone());
+            }
         }
     }
 
     let mut node = Node::new_sticky(color, Pos2::ZERO);
     node.z_offset = z_offset;
+    node.unknown_tags = unknown_tags;
     if let NodeKind::StickyNote { text: ref mut t, .. } = node.kind {
         *t = text;
     }
@@ -4240,6 +4253,72 @@ pub fn suggest_fill_color_name(raw: &str) -> Option<&'static str> {
         // cases (`bleu` → `blue`, `gren` → `green`) without producing
         // false-positive pairs like `red` → `teal`.
         if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical sticky-note color token for a possibly
+/// misspelled `## Notes` tag (`{blu}`, `{grean}`, `{yelow}`). Returns None on
+/// exact match, empty input, prefixed tags (colon-bearing), or no close
+/// candidate. The vocabulary is the union of all accepted spellings in
+/// `parse_note_line`'s color match arm so any returned suggestion is
+/// guaranteed to produce the intended sticky color after substitution.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_sticky_color(raw: &str) -> Option<&'static str> {
+    const KNOWN_STICKY_COLORS: &[&str] = &[
+        // pink bucket
+        "pink", "red", "critical", "error",
+        // green bucket
+        "green", "ok", "success", "done",
+        // blue bucket
+        "blue", "info", "note", "sky", "teal",
+        // purple bucket
+        "purple", "mauve", "violet", "lavender",
+        // yellow bucket
+        "yellow", "warning", "warn", "caution", "orange", "peach",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+    // Skip prefixed tags — those belong to other suggest helpers (fill:, z:, …)
+    if raw_lower.contains(':') { return None; }
+    // Length guard: too-short noise like `r` or `b` is too ambiguous.
+    if raw_lower.len() < 3 { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_STICKY_COLORS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // exact match → already valid
+        // Length-scaled cutoff: short vocab words like `ok`/`wip` would be
+        // indistinguishable under d<=2 (half their length!), so restrict to
+        // d<=1 when either string is <= 4 chars.
+        let max_d = if cand.len() <= 4 || raw_lower.len() <= 4 { 1 } else { 2 };
+        if d <= max_d {
             match best {
                 Some((best_d, _)) if d >= best_d => {}
                 _ => best = Some((d, cand)),

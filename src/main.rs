@@ -1280,12 +1280,28 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
     //   - Skip exact matches (defensive — shouldn't reach unknown_tags).
     //   - Distance <= 2 (length-scaled: <= 1 for <= 4 char names).
     for node in &doc.nodes {
+        let is_sticky = matches!(node.kind, crate::model::NodeKind::StickyNote { .. });
         for tag in &node.unknown_tags {
             let id_str = if node.hrf_id.is_empty() {
                 node.display_label().to_string()
             } else {
                 format!("[{}]", node.hrf_id)
             };
+            // Sticky-note color typo: `{blu}` / `{grean}` / `{yelow}` on a
+            // `## Notes` entry. Dispatch first so sticky colors are not
+            // misclassified as shape aliases (shape vocabulary has zero
+            // overlap with sticky colors, but we want the message to say
+            // "sticky color" for clarity). Only applies to notes — nodes
+            // shouldn't get a sticky-color suggestion.
+            if is_sticky {
+                if let Some(suggestion) = crate::specgraph::hrf::suggest_sticky_color(tag) {
+                    warnings.push(format!(
+                        "Note {}: unknown sticky color {{{}}} — did you mean {{{}}}?",
+                        id_str, tag, suggestion
+                    ));
+                    continue;
+                }
+            }
             if let Some(suggestion) = crate::specgraph::hrf::suggest_shape_alias(tag) {
                 warnings.push(format!(
                     "Node {}: unknown tag {{{}}} — did you mean {{{}}}?",
@@ -6374,6 +6390,91 @@ mod cli_tests {
             w.as_str().unwrap_or("").contains("not a number")
         });
         assert!(!bad, "canonical numeric values must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_sticky_note_color_typo_via_cli() {
+        // `## Notes` sticky-note tags like `{pnk}`, `{grean}`, `{yelow}`
+        // used to silently default to yellow because parse_note_line had
+        // a `_ => {}` catch-all. `{z:top}` (non-numeric z:) had the same
+        // problem with `if let Ok(v) = ...`. Lint should now surface
+        // did-you-mean hints via suggest_sticky_color for color typos and
+        // the numeric_prefix_match walk for the bad `z:` value.
+        let spec = "## Notes\n\
+                    - Bug found here {pnk}\n\
+                    - All good {grean}\n\
+                    - Watch out {z:top}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("sticky_bad_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_pink = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("sticky color") && s.contains("pnk") && s.contains("pink")
+        });
+        let has_green = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("sticky color") && s.contains("grean") && s.contains("green")
+        });
+        let has_z = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("z:top") && s.contains("number")
+        });
+        assert!(has_pink, "expected sticky color hint for pnk→pink, got: {stdout}");
+        assert!(has_green, "expected sticky color hint for grean→green, got: {stdout}");
+        assert!(has_z, "expected numeric hint for {{z:top}}, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_sticky_note_valid_tags_not_flagged_via_cli() {
+        // Regression guard: canonical sticky colors + valid numeric z:
+        // must NOT fire any warning.
+        let spec = "## Notes\n\
+                    - Pink is fine {pink}\n\
+                    - Green is fine {green}\n\
+                    - Blue is fine {blue}\n\
+                    - Purple is fine {purple}\n\
+                    - Yellow is fine {yellow}\n\
+                    - Layered note {z:120}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("sticky_ok_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("sticky color") || (s.contains("Note") && s.contains("unknown"))
+        });
+        assert!(!bad, "canonical sticky tags must not warn, got: {stdout}");
     }
 
     #[test]
