@@ -510,13 +510,20 @@ fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &st
 
 fn cli_templates_list() {
     use crate::templates::TEMPLATES;
-    let mut current_category = "";
+    // Group by category so each category header prints exactly once,
+    // regardless of registration order in TEMPLATES.
+    let mut by_category: std::collections::BTreeMap<&str, Vec<&crate::templates::Template>> =
+        std::collections::BTreeMap::new();
     for t in TEMPLATES {
-        if t.category != current_category {
-            current_category = t.category;
-            println!("\n{}:", current_category);
+        by_category.entry(t.category).or_default().push(t);
+    }
+    for (category, items) in &by_category {
+        println!("\n{}:", category);
+        let mut sorted = items.clone();
+        sorted.sort_by_key(|t| t.name);
+        for t in sorted {
+            println!("  {:20}  {}", t.name, t.description);
         }
-        println!("  {:20}  {}", t.name, t.description);
     }
     println!();
 }
