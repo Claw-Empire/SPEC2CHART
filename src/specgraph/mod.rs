@@ -6,7 +6,7 @@ pub mod llm;
 
 pub use schema::SpecGraph;
 pub use convert::{document_to_specgraph, specgraph_to_document};
-pub use hrf::{parse_hrf, export_hrf};
+pub use hrf::parse_hrf;
 pub use llm::LlmConfig;
 
 use crate::model::FlowchartDocument;

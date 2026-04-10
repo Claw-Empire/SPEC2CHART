@@ -1,5 +1,109 @@
-use crate::model::{Cardinality, FlowchartDocument, Node, NodeKind, NodeShape, ENTITY_HEADER_HEIGHT, ENTITY_ROW_HEIGHT};
+use crate::model::{Cardinality, FlowchartDocument, LayoutMode, Node, NodeKind, NodeShape, ENTITY_HEADER_HEIGHT, ENTITY_ROW_HEIGHT};
 use std::path::Path;
+
+// ---------------------------------------------------------------------------
+// Embedded 5×7 pixel bitmap font (ASCII 0x20–0x7E, column-major, bit0=top)
+// Each glyph is 5 bytes: one per column (left→right).
+// Within each byte, bit 0 = top row … bit 6 = bottom row.
+// Derived from the classic Adafruit GFX 5×7 font (MIT License).
+// ---------------------------------------------------------------------------
+static FONT5X7: &[u8] = &[
+    0x00,0x00,0x00,0x00,0x00, // ' ' 0x20
+    0x00,0x00,0x5F,0x00,0x00, // '!' 0x21
+    0x00,0x07,0x00,0x07,0x00, // '"' 0x22
+    0x14,0x7F,0x14,0x7F,0x14, // '#' 0x23
+    0x24,0x2A,0x7F,0x2A,0x12, // '$' 0x24
+    0x23,0x13,0x08,0x64,0x62, // '%' 0x25
+    0x36,0x49,0x55,0x22,0x50, // '&' 0x26
+    0x00,0x05,0x03,0x00,0x00, // ''' 0x27
+    0x00,0x1C,0x22,0x41,0x00, // '(' 0x28
+    0x00,0x41,0x22,0x1C,0x00, // ')' 0x29
+    0x08,0x2A,0x1C,0x2A,0x08, // '*' 0x2A
+    0x08,0x08,0x3E,0x08,0x08, // '+' 0x2B
+    0x00,0x50,0x30,0x00,0x00, // ',' 0x2C
+    0x08,0x08,0x08,0x08,0x08, // '-' 0x2D
+    0x00,0x60,0x60,0x00,0x00, // '.' 0x2E
+    0x20,0x10,0x08,0x04,0x02, // '/' 0x2F
+    0x3E,0x51,0x49,0x45,0x3E, // '0' 0x30
+    0x00,0x42,0x7F,0x40,0x00, // '1' 0x31
+    0x42,0x61,0x51,0x49,0x46, // '2' 0x32
+    0x21,0x41,0x45,0x4B,0x31, // '3' 0x33
+    0x18,0x14,0x12,0x7F,0x10, // '4' 0x34
+    0x27,0x45,0x45,0x45,0x39, // '5' 0x35
+    0x3C,0x4A,0x49,0x49,0x30, // '6' 0x36
+    0x01,0x71,0x09,0x05,0x03, // '7' 0x37
+    0x36,0x49,0x49,0x49,0x36, // '8' 0x38
+    0x06,0x49,0x49,0x29,0x1E, // '9' 0x39
+    0x00,0x36,0x36,0x00,0x00, // ':' 0x3A
+    0x00,0x56,0x36,0x00,0x00, // ';' 0x3B
+    0x00,0x08,0x14,0x22,0x41, // '<' 0x3C
+    0x14,0x14,0x14,0x14,0x14, // '=' 0x3D
+    0x41,0x22,0x14,0x08,0x00, // '>' 0x3E
+    0x02,0x01,0x51,0x09,0x06, // '?' 0x3F
+    0x32,0x49,0x79,0x41,0x3E, // '@' 0x40
+    0x7E,0x11,0x11,0x11,0x7E, // 'A' 0x41
+    0x7F,0x49,0x49,0x49,0x36, // 'B' 0x42
+    0x3E,0x41,0x41,0x41,0x22, // 'C' 0x43
+    0x7F,0x41,0x41,0x22,0x1C, // 'D' 0x44
+    0x7F,0x49,0x49,0x49,0x41, // 'E' 0x45
+    0x7F,0x09,0x09,0x01,0x01, // 'F' 0x46
+    0x3E,0x41,0x41,0x51,0x32, // 'G' 0x47
+    0x7F,0x08,0x08,0x08,0x7F, // 'H' 0x48
+    0x00,0x41,0x7F,0x41,0x00, // 'I' 0x49
+    0x20,0x40,0x41,0x3F,0x01, // 'J' 0x4A
+    0x7F,0x08,0x14,0x22,0x41, // 'K' 0x4B
+    0x7F,0x40,0x40,0x40,0x40, // 'L' 0x4C
+    0x7F,0x02,0x04,0x02,0x7F, // 'M' 0x4D
+    0x7F,0x04,0x08,0x10,0x7F, // 'N' 0x4E
+    0x3E,0x41,0x41,0x41,0x3E, // 'O' 0x4F
+    0x7F,0x09,0x09,0x09,0x06, // 'P' 0x50
+    0x3E,0x41,0x51,0x21,0x5E, // 'Q' 0x51
+    0x7F,0x09,0x19,0x29,0x46, // 'R' 0x52
+    0x46,0x49,0x49,0x49,0x31, // 'S' 0x53
+    0x01,0x01,0x7F,0x01,0x01, // 'T' 0x54
+    0x3F,0x40,0x40,0x40,0x3F, // 'U' 0x55
+    0x1F,0x20,0x40,0x20,0x1F, // 'V' 0x56
+    0x7F,0x20,0x18,0x20,0x7F, // 'W' 0x57
+    0x63,0x14,0x08,0x14,0x63, // 'X' 0x58
+    0x03,0x04,0x78,0x04,0x03, // 'Y' 0x59
+    0x61,0x51,0x49,0x45,0x43, // 'Z' 0x5A
+    0x00,0x00,0x7F,0x41,0x41, // '[' 0x5B
+    0x02,0x04,0x08,0x10,0x20, // '\' 0x5C
+    0x41,0x41,0x7F,0x00,0x00, // ']' 0x5D
+    0x04,0x02,0x01,0x02,0x04, // '^' 0x5E
+    0x40,0x40,0x40,0x40,0x40, // '_' 0x5F
+    0x00,0x01,0x02,0x04,0x00, // '`' 0x60
+    0x20,0x54,0x54,0x54,0x78, // 'a' 0x61
+    0x7F,0x48,0x44,0x44,0x38, // 'b' 0x62
+    0x38,0x44,0x44,0x44,0x20, // 'c' 0x63
+    0x38,0x44,0x44,0x48,0x7F, // 'd' 0x64
+    0x38,0x54,0x54,0x54,0x18, // 'e' 0x65
+    0x08,0x7E,0x09,0x01,0x02, // 'f' 0x66
+    0x08,0x14,0x54,0x54,0x3C, // 'g' 0x67
+    0x7F,0x08,0x04,0x04,0x78, // 'h' 0x68
+    0x00,0x44,0x7D,0x40,0x00, // 'i' 0x69
+    0x20,0x40,0x44,0x3D,0x00, // 'j' 0x6A
+    0x00,0x7F,0x10,0x28,0x44, // 'k' 0x6B
+    0x00,0x41,0x7F,0x40,0x00, // 'l' 0x6C
+    0x7C,0x04,0x18,0x04,0x7C, // 'm' 0x6D
+    0x7C,0x08,0x04,0x04,0x78, // 'n' 0x6E
+    0x38,0x44,0x44,0x44,0x38, // 'o' 0x6F
+    0x7C,0x14,0x14,0x14,0x08, // 'p' 0x70
+    0x08,0x14,0x14,0x18,0x7C, // 'q' 0x71
+    0x7C,0x08,0x04,0x04,0x08, // 'r' 0x72
+    0x48,0x54,0x54,0x54,0x24, // 's' 0x73
+    0x04,0x3F,0x44,0x40,0x20, // 't' 0x74
+    0x3C,0x40,0x40,0x20,0x7C, // 'u' 0x75
+    0x1C,0x20,0x40,0x20,0x1C, // 'v' 0x76
+    0x3C,0x40,0x30,0x40,0x3C, // 'w' 0x77
+    0x44,0x28,0x10,0x28,0x44, // 'x' 0x78
+    0x0C,0x50,0x50,0x50,0x3C, // 'y' 0x79
+    0x44,0x64,0x54,0x4C,0x44, // 'z' 0x7A
+    0x00,0x08,0x36,0x41,0x00, // '{' 0x7B
+    0x00,0x00,0x7F,0x00,0x00, // '|' 0x7C
+    0x00,0x41,0x36,0x08,0x00, // '}' 0x7D
+    0x08,0x08,0x2A,0x1C,0x08, // '~' 0x7E
+];
 
 /// Padding around the bounding box in pixels.
 const EXPORT_PADDING: f32 = 40.0;
@@ -121,7 +225,8 @@ pub fn export_png(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
         }
     }
 
-    // Draw edges as lines
+    // Draw edges as lines with arrowheads and labels
+    let label_color = image::Rgba([76u8, 79, 105, 255]); // #4c4f69 — WCAG AA on white
     for edge in &doc.edges {
         let src_node = doc.find_node(&edge.source.node_id);
         let tgt_node = doc.find_node(&edge.target.node_id);
@@ -134,7 +239,73 @@ pub fn export_png(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
             let ty = (tgt.y - min_y) as i32;
             let color = image::Rgba(edge.style.color);
             let w = edge.style.width.round().max(1.0) as i32;
-            draw_line(&mut img, sx, sy, tx, ty, color, w);
+
+            // Shorten the line slightly so the arrowhead tip lands at target port
+            let ddx = (tx - sx) as f32;
+            let ddy = (ty - sy) as f32;
+            let dlen = (ddx * ddx + ddy * ddy).sqrt().max(1.0);
+            let shorten = 12.0_f32; // match arrow_len in draw_arrowhead_png
+            let tx_short = (tx as f32 - ddx / dlen * shorten) as i32;
+            let ty_short = (ty as f32 - ddy / dlen * shorten) as i32;
+            draw_line(&mut img, sx, sy, tx_short, ty_short, color, w);
+
+            // Arrowhead at target
+            draw_arrowhead_png(&mut img, sx, sy, tx, ty, color);
+
+            // Edge label at midpoint
+            if !edge.label.is_empty() {
+                let mx = (sx + tx) / 2;
+                let my = (sy + ty) / 2;
+                draw_text_centered_png(&mut img, &edge.label, mx, my, 1, label_color);
+            }
+        }
+    }
+
+    // Draw node labels
+    for node in &doc.nodes {
+        let nx = (node.position[0] - min_x) as i32;
+        let ny = (node.position[1] - min_y) as i32;
+        let nw = node.size[0] as i32;
+        let nh = node.size[1] as i32;
+
+        let text_rgba = image::Rgba(node.style.text_color);
+        let cx = nx + nw / 2;
+        let cy = ny + nh / 2;
+
+        match &node.kind {
+            NodeKind::Shape { label, .. } => {
+                if !label.is_empty() {
+                    draw_text_centered_png(&mut img, label, cx, cy, 2, text_rgba);
+                }
+            }
+            NodeKind::StickyNote { text, .. } => {
+                if !text.is_empty() {
+                    // Truncate to first line for simple rendering
+                    let first_line = text.lines().next().unwrap_or(text);
+                    draw_text_centered_png(&mut img, first_line, cx, ny + 14, 1, text_rgba);
+                }
+            }
+            NodeKind::Entity { name, attributes } => {
+                // Name in header bar (header occupies top ENTITY_HEADER_HEIGHT pixels)
+                let header_h = ENTITY_HEADER_HEIGHT as i32;
+                let header_center_y = ny + header_h / 2;
+                draw_text_centered_png(&mut img, name, cx, header_center_y, 1, image::Rgba([255, 255, 255, 255]));
+                // Attributes
+                let row_h = ENTITY_ROW_HEIGHT as i32;
+                let attr_color = image::Rgba([50u8, 50, 50, 255]);
+                for (i, attr) in attributes.iter().enumerate() {
+                    let ry = ny + header_h + (i as i32) * row_h + row_h / 2;
+                    let prefix = if attr.is_primary_key { "PK " } else if attr.is_foreign_key { "FK " } else { "" };
+                    let attr_text = format!("{}{}", prefix, attr.name);
+                    draw_text_centered_png(&mut img, &attr_text, cx, ry, 1, attr_color);
+                }
+            }
+            NodeKind::Text { content } => {
+                if !content.is_empty() {
+                    let first_line = content.lines().next().unwrap_or(content);
+                    draw_text_centered_png(&mut img, first_line, cx, cy, 1, text_rgba);
+                }
+            }
         }
     }
 
@@ -323,6 +494,68 @@ fn put_pixel_safe(img: &mut image::RgbaImage, x: i32, y: i32, color: image::Rgba
     }
 }
 
+/// Render a single ASCII character from FONT5X7 at pixel position (x, y).
+/// `scale` pixels per font pixel (2 = 10×14 rendered size).
+fn draw_char_png(img: &mut image::RgbaImage, ch: char, x: i32, y: i32, scale: i32, color: image::Rgba<u8>) {
+    let code = ch as u8;
+    if !(0x20..=0x7E).contains(&code) {
+        return;
+    }
+    let idx = (code - 0x20) as usize;
+    let glyph = &FONT5X7[idx * 5..(idx + 1) * 5];
+    for col in 0..5_i32 {
+        let col_bits = glyph[col as usize];
+        for row in 0..7_i32 {
+            if col_bits & (1 << row) != 0 {
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        put_pixel_safe(img, x + col * scale + sx, y + row * scale + sy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a string centered at pixel (cx, cy) using the 5×7 bitmap font.
+fn draw_text_centered_png(img: &mut image::RgbaImage, text: &str, cx: i32, cy: i32, scale: i32, color: image::Rgba<u8>) {
+    if text.is_empty() { return; }
+    let char_w = (5 + 1) * scale; // 5 pixels wide + 1px gap
+    let char_h = 7 * scale;
+    let total_w = text.len() as i32 * char_w - scale; // remove trailing gap
+    let x_start = cx - total_w / 2;
+    let y_start = cy - char_h / 2;
+    for (i, ch) in text.chars().enumerate() {
+        draw_char_png(img, ch, x_start + i as i32 * char_w, y_start, scale, color);
+    }
+}
+
+/// Draw a filled arrowhead triangle pointing from (sx,sy) toward (tx,ty).
+/// The tip is at (tx,ty).
+fn draw_arrowhead_png(img: &mut image::RgbaImage, sx: i32, sy: i32, tx: i32, ty: i32, color: image::Rgba<u8>) {
+    let dx = (tx - sx) as f32;
+    let dy = (ty - sy) as f32;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1.0 { return; }
+    let dirx = dx / len;
+    let diry = dy / len;
+    let perpx = -diry;
+    let perpy = dirx;
+
+    let arrow_len = 12.0_f32;
+    let arrow_half_w = 5.0_f32;
+
+    // Base center of the arrowhead triangle
+    let bx = tx as f32 - dirx * arrow_len;
+    let by = ty as f32 - diry * arrow_len;
+
+    let p1 = (tx, ty); // tip
+    let p2 = ((bx + perpx * arrow_half_w) as i32, (by + perpy * arrow_half_w) as i32);
+    let p3 = ((bx - perpx * arrow_half_w) as i32, (by - perpy * arrow_half_w) as i32);
+
+    draw_filled_polygon(img, &[p1, p2, p3], color);
+}
+
 // ---------------------------------------------------------------------------
 // SVG Export
 // ---------------------------------------------------------------------------
@@ -339,6 +572,12 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">
 <rect width="100%" height="100%" fill="white"/>
+<defs>
+  <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
+          markerUnits="strokeWidth" markerWidth="6" markerHeight="6" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+  </marker>
+</defs>
 "#,
         width.ceil() as i32,
         height.ceil() as i32,
@@ -360,18 +599,18 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
             let color = rgba_to_svg_color(edge.style.color);
             let opacity = edge.style.color[3] as f32 / 255.0;
             svg.push_str(&format!(
-                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}" stroke-opacity="{:.2}"/>"#,
+                r#"<line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="{:.1}" stroke-opacity="{:.2}" marker-end="url(#arrowhead)"/>"#,
                 sx, sy, tx, ty, color, edge.style.width, opacity,
             ));
             svg.push('\n');
 
-            // Edge label at midpoint
+            // Edge label at midpoint — use accessible dark color (#4c4f69) for WCAG AA contrast on white
             if !edge.label.is_empty() {
                 let mx = (sx + tx) / 2.0;
                 let my = (sy + ty) / 2.0;
                 svg.push_str(&format!(
-                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12" fill="{}">{}</text>"#,
-                    mx, my, color, xml_escape(&edge.label),
+                    r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12" fill="#4c4f69">{}</text>"##,
+                    mx, my, xml_escape(&edge.label),
                 ));
                 svg.push('\n');
             }
@@ -381,13 +620,13 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
             svg_crow_foot(&mut svg, sx, sy, tx, ty, edge.source_cardinality, &color, ew, true);
             svg_crow_foot(&mut svg, sx, sy, tx, ty, edge.target_cardinality, &color, ew, false);
 
-            // Source/target text labels
+            // Source/target text labels — use accessible dark color (#4c4f69) for WCAG AA contrast on white
             if !edge.source_label.is_empty() {
                 let lx = sx + (tx - sx) * 0.08;
                 let ly = sy + (ty - sy) * 0.08 - 10.0;
                 svg.push_str(&format!(
-                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="{}">{}</text>"#,
-                    lx, ly, color, xml_escape(&edge.source_label),
+                    r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#4c4f69">{}</text>"##,
+                    lx, ly, xml_escape(&edge.source_label),
                 ));
                 svg.push('\n');
             }
@@ -395,11 +634,82 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                 let lx = sx + (tx - sx) * 0.92;
                 let ly = sy + (ty - sy) * 0.92 - 10.0;
                 svg.push_str(&format!(
-                    r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="{}">{}</text>"#,
-                    lx, ly, color, xml_escape(&edge.target_label),
+                    r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#4c4f69">{}</text>"##,
+                    lx, ly, xml_escape(&edge.target_label),
                 ));
                 svg.push('\n');
             }
+        }
+    }
+
+    // Swimlane dividers: horizontal separator lines + lane labels
+    if doc.layout_mode == LayoutMode::Swimlane {
+        use std::collections::HashMap;
+        let canonical_lanes = &doc.timeline_lanes;
+        let mut lane_order: Vec<String> = Vec::new();
+        let mut lane_y_min: HashMap<String, f32> = HashMap::new();
+        let mut lane_y_max: HashMap<String, f32> = HashMap::new();
+
+        for node in &doc.nodes {
+            let lane = match &node.timeline_lane {
+                Some(l) if !l.is_empty() => l.clone(),
+                _ => continue,
+            };
+            let ny = node.position[1] - min_y;
+            let nh = node.size[1];
+            let entry_min = lane_y_min.entry(lane.clone()).or_insert(f32::MAX);
+            *entry_min = entry_min.min(ny);
+            let entry_max = lane_y_max.entry(lane.clone()).or_insert(f32::MIN);
+            *entry_max = entry_max.max(ny + nh);
+            if !lane_order.contains(&lane) {
+                lane_order.push(lane);
+            }
+        }
+
+        let ordered: Vec<&String> = if !canonical_lanes.is_empty() {
+            let mut v: Vec<&String> = canonical_lanes
+                .iter()
+                .filter(|l| lane_y_min.contains_key(l.as_str()))
+                .collect();
+            for l in &lane_order {
+                if !canonical_lanes.contains(l) {
+                    v.push(l);
+                }
+            }
+            v
+        } else {
+            lane_order.iter().collect()
+        };
+
+        for (i, lane) in ordered.iter().enumerate() {
+            if i > 0 {
+                let prev = &ordered[i - 1];
+                let prev_max = lane_y_max.get(prev.as_str()).copied().unwrap_or(0.0);
+                let curr_min = lane_y_min.get(lane.as_str()).copied().unwrap_or(0.0);
+                let div_y = (prev_max + curr_min) / 2.0;
+                svg.push_str(&format!(
+                    r##"<line x1="0" y1="{:.1}" x2="{}" y2="{:.1}" stroke="#969696" stroke-width="1" stroke-dasharray="6,4" stroke-opacity="0.5"/>"##,
+                    div_y, width.ceil() as i32, div_y,
+                ));
+                svg.push('\n');
+            }
+            // Lane label on the left
+            let y_min = lane_y_min.get(lane.as_str()).copied().unwrap_or(0.0);
+            let y_max = lane_y_max.get(lane.as_str()).copied().unwrap_or(0.0);
+            let label_y = (y_min + y_max) / 2.0;
+            let label_x = 6.0;
+            let lw = lane.len() as f32 * 7.0 + 16.0;
+            let lh = 20.0;
+            svg.push_str(&format!(
+                r##"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="4" ry="4" fill="#1e1e2e" fill-opacity="0.78"/>"##,
+                label_x - 2.0, label_y - lh / 2.0, lw, lh,
+            ));
+            svg.push('\n');
+            svg.push_str(&format!(
+                r##"<text x="{:.1}" y="{:.1}" font-family="sans-serif" font-size="11" fill="#b4befe" font-weight="bold">{}</text>"##,
+                label_x + 6.0, label_y + 4.0, xml_escape(lane),
+            ));
+            svg.push('\n');
         }
     }
 
@@ -748,6 +1058,27 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                     ));
                     svg.push('\n');
                 }
+
+                // Tag badge (small colored pill below label)
+                if let Some(tag) = &node.tag {
+                    let tag_rgba = tag.color();
+                    let tag_fill = rgba_to_svg_color(tag_rgba);
+                    let tag_text = tag.label();
+                    let badge_w = tag_text.len() as f32 * 7.0 + 12.0;
+                    let badge_h = 16.0;
+                    let badge_x = nx + nw / 2.0 - badge_w / 2.0;
+                    let badge_y = ny + nh / 2.0 + node.style.font_size * 0.6;
+                    svg.push_str(&format!(
+                        r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="8" ry="8" fill="{}" fill-opacity="0.85"/>"#,
+                        badge_x, badge_y, badge_w, badge_h, tag_fill,
+                    ));
+                    svg.push('\n');
+                    svg.push_str(&format!(
+                        r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="10" fill="#1e1e2e" font-weight="bold">{}</text>"##,
+                        badge_x + badge_w / 2.0, badge_y + badge_h / 2.0, xml_escape(tag_text),
+                    ));
+                    svg.push('\n');
+                }
             }
             NodeKind::StickyNote { text, .. } => {
                 svg.push_str(&format!(
@@ -833,6 +1164,7 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
 
 /// Render a crow's foot cardinality symbol in SVG at an edge endpoint.
 /// If `is_source` is true, symbol is at (sx,sy); otherwise at (tx,ty).
+#[allow(clippy::too_many_arguments)]
 fn svg_crow_foot(
     svg: &mut String,
     sx: f32, sy: f32, tx: f32, ty: f32,

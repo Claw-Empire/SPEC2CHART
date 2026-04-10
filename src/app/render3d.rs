@@ -826,9 +826,7 @@ impl FlowchartApp {
                     egui::CursorIcon::Grab
                 } else if let Some(handle) = hovering_resize {
                     Self::resize_cursor(handle)
-                } else if hovering_port {
-                    egui::CursorIcon::Crosshair
-                } else if self.tool == Tool::Connect {
+                } else if hovering_port || self.tool == Tool::Connect {
                     egui::CursorIcon::Crosshair
                 } else if hovered_node_id.is_some() {
                     egui::CursorIcon::PointingHand
@@ -940,7 +938,7 @@ impl FlowchartApp {
                     let r =
                         PORT_RADIUS * proj.depth_scale.sqrt().clamp(0.5, 2.0);
                     let hovered = pointer_pos
-                        .map_or(false, |m| (m - screen_port).length() < r * 3.0);
+                        .is_some_and(|m| (m - screen_port).length() < r * 3.0);
                     if hovered {
                         painter.circle_filled(screen_port, r * 1.3, self.theme.accent);
                         painter.circle_stroke(
@@ -1085,7 +1083,7 @@ impl FlowchartApp {
                 Pos2::new(start_x, y),
                 Vec2::new(fit_btn_w, btn_h),
             );
-            let fit_hovered = pointer.map_or(false, |p| fit_rect.contains(p));
+            let fit_hovered = pointer.is_some_and(|p| fit_rect.contains(p));
             let fit_bg = if fit_hovered {
                 Color32::from_rgba_premultiplied(137, 180, 250, 200)
             } else {
@@ -1125,7 +1123,7 @@ impl FlowchartApp {
                 let target_pitch = self.camera3d.anim_target.map(|a| a.pitch).unwrap_or(self.camera3d.pitch);
                 let is_active = (target_pitch - preset_pitch).abs() < 0.05
                     && (target_yaw - preset_yaw).abs() < 0.05;
-                let hovered = pointer.map_or(false, |p| btn_rect.contains(p));
+                let hovered = pointer.is_some_and(|p| btn_rect.contains(p));
                 let bg = if is_active {
                     Color32::from_rgba_premultiplied(139, 213, 202, 200)
                 } else if hovered {
@@ -1402,10 +1400,10 @@ impl FlowchartApp {
         }
 
         // Status toast
-        if let Some((ref msg, time)) = self.status_message {
+        if let Some((ref msg, time, _level)) = self.status_message {
             let elapsed = time.elapsed().as_secs_f32();
             if elapsed < 2.0 {
-                let alpha = ((2.0 - elapsed) * 255.0).min(255.0) as u8;
+                let alpha = ((2.0 - elapsed) * 255.0).min(255.0_f32) as u8;
                 let toast_pos =
                     Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 40.0);
                 painter.text(
@@ -1429,6 +1427,7 @@ impl FlowchartApp {
     // 3D node rendering
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_node_3d(
         &self,
         node: &Node,
@@ -1917,7 +1916,7 @@ impl FlowchartApp {
 
         // Label (billboard)
         let label_text = node.display_label();
-        let font_size = (node.style.font_size * scale).max(7.0).min(24.0);
+        let font_size = (node.style.font_size * scale).clamp(7.0, 24.0);
         if font_size >= 7.0 && !label_text.is_empty() {
             let text_color = {
                 let c = node.style.text_color;
@@ -2075,7 +2074,7 @@ impl FlowchartApp {
             let c = edge.style.color;
             Color32::from_rgba_premultiplied(c[0], c[1], c[2], alpha)
         };
-        let width = (edge.style.width * avg_scale.sqrt()).max(0.5).min(5.0);
+        let width = (edge.style.width * avg_scale.sqrt()).clamp(0.5, 5.0);
 
         let offset = 60.0 * avg_scale;
         let (cp1, cp2) = control_points_for_side(

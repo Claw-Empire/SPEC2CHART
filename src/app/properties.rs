@@ -803,6 +803,7 @@ impl FlowchartApp {
             ui.label(egui::RichText::new("Quick Styles").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
             // (label, fill, border, text, shadow, bold)
+            #[allow(clippy::type_complexity)]
             let quick_styles: &[(&str, [u8;4], [u8;4], [u8;4], bool, bool)] = &[
                 ("Primary",   [137, 180, 250, 255], [100, 150, 220, 255], [30, 30, 46, 255],  true,  true),
                 ("Success",   [166, 227, 161, 255], [120, 190, 115, 255], [30, 30, 46, 255],  false, false),
@@ -843,6 +844,7 @@ impl FlowchartApp {
             ui.label(egui::RichText::new("Color Themes").size(11.0).color(theme.text_secondary).strong());
             ui.add_space(4.0);
             // Each entry: (name, fill_rgba, border_rgba, text_rgba)
+            #[allow(clippy::type_complexity)]
             let themes: &[(&str, [u8;4], [u8;4], [u8;4])] = &[
                 ("Default",  [49, 50, 68, 255],    [69, 71, 90, 255],     [205, 214, 244, 255]),
                 ("Ocean",    [30, 102, 140, 255],   [87, 189, 220, 255],   [240, 250, 255, 255]),
@@ -1244,7 +1246,7 @@ impl FlowchartApp {
         // Apply quick style history push outside the borrow
         if let Some(style_name) = applied_quick_style {
             self.history.push(&self.document);
-            self.status_message = Some((format!("{} style applied", style_name), std::time::Instant::now()));
+            self.set_status(format!("{} style applied", style_name), super::StatusLevel::Success);
         }
 
         // Timeline section — Period/Lane dropdowns (only when timeline_mode is active)
@@ -1509,7 +1511,7 @@ impl FlowchartApp {
         }
     }
 
-    fn draw_multi_selection_tools(&mut self, ui: &mut egui::Ui, sel_nodes: usize, total: usize) {
+    fn draw_multi_selection_tools(&mut self, ui: &mut egui::Ui, sel_nodes: usize, _total: usize) {
         let theme = self.theme.clone();
         let sel_edges = self.selection.edge_ids.len();
         // Descriptive header
@@ -1680,7 +1682,7 @@ impl FlowchartApp {
             for stage in &doc_sections {
                 // Highlight if all selected nodes are in this section
                 let all_in = self.selection.node_ids.iter().all(|id| {
-                    self.document.find_node(id).map_or(false, |n| &n.section_name == stage)
+                    self.document.find_node(id).is_some_and(|n| &n.section_name == stage)
                 });
                 let btn = egui::RichText::new(stage.as_str()).size(10.5);
                 let btn = if all_in { btn.strong().color(egui::Color32::from_rgb(166, 227, 161)) } else { btn };
@@ -1758,7 +1760,7 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some((format!("Assigned: {} ({} nodes)", assignee, ids.len()), std::time::Instant::now()));
+                self.set_status(format!("Assigned: {} ({} nodes)", assignee, ids.len()), super::StatusLevel::Info);
                 self.bulk_assign_buf.clear();
             } else if prev != self.bulk_assign_buf {
                 // typing — no action
@@ -1793,7 +1795,7 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some((format!("Due: {} ({} nodes)", due, ids.len()), std::time::Instant::now()));
+                self.set_status(format!("Due: {} ({} nodes)", due, ids.len()), super::StatusLevel::Info);
                 self.bulk_due_buf.clear();
             } else if prev != self.bulk_due_buf { }
         }

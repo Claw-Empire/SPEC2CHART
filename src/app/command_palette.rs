@@ -105,6 +105,15 @@ enum PaletteAction {
     SelectEdgesOfSelection,
     CopyLabelsToClipboard,
     OpenRecentFile(usize),
+    ToggleStatsPanel,
+    ApplyThemeOcean,
+    ApplyThemeForest,
+    ApplyThemeSunset,
+    ApplyThemeMonochrome,
+    ApplyThemeNeon,
+    ApplyThemeCorporate,
+    ApplyThemePastel,
+    ApplyThemeDefault,
 }
 
 impl FlowchartApp {
@@ -361,7 +370,7 @@ impl FlowchartApp {
 
             PaletteAction::DeleteSelected => {
                 let node_ids: Vec<crate::model::NodeId> = self.selection.node_ids.iter()
-                    .filter(|id| !self.document.find_node(id).map_or(false, |n| n.locked))
+                    .filter(|id| !self.document.find_node(id).is_some_and(|n| n.locked))
                     .copied().collect();
                 let edge_ids: Vec<crate::model::EdgeId> = self.selection.edge_ids.iter().copied().collect();
                 for id in &node_ids { self.document.remove_node(id); }
@@ -372,7 +381,7 @@ impl FlowchartApp {
                     if !edge_ids.is_empty() { parts.push(format!("{} edge{}", edge_ids.len(), if edge_ids.len() == 1 { "" } else { "s" })); }
                     self.selection.clear();
                     self.history.push(&self.document);
-                    self.status_message = Some((format!("Deleted {} — Cmd+Z to undo", parts.join(", ")), std::time::Instant::now()));
+                    self.set_status(format!("Deleted {} — Cmd+Z to undo", parts.join(", ")), super::StatusLevel::Info);
                 }
             }
 
@@ -403,7 +412,7 @@ impl FlowchartApp {
                         for _ in 0..8 {
                             let snap_r = egui::Rect::from_min_size(candidate, node.size_vec());
                             if !self.document.nodes.iter().any(|n| n.rect().expand(-4.0).intersects(snap_r)) { break; }
-                            candidate = candidate + base_offset;
+                            candidate += base_offset;
                         }
                         node.set_pos(candidate);
                         self.selection.node_ids.insert(node.id);
@@ -411,7 +420,7 @@ impl FlowchartApp {
                     }
                     let n = self.selection.node_ids.len();
                     self.history.push(&self.document);
-                    self.status_message = Some((format!("Duplicated {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                    self.set_status(format!("Duplicated {} node{}", n, if n == 1 { "" } else { "s" }), super::StatusLevel::Success);
                 }
             }
 
@@ -419,7 +428,7 @@ impl FlowchartApp {
                 if let Some(id) = self.selection.node_ids.iter().next().copied() {
                     if let Some(n) = self.document.find_node(&id) {
                         self.style_clipboard = Some(n.style.clone());
-                        self.status_message = Some(("Style copied".to_string(), std::time::Instant::now()));
+                        self.set_status("Style copied", super::StatusLevel::Success);
                     }
                 }
             }
@@ -433,7 +442,7 @@ impl FlowchartApp {
                     }
                     if !ids.is_empty() {
                         self.history.push(&self.document);
-                        self.status_message = Some(("Style pasted".to_string(), std::time::Instant::now()));
+                        self.set_status("Style pasted", super::StatusLevel::Success);
                     }
                 }
             }
@@ -445,7 +454,7 @@ impl FlowchartApp {
                 self.layout_targets.clear();
                 for node in &doc_clone.nodes { self.layout_targets.insert(node.id, node.position); }
                 self.pending_fit = true;
-                self.status_message = Some(("Layout animating…".to_string(), std::time::Instant::now()));
+                self.set_status("Layout animating…", super::StatusLevel::Info);
             }
 
             PaletteAction::ToggleGrid             => { self.show_grid = !self.show_grid; }
@@ -453,9 +462,9 @@ impl FlowchartApp {
             PaletteAction::ToggleFocusMode        => {
                 self.focus_mode = !self.focus_mode;
                 if self.focus_mode {
-                    self.status_message = Some(("Focus mode on — unrelated nodes dimmed".to_string(), std::time::Instant::now()));
+                    self.set_status("Focus mode on — unrelated nodes dimmed", super::StatusLevel::Info);
                 } else {
-                    self.status_message = Some(("Focus mode off".to_string(), std::time::Instant::now()));
+                    self.set_status("Focus mode off", super::StatusLevel::Info);
                 }
             }
             PaletteAction::TogglePresentation     => { self.presentation_mode = !self.presentation_mode; }
@@ -475,16 +484,16 @@ impl FlowchartApp {
             PaletteAction::ExportMermaid          => {
                 let mermaid = crate::app::export_mermaid::to_mermaid(&self.document);
                 ctx.copy_text(mermaid);
-                self.status_message = Some(("Mermaid copied to clipboard".to_string(), std::time::Instant::now()));
+                self.set_status("Mermaid copied to clipboard", super::StatusLevel::Success);
             }
             PaletteAction::ToggleTimelineMode => {
                 self.document.timeline_mode = !self.document.timeline_mode;
                 if self.document.timeline_mode {
                     crate::specgraph::layout::auto_layout(&mut self.document);
                     self.pending_fit = true;
-                    self.status_message = Some(("Timeline mode on".to_string(), std::time::Instant::now()));
+                    self.set_status("Timeline mode on", super::StatusLevel::Info);
                 } else {
-                    self.status_message = Some(("Timeline mode off".to_string(), std::time::Instant::now()));
+                    self.set_status("Timeline mode off", super::StatusLevel::Info);
                 }
                 self.history.push(&self.document);
             }
@@ -496,10 +505,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Hypothesis map loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Hypothesis map loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -511,10 +520,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("SWOT analysis loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("SWOT analysis loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -526,10 +535,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Roadmap template loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Roadmap template loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -541,10 +550,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Force field loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Force field loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -556,10 +565,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Lean canvas loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Lean canvas loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -571,10 +580,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("OKR tree loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("OKR tree loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -586,10 +595,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("5 Whys loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("5 Whys loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -601,10 +610,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Impact/Effort matrix loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Impact/Effort matrix loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -616,10 +625,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Customer journey loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Customer journey loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -631,10 +640,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Decision record loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Decision record loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -646,10 +655,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Empathy map loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Empathy map loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -661,10 +670,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Value proposition canvas loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Value proposition canvas loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -676,10 +685,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Fishbone diagram loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Fishbone diagram loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -691,10 +700,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("PESTLE analysis loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("PESTLE analysis loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -706,10 +715,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Mind map loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Mind map loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -721,10 +730,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Premortem analysis loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Premortem analysis loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -736,10 +745,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Rose-Bud-Thorn retro loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Rose-Bud-Thorn retro loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -751,10 +760,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Double Diamond loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Double Diamond loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -766,10 +775,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Assumption Map loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Assumption Map loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -781,10 +790,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Business Model Canvas loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Business Model Canvas loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -796,10 +805,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Hypothesis Validation Canvas loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Hypothesis Validation Canvas loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -811,10 +820,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("User Story Map loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("User Story Map loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -826,10 +835,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("ICE Scoring Matrix loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("ICE Scoring Matrix loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -841,10 +850,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Jobs To Be Done Canvas loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Jobs To Be Done Canvas loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -856,10 +865,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Causal Loop Diagram loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Causal Loop Diagram loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -871,10 +880,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Experiment Board loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Experiment Board loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -886,10 +895,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Theory of Change loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Theory of Change loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -901,10 +910,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Competitive Analysis loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Competitive Analysis loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -916,10 +925,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("What? So What? Now What? loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("What? So What? Now What? loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -931,10 +940,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("2×2 Prioritization Matrix loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("2×2 Prioritization Matrix loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -946,10 +955,10 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Design Sprint (5-Day) loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Design Sprint (5-Day) loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
@@ -961,88 +970,88 @@ impl FlowchartApp {
                         self.selection.clear();
                         self.history.push(&self.document);
                         self.pending_fit = true;
-                        self.status_message = Some(("Problem/Solution Fit loaded".to_string(), std::time::Instant::now()));
+                        self.set_status("Problem/Solution Fit loaded", super::StatusLevel::Success);
                     }
                     Err(e) => {
-                        self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                        self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error);
                     }
                 }
             }
             PaletteAction::LoadSupportTicketFlowTemplate => {
                 let spec = include_str!("../../assets/examples/support_ticket_flow.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Ticket Flow loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Support Ticket Flow loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadIncidentResponseTemplate => {
                 let spec = include_str!("../../assets/examples/incident_response.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Incident Response Runbook loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Incident Response Runbook loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadSupportEscalationMatrixTemplate => {
                 let spec = include_str!("../../assets/examples/support_escalation_matrix.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Escalation Matrix loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Support Escalation Matrix loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadBugTriageTemplate => {
                 let spec = include_str!("../../assets/examples/bug_triage.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Bug Triage Process loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Bug Triage Process loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadKnowledgeBaseStructureTemplate => {
                 let spec = include_str!("../../assets/examples/knowledge_base_structure.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Knowledge Base Structure loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Knowledge Base Structure loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadVoiceOfCustomerTemplate => {
                 let spec = include_str!("../../assets/examples/voice_of_customer.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Voice of Customer loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Voice of Customer loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadCustomerOnboardingTemplate => {
                 let spec = include_str!("../../assets/examples/customer_onboarding.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Customer Onboarding Journey loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Customer Onboarding Journey loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadSupportHealthDashboardTemplate => {
                 let spec = include_str!("../../assets/examples/support_health_dashboard.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Health Dashboard loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Support Health Dashboard loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadPostmortemTemplate => {
                 let spec = include_str!("../../assets/examples/postmortem.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Postmortem template loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Postmortem template loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadSupportSLAMatrixTemplate => {
                 let spec = include_str!("../../assets/examples/support_sla_matrix.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support SLA Matrix loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Support SLA Matrix loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::LoadSupportQueueTemplate => {
                 let spec = include_str!("../../assets/examples/support_queue.spec");
                 match crate::specgraph::hrf::parse_hrf(spec) {
-                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.status_message = Some(("Support Queue kanban loaded".to_string(), std::time::Instant::now())); }
-                    Err(e) => { self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now())); }
+                    Ok(doc) => { self.document = doc; self.selection.clear(); self.history.push(&self.document); self.pending_fit = true; self.set_status("Support Queue kanban loaded", super::StatusLevel::Success); }
+                    Err(e) => { self.set_status(format!("Parse error: {e}"), super::StatusLevel::Error); }
                 }
             }
             PaletteAction::InvertSelection => {
@@ -1050,7 +1059,7 @@ impl FlowchartApp {
                 let currently_selected = self.selection.node_ids.clone();
                 self.selection.node_ids = all_ids.difference(&currently_selected).copied().collect();
                 let n = self.selection.node_ids.len();
-                self.status_message = Some((format!("Selection inverted — {} node{} selected", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                self.set_status(format!("Selection inverted — {} node{} selected", n, if n == 1 { "" } else { "s" }), super::StatusLevel::Info);
             }
             PaletteAction::SelectSimilarShape => {
                 if let Some(&ref_id) = self.selection.node_ids.iter().next() {
@@ -1068,7 +1077,7 @@ impl FlowchartApp {
                                 }
                             }
                             let n = self.selection.node_ids.len();
-                            self.status_message = Some((format!("Selected {} {} node{}", n, shape_name, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                            self.set_status(format!("Selected {} {} node{}", n, shape_name, if n == 1 { "" } else { "s" }), super::StatusLevel::Info);
                         }
                     }
                 }
@@ -1083,7 +1092,7 @@ impl FlowchartApp {
                         }
                         let tag_label = ref_tag.map(|t| t.label()).unwrap_or("no tag");
                         let n = self.selection.node_ids.len();
-                        self.status_message = Some((format!("Selected {} node{} with tag \"{}\"", n, if n == 1 { "" } else { "s" }, tag_label), std::time::Instant::now()));
+                        self.set_status(format!("Selected {} node{} with tag \"{}\"", n, if n == 1 { "" } else { "s" }, tag_label), super::StatusLevel::Info);
                     }
                 }
             }
@@ -1097,7 +1106,7 @@ impl FlowchartApp {
                         }
                         let sec_label = if ref_section.is_empty() { "no section" } else { &ref_section };
                         let n = self.selection.node_ids.len();
-                        self.status_message = Some((format!("Selected {} node{} in \"{}\"", n, if n == 1 { "" } else { "s" }, sec_label), std::time::Instant::now()));
+                        self.set_status(format!("Selected {} node{} in \"{}\"", n, if n == 1 { "" } else { "s" }, sec_label), super::StatusLevel::Info);
                     }
                 }
             }
@@ -1116,7 +1125,7 @@ impl FlowchartApp {
                 if frames > 0 { msg.push_str(&format!(", {} frames", frames)); }
                 if !sections.is_empty() { msg.push_str(&format!(", {} sections", sections.len())); }
                 if orphans > 0 { msg.push_str(&format!(", {} unconnected", orphans)); }
-                self.status_message = Some((msg, std::time::Instant::now()));
+                self.set_status(msg, super::StatusLevel::Info);
             }
             PaletteAction::CopyLabelsToClipboard => {
                 let labels: Vec<String> = if self.selection.node_ids.is_empty() {
@@ -1128,12 +1137,12 @@ impl FlowchartApp {
                         .collect()
                 };
                 if labels.is_empty() {
-                    self.status_message = Some(("No nodes to copy labels from".to_string(), std::time::Instant::now()));
+                    self.set_status("No nodes to copy labels from", super::StatusLevel::Warning);
                 } else {
                     let text = labels.join("\n");
                     ctx.copy_text(text);
                     let n = labels.len();
-                    self.status_message = Some((format!("Copied {} label{} to clipboard", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                    self.set_status(format!("Copied {} label{} to clipboard", n, if n == 1 { "" } else { "s" }), super::StatusLevel::Success);
                 }
             }
             PaletteAction::SelectAllEdges => {
@@ -1142,12 +1151,12 @@ impl FlowchartApp {
                     self.selection.edge_ids.insert(edge.id);
                 }
                 let n = self.selection.edge_ids.len();
-                self.status_message = Some((format!("Selected all {} edge{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                self.set_status(format!("Selected all {} edge{}", n, if n == 1 { "" } else { "s" }), super::StatusLevel::Info);
             }
             PaletteAction::SelectEdgesOfSelection => {
                 let sel_nodes = &self.selection.node_ids;
                 if sel_nodes.is_empty() {
-                    self.status_message = Some(("Select nodes first, then use this to select their edges".to_string(), std::time::Instant::now()));
+                    self.set_status("Select nodes first, then use this to select their edges", super::StatusLevel::Warning);
                 } else {
                     self.selection.edge_ids.clear();
                     for edge in &self.document.edges {
@@ -1157,16 +1166,16 @@ impl FlowchartApp {
                     }
                     let n = self.selection.edge_ids.len();
                     if n == 0 {
-                        self.status_message = Some(("No edges between selected nodes".to_string(), std::time::Instant::now()));
+                        self.set_status("No edges between selected nodes", super::StatusLevel::Info);
                     } else {
-                        self.status_message = Some((format!("Selected {} edge{} between nodes", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                        self.set_status(format!("Selected {} edge{} between nodes", n, if n == 1 { "" } else { "s" }), super::StatusLevel::Info);
                     }
                 }
             }
             PaletteAction::ResetView => {
                 self.zoom_target = 1.0;
                 self.pan_target = Some([0.0, 0.0]);
-                self.status_message = Some(("View reset to 100% — Cmd+1 to fit all".to_string(), std::time::Instant::now()));
+                self.set_status("View reset to 100% — Cmd+1 to fit all", super::StatusLevel::Info);
             }
             PaletteAction::SelectOrphans => {
                 self.selection.clear();
@@ -1180,9 +1189,9 @@ impl FlowchartApp {
                 }
                 let n = self.selection.node_ids.len();
                 if n == 0 {
-                    self.status_message = Some(("All nodes are connected — no orphans found".to_string(), std::time::Instant::now()));
+                    self.set_status("All nodes are connected — no orphans found", super::StatusLevel::Info);
                 } else {
-                    self.status_message = Some((format!("Selected {} unconnected node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                    self.set_status(format!("Selected {} unconnected node{}", n, if n == 1 { "" } else { "s" }), super::StatusLevel::Info);
                 }
             }
             PaletteAction::RandomizeColors => {
@@ -1200,7 +1209,7 @@ impl FlowchartApp {
                 ];
                 let ids: Vec<crate::model::NodeId> = self.selection.node_ids.iter().copied().collect();
                 if ids.is_empty() {
-                    self.status_message = Some(("Select nodes first, then randomize".to_string(), std::time::Instant::now()));
+                    self.set_status("Select nodes first, then randomize", super::StatusLevel::Warning);
                 } else {
                     for (i, id) in ids.iter().enumerate() {
                         if let Some(node) = self.document.find_node_mut(id) {
@@ -1211,7 +1220,7 @@ impl FlowchartApp {
                     }
                     self.history.push(&self.document);
                     let n = ids.len();
-                    self.status_message = Some((format!("Applied {} distinct colors", n.min(palette.len())), std::time::Instant::now()));
+                    self.set_status(format!("Applied {} distinct colors", n.min(palette.len())), super::StatusLevel::Success);
                 }
             }
             PaletteAction::CollapseAll => {
@@ -1225,7 +1234,7 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some((format!("Collapsed {} nodes", count), std::time::Instant::now()));
+                self.set_status(format!("Collapsed {} nodes", count), super::StatusLevel::Info);
             }
             PaletteAction::ExpandAll => {
                 let mut count = 0;
@@ -1239,7 +1248,7 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some((format!("Expanded {} nodes", count), std::time::Instant::now()));
+                self.set_status(format!("Expanded {} nodes", count), super::StatusLevel::Info);
             }
             PaletteAction::OpenRecentFile(idx) => {
                 // SAFETY: idx was assigned from recent_entries.iter().enumerate() in this same frame,
@@ -1249,6 +1258,19 @@ impl FlowchartApp {
                     self.open_recent_file(path);
                 }
             }
+            PaletteAction::ToggleStatsPanel => {
+                self.show_stats_panel = !self.show_stats_panel;
+                let msg = if self.show_stats_panel { "Statistics Panel On" } else { "Statistics Panel Off" };
+                self.set_status(msg, super::StatusLevel::Info);
+            }
+            PaletteAction::ApplyThemeDefault => self.apply_color_theme(super::ColorTheme::Default),
+            PaletteAction::ApplyThemeOcean => self.apply_color_theme(super::ColorTheme::Ocean),
+            PaletteAction::ApplyThemeForest => self.apply_color_theme(super::ColorTheme::Forest),
+            PaletteAction::ApplyThemeSunset => self.apply_color_theme(super::ColorTheme::Sunset),
+            PaletteAction::ApplyThemeMonochrome => self.apply_color_theme(super::ColorTheme::Monochrome),
+            PaletteAction::ApplyThemeNeon => self.apply_color_theme(super::ColorTheme::Neon),
+            PaletteAction::ApplyThemeCorporate => self.apply_color_theme(super::ColorTheme::Corporate),
+            PaletteAction::ApplyThemePastel => self.apply_color_theme(super::ColorTheme::Pastel),
         }
     }
 }
@@ -1351,5 +1373,15 @@ fn build_entries() -> Vec<PaletteEntry> {
         PaletteEntry { icon: "⇄",  label: "Find & Replace".into(),            category: "Search",  action: PaletteAction::OpenFindReplace },
         // Export
         PaletteEntry { icon: "⎘",  label: "Copy as Mermaid to clipboard".into(), category: "Export", action: PaletteAction::ExportMermaid },
+        // Statistics & Themes
+        PaletteEntry { icon: "📊", label: "Toggle diagram statistics panel (Cmd+I)".into(), category: "View", action: PaletteAction::ToggleStatsPanel },
+        PaletteEntry { icon: "🎨", label: "Theme: Default".into(),         category: "Theme", action: PaletteAction::ApplyThemeDefault },
+        PaletteEntry { icon: "🌊", label: "Theme: Ocean".into(),           category: "Theme", action: PaletteAction::ApplyThemeOcean },
+        PaletteEntry { icon: "🌲", label: "Theme: Forest".into(),          category: "Theme", action: PaletteAction::ApplyThemeForest },
+        PaletteEntry { icon: "🌅", label: "Theme: Sunset".into(),          category: "Theme", action: PaletteAction::ApplyThemeSunset },
+        PaletteEntry { icon: "⬛", label: "Theme: Monochrome".into(),      category: "Theme", action: PaletteAction::ApplyThemeMonochrome },
+        PaletteEntry { icon: "💡", label: "Theme: Neon".into(),            category: "Theme", action: PaletteAction::ApplyThemeNeon },
+        PaletteEntry { icon: "🏢", label: "Theme: Corporate".into(),       category: "Theme", action: PaletteAction::ApplyThemeCorporate },
+        PaletteEntry { icon: "🍭", label: "Theme: Pastel".into(),          category: "Theme", action: PaletteAction::ApplyThemePastel },
     ]
 }

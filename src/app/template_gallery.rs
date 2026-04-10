@@ -114,7 +114,7 @@ impl super::FlowchartApp {
                                 super::save_recent_files(&self.recent_files);
                             }
                             if let Some(msg) = not_found_msg {
-                                self.status_message = Some((msg, std::time::Instant::now()));
+                                self.set_status(msg, super::StatusLevel::Warning);
                             }
                             ui.add_space(16.0);
                         }

@@ -1,7 +1,7 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use crate::model::*;
 use super::FlowchartApp;
-use super::interaction::{control_points_for_side, cubic_bezier_point};
+use super::interaction::cubic_bezier_point;
 use super::theme::{PORT_RADIUS, to_color32};
 
 /// Infer a semantic watermark icon from node label keywords.
@@ -142,14 +142,14 @@ impl FlowchartApp {
                 painter.text(
                     center + Vec2::new(dot_r + 2.0, 0.0),
                     Align2::LEFT_CENTER,
-                    &format!("{}{}", short, suffix),
+                    format!("{}{}", short, suffix),
                     FontId::proportional(6.5),
                     to_color32(node.style.text_color).gamma_multiply(0.8),
                 );
             }
             return;
         }
-        let is_hovered = hover_pos.map_or(false, |hp| screen_rect.expand(6.0).contains(hp));
+        let is_hovered = hover_pos.is_some_and(|hp| screen_rect.expand(6.0).contains(hp));
 
         // Selection-confirmation flash: brief bright overlay when node is first selected
         if is_selected {
@@ -208,7 +208,7 @@ impl FlowchartApp {
                 } else {
                     5.0
                 };
-                let cr = CornerRadius::same((node.style.corner_radius as f32 + expand * 0.5) as u8);
+                let cr = CornerRadius::same((node.style.corner_radius + expand * 0.5) as u8);
                 painter.rect_stroke(
                     screen_rect.expand(expand),
                     cr,
@@ -236,7 +236,7 @@ impl FlowchartApp {
                 } else {
                     Color32::from_rgba_unmultiplied(120, 180, 255, 60)
                 };
-                let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + 0.5) as u8);
+                let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt() + 0.5) as u8);
                 let ring_width = (0.8 + (degree as f32 / 10.0).min(1.0) * 1.5).clamp(0.8, 2.3);
                 painter.rect_stroke(
                     screen_rect.expand(4.5),
@@ -253,7 +253,7 @@ impl FlowchartApp {
             // Slow breath: ~0.5 Hz, oscillates between 0.4 and 1.0
             let breath = ((time * std::f64::consts::PI).sin() as f32) * 0.3 + 0.7;
             let expand = 5.0 + breath * 3.0;
-            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + expand * 0.4) as u8);
+            let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt() + expand * 0.4) as u8);
             // Outer soft glow fill
             let glow_fill = Color32::from_rgba_unmultiplied(255, 185, 0, (breath * 22.0) as u8);
             painter.rect_filled(screen_rect.expand(expand + 3.0), cr, glow_fill);
@@ -286,7 +286,7 @@ impl FlowchartApp {
             // Fast urgent pulse: ~1.5 Hz
             let urgency = ((time * 3.0 * std::f64::consts::PI).sin() as f32) * 0.4 + 0.6;
             let expand = 3.0 + urgency * 2.5;
-            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + expand * 0.3) as u8);
+            let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt() + expand * 0.3) as u8);
             // Urgent red glow fill
             painter.rect_filled(screen_rect.expand(expand + 2.0), cr,
                 Color32::from_rgba_unmultiplied(243, 139, 168, (urgency * 18.0) as u8));
@@ -303,7 +303,7 @@ impl FlowchartApp {
             let time = painter.ctx().input(|i| i.time);
             let pulse = ((time * 1.6 * std::f64::consts::PI).sin() as f32) * 0.35 + 0.65;
             let expand = 2.5 + pulse * 1.5;
-            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + 2.0) as u8);
+            let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt() + 2.0) as u8);
             painter.rect_stroke(
                 screen_rect.expand(expand),
                 cr,
@@ -313,7 +313,7 @@ impl FlowchartApp {
             painter.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         } else if due_days_remaining == Some(1) && !node.is_frame {
             // Due tomorrow: static soft yellow ring (no pulse, just a gentle warning)
-            let cr = CornerRadius::same((node.style.corner_radius as f32 * self.viewport.zoom.sqrt() + 1.5) as u8);
+            let cr = CornerRadius::same((node.style.corner_radius * self.viewport.zoom.sqrt() + 1.5) as u8);
             painter.rect_stroke(
                 screen_rect.expand(2.0),
                 cr,
@@ -970,7 +970,7 @@ impl FlowchartApp {
                 let screen_port = self.viewport.canvas_to_screen(canvas_port);
                 let r = PORT_RADIUS * self.viewport.zoom.sqrt();
                 let port_hovered =
-                    hover_pos.map_or(false, |hp| (hp - screen_port).length() < r * 3.0);
+                    hover_pos.is_some_and(|hp| (hp - screen_port).length() < r * 3.0);
 
                 if port_hovered {
                     let glow_r = r * 2.5;
@@ -993,7 +993,7 @@ impl FlowchartApp {
                         let badge_r = 7.0_f32;
                         painter.circle_filled(badge_pos, badge_r, self.theme.accent);
                         painter.text(badge_pos, egui::Align2::CENTER_CENTER,
-                            &conn_count.to_string(),
+                            conn_count.to_string(),
                             egui::FontId::proportional(8.5),
                             self.theme.text_primary);
                     }
@@ -1072,7 +1072,7 @@ impl FlowchartApp {
             let glow_col = self.theme.selection_color;
             for i in 1u8..=3 {
                 let expand = i as f32 * 2.5 * self.viewport.zoom.sqrt();
-                let alpha = (60 - i * 18) as u8;
+                let alpha = 60 - i * 18 ;
                 let glow_rect = screen_rect.expand(expand);
                 painter.rect_stroke(
                     glow_rect,
@@ -1902,8 +1902,8 @@ impl FlowchartApp {
             let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
             let perp = Vec2::new(-dir.y, dir.x);
             let bend_screen = extra_bend * self.viewport.zoom;
-            cp1 = cp1 + perp * bend_screen;
-            cp2 = cp2 + perp * bend_screen;
+            cp1 += perp * bend_screen;
+            cp2 += perp * bend_screen;
         }
 
         // Edge draw-in animation: if this edge was recently created, clip the bezier
@@ -2175,7 +2175,7 @@ impl FlowchartApp {
             let t = painter.ctx().input(|i| i.time) as f32;
             // Two rings out of phase for a continuous pulse feel
             for phase in [0.0_f32, 0.5] {
-                let cycle = ((t * 1.2 + phase) % 1.0) as f32; // 0→1 loop
+                let cycle = (t * 1.2 + phase) % 1.0 ; // 0→1 loop
                 let ring_r = 6.0 + cycle * 14.0;
                 let alpha = ((1.0 - cycle) * 130.0) as u8;
                 let ring_color = Color32::from_rgba_unmultiplied(

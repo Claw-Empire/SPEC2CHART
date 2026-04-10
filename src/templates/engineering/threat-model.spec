@@ -3,17 +3,29 @@ title: Threat Model
 flow = TB
 
 ## Nodes
-- [user] User {person}
-- [browser] Browser {screen}
-- [waf] WAF {diamond}
-- [app] Application {rounded}
-- [db] Database {cylinder}
-- [attacker] Attacker {person} {fill:#cc3333}
+- [user] User {person} {fill:#89b4fa} {ok}
+  Legitimate end-user.
+- [attacker] Attacker {person} {fill:#f38ba8} {critical}
+  External threat actor.
+- [browser] Browser {screen} {fill:#cba6f7}
+  Client-side runtime.
+- [waf] WAF {diamond} {fill:#f9e2af} {wip}
+  Rate limit + filter rules.
+- [app] Application {rounded} {fill:#a6e3a1}
+  Business logic API.
+- [secrets] Secrets Vault {cylinder} {fill:#b4befe} {ok}
+  KMS-backed storage.
+- [db] Database {cylinder} {fill:#74c7ec}
+  Encrypted at rest.
+- [audit] Audit Log {document} {fill:#cba6f7} {info}
+  Tamper-evident trail.
 
 ## Flow
 user --> browser: interacts
+attacker --> browser: XSS attempt
+attacker --> waf: scan probes
 browser --> waf: HTTPS
 waf --> app: filtered
+app --> secrets: fetch creds
 app --> db: queries
-attacker --> browser: XSS attempt
-attacker --> app: injection attempt
+app --> audit: logs events

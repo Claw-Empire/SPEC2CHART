@@ -2,7 +2,7 @@ use egui::{
     Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2,
 };
 use crate::model::*;
-use super::{FlowchartApp, DragState, Tool, ResizeHandle};
+use super::{FlowchartApp, DragState, Tool, ResizeHandle, StatusLevel};
 use super::interaction::{control_points_for_side, cubic_bezier_point};
 use super::theme::{PORT_RADIUS, to_color32};
 
@@ -288,7 +288,7 @@ impl FlowchartApp {
                     } else {
                         // Click on chevron (▶) of a collapsed node → expand it
                         let is_collapsed = self.document.find_node(&node_id)
-                            .map_or(false, |n| n.collapsed);
+                            .is_some_and(|n| n.collapsed);
                         if is_collapsed {
                             let tl = self.document.find_node(&node_id)
                                 .map(|n| self.viewport.canvas_to_screen(n.pos()));
@@ -335,10 +335,7 @@ impl FlowchartApp {
                             self.selection.node_ids.insert(id);
                         }
                         if count > 0 {
-                            self.status_message = Some((
-                                format!("Selected {count} nodes in \"{section_name}\""),
-                                std::time::Instant::now(),
-                            ));
+                            self.set_status(format!("Selected {count} nodes in \"{section_name}\""), StatusLevel::Info);
                         }
                     } else if !cmd_held {
                         self.selection.clear();
@@ -374,11 +371,11 @@ impl FlowchartApp {
                     self.selection.select_node(node_id);
                     // Open inline canvas editor for editable label types
                     let current_label = self.document.find_node(&node_id)
-                        .and_then(|n| match &n.kind {
-                            NodeKind::Shape { label, .. } => Some(label.clone()),
-                            NodeKind::Text { content } => Some(content.clone()),
-                            NodeKind::Entity { name, .. } => Some(name.clone()),
-                            NodeKind::StickyNote { text, .. } => Some(text.clone()),
+                        .map(|n| match &n.kind {
+                            NodeKind::Shape { label, .. } => label.clone(),
+                            NodeKind::Text { content } => content.clone(),
+                            NodeKind::Entity { name, .. } => name.clone(),
+                            NodeKind::StickyNote { text, .. } => text.clone(),
                         });
                     if let Some(label) = current_label {
                         self.inline_node_edit = Some((node_id, label));
@@ -414,7 +411,7 @@ impl FlowchartApp {
                         self.selection.select_node(id);
                         self.inline_node_edit = Some((id, String::new()));
                         self.history.push(&self.document);
-                        self.status_message = Some(("New node — type to label it".to_string(), std::time::Instant::now()));
+                        self.set_status("New node — type to label it", StatusLevel::Success);
                     }
                 }
             }
@@ -571,7 +568,7 @@ impl FlowchartApp {
                 let hover_canvas = hover_pos.map(|p| self.viewport.screen_to_canvas(p));
 
                 // Connection highlight: dim edges not connected to hovered node
-                let is_connected_to_hover = hover_node_id.map_or(false, |hid| {
+                let is_connected_to_hover = hover_node_id.is_some_and(|hid| {
                     edge.source.node_id == hid || edge.target.node_id == hid
                 });
                 let should_dim = hover_node_id.is_some()
@@ -667,7 +664,7 @@ impl FlowchartApp {
                     // "p1 overdue", "@alice due:3", "@bob p2 section:Triage", etc.
                     // Activated when query has spaces and doesn't start with a colon-prefix.
                     if q.contains(' ') && !q.starts_with("status:") && !q.starts_with("section:") {
-                        let colon_before_space = q.find(':').map_or(false, |ci| q.find(' ').map_or(false, |si| ci < si));
+                        let colon_before_space = q.find(':').is_some_and(|ci| q.find(' ').is_some_and(|si| ci < si));
                         if !colon_before_space {
                             let tokens: Vec<&str> = q.split_whitespace().collect();
                             if tokens.len() >= 2 {
@@ -680,11 +677,11 @@ impl FlowchartApp {
                                         "p4" => n.priority == 4,
                                         "overdue" | "late" | "past-due" | "sla-breach" => {
                                             n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
-                                                .map_or(false, |d| d.trim() <= today_str.as_str() && d.len() >= 8)
+                                                .is_some_and(|d| d.trim() <= today_str.as_str() && d.len() >= 8)
                                         }
                                         "upcoming" => {
                                             n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
-                                                .map_or(false, |d| d.trim() > today_str.as_str())
+                                                .is_some_and(|d| d.trim() > today_str.as_str())
                                         }
                                         "linked" => self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
                                         "orphan" | "unlinked" => !self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
@@ -705,9 +702,9 @@ impl FlowchartApp {
                                                 if n.created_date.is_empty() { return false; }
                                                 let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0);
                                                 if let Some(lt_q) = age_q.strip_prefix('<') {
-                                                    return lt_q.parse::<i32>().map_or(false, |nd| age < nd);
+                                                    return lt_q.parse::<i32>().is_ok_and(|nd| age < nd);
                                                 }
-                                                return age_q.parse::<i32>().map_or(false, |nd| age >= nd);
+                                                return age_q.parse::<i32>().is_ok_and(|nd| age >= nd);
                                             }
                                             if let Some(at_q) = term.strip_prefix('@') {
                                                 return n.sublabel.to_lowercase().contains(at_q);
@@ -725,9 +722,9 @@ impl FlowchartApp {
                                                 let date_opt = n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 ").map(|s| s.trim().to_string()));
                                                 return match due_q {
                                                     "today" => date_opt.as_deref() == Some(today_str.as_str()),
-                                                    "overdue" | "late" => date_opt.as_deref().map_or(false, |d| d <= today_str.as_str()),
-                                                    _ => due_q.parse::<i32>().map_or(false, |nd| {
-                                                        date_opt.as_ref().map_or(false, |d| super::render::iso_days_remaining_pub(d.trim(), &today_str) <= nd)
+                                                    "overdue" | "late" => date_opt.as_deref().is_some_and(|d| d <= today_str.as_str()),
+                                                    _ => due_q.parse::<i32>().is_ok_and(|nd| {
+                                                        date_opt.as_ref().is_some_and(|d| super::render::iso_days_remaining_pub(d.trim(), &today_str) <= nd)
                                                     }),
                                                 };
                                             }
@@ -773,7 +770,7 @@ impl FlowchartApp {
                             "p4" | "low" => n.priority == 4,
                             "overdue" | "late" | "past-due" =>
                                 n.sublabel.split('\n').find_map(|l| l.strip_prefix("📅 "))
-                                    .map_or(false, |d| d.trim() <= today_str.as_str() && d.len() >= 8),
+                                    .is_some_and(|d| d.trim() <= today_str.as_str() && d.len() >= 8),
                             "linked" =>
                                 self.document.edges.iter().any(|e| e.source.node_id == n.id || e.target.node_id == n.id),
                             "orphan" | "unlinked" =>
@@ -885,7 +882,7 @@ impl FlowchartApp {
                                 return false;
                             }
                             "overdue" | "past-due" | "late" => {
-                                return date_str_opt.as_deref().map_or(false, |d| d <= today_str.as_str() && d.len() >= 8);
+                                return date_str_opt.as_deref().is_some_and(|d| d <= today_str.as_str() && d.len() >= 8);
                             }
                             _ => {
                                 // due:N → due within N days (e.g. due:3 = due in ≤3 days, including overdue)
@@ -897,7 +894,7 @@ impl FlowchartApp {
                                     return false;
                                 }
                                 // fallback: substring match on date string
-                                return date_str_opt.map_or(false, |d| d.to_lowercase().contains(&tgt));
+                                return date_str_opt.is_some_and(|d| d.to_lowercase().contains(&tgt));
                             }
                         }
                     }
@@ -950,30 +947,30 @@ impl FlowchartApp {
                     // created:today / created:N (within N days)
                     if let Some(age_q) = q.strip_prefix("age:") {
                         if n.created_date.is_empty() { return false; }
-                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0);
                         if let Some(lt_q) = age_q.strip_prefix('<') {
-                            return lt_q.parse::<i32>().map_or(false, |n| age < n);
+                            return lt_q.parse::<i32>().is_ok_and(|n| age < n);
                         }
-                        return age_q.parse::<i32>().map_or(false, |n| age >= n);
+                        return age_q.parse::<i32>().is_ok_and(|n| age >= n);
                     }
                     if let Some(created_q) = q.strip_prefix("created:") {
                         let tgt = created_q.trim();
                         if tgt == "today" { return n.created_date == today_str.as_str(); }
                         if tgt == "this-week" {
                             if n.created_date.is_empty() { return false; }
-                            let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                            let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0);
                             return age < 7;
                         }
                         return n.created_date.to_lowercase().contains(tgt);
                     }
                     if q == "fresh" || q == "new" {
                         if n.created_date.is_empty() { return false; }
-                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0);
                         return age < 2;
                     }
                     if q == "stale" || q == "old" {
                         if n.created_date.is_empty() { return false; }
-                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0) as i32;
+                        let age = (-super::render::iso_days_remaining_pub(&n.created_date, &today_str)).max(0);
                         return age >= 7;
                     }
                     // #id search: match by hrf_id (e.g. "#t1" → ticket t1)
@@ -1404,7 +1401,7 @@ impl FlowchartApp {
                         self.selection.clear();
                         for id in &new_ids { self.selection.select_node(*id); }
                         let n = new_ids.len();
-                        self.status_message = Some((format!("Duplicated {} node{} — drag to position", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                        self.set_status(format!("Duplicated {} node{} — drag to position", n, if n == 1 { "" } else { "s" }), StatusLevel::Success);
                     }
                     let start_positions: Vec<(NodeId, Pos2)> = self
                         .selection
@@ -1635,7 +1632,6 @@ impl FlowchartApp {
                         let perp = Vec2::new(-dir.y, dir.x);
                         let delta = canvas_mouse - start_mouse;
                         let bend_delta = delta.dot(perp);
-                        let edge_id = edge_id;
                         if let Some(edge) = self.document.find_edge_mut(&edge_id) {
                             edge.style.curve_bend = start_bend + bend_delta;
                         }
@@ -1777,8 +1773,8 @@ impl FlowchartApp {
                 DragState::DraggingNewNode {
                     kind,
                     current_screen,
-                } => {
-                    if canvas_rect.contains(*current_screen) {
+                }
+                    if canvas_rect.contains(*current_screen) => {
                         let mut canvas_pos =
                             self.viewport.screen_to_canvas(*current_screen);
                         if self.snap_to_grid {
@@ -1805,7 +1801,6 @@ impl FlowchartApp {
                         self.document.nodes.push(node);
                         self.history.push(&self.document);
                     }
-                }
                 _ => {}
             }
         }
@@ -2222,7 +2217,7 @@ impl FlowchartApp {
 
         // Cursor-following hint text
         let hovering_any_port = self.hit_test_port(canvas_dst)
-            .map_or(false, |p| p.node_id != source.node_id);
+            .is_some_and(|p| p.node_id != source.node_id);
         if !hovering_any_port {
             let hint = "Release on a port to connect";
             let hint_pos = *current_screen + Vec2::new(14.0, 18.0);
@@ -2308,44 +2303,33 @@ impl FlowchartApp {
         canvas_rect: Rect,
         ctx: &egui::Context,
     ) {
-        if let Some((ref msg, time)) = self.status_message {
+        if let Some((ref msg, time, level)) = self.status_message {
             let elapsed = time.elapsed().as_secs_f32();
-            let fade_duration = 2.0_f32 + (msg.len() as f32 / 20.0).min(2.0) * 0.5;
+            let fade_duration = if level == StatusLevel::Error {
+                5.0_f32
+            } else {
+                2.0_f32 + (msg.len() as f32 / 20.0).min(2.0) * 0.5
+            };
             if elapsed < fade_duration {
                 let alpha = ((fade_duration - elapsed).min(1.0) * 255.0) as u8;
                 let toast_pos = Pos2::new(canvas_rect.center().x, canvas_rect.max.y - 40.0);
                 let font = FontId::proportional(12.0);
 
-                // Measure text to draw pill background
-                let galley = painter.layout_no_wrap(msg.clone(), font.clone(), self.theme.toast_success);
-                let pill_rect = Rect::from_center_size(
-                    toast_pos,
-                    Vec2::new(galley.size().x + 24.0, galley.size().y + 12.0),
-                );
-                let bg_alpha = (alpha as f32 * 0.85) as u8;
-                painter.rect_filled(
-                    pill_rect,
-                    CornerRadius::same(16),
-                    self.theme.mantle.gamma_multiply(bg_alpha as f32 / 255.0),
-                );
-                painter.rect_stroke(
-                    pill_rect,
-                    CornerRadius::same(16),
-                    Stroke::new(
-                        1.0,
-                        Color32::from_rgba_premultiplied(166, 227, 161, bg_alpha / 2),
-                    ),
-                    StrokeKind::Outside,
+                // Level-based accent color and default icon
+                let (level_color, default_icon) = match level {
+                    StatusLevel::Success => (Color32::from_rgb(166, 227, 161), "\u{2713} "), // ✓ green
+                    StatusLevel::Info    => (Color32::from_rgb(137, 180, 250), "\u{2139} "), // ℹ blue
+                    StatusLevel::Warning => (Color32::from_rgb(249, 226, 175), "\u{26A0} "), // ⚠ amber
+                    StatusLevel::Error   => (Color32::from_rgb(243, 139, 168), "\u{2717} "), // ✗ red
+                };
+                let level_color_a = Color32::from_rgba_premultiplied(
+                    level_color.r(), level_color.g(), level_color.b(), alpha,
                 );
 
-                // Contextual icon + text
+                // Contextual icon overrides (secondary refinement on top of level defaults)
                 let msg_lower = msg.to_lowercase();
-                let (icon, icon_color) = if msg_lower.contains("error") || msg_lower.contains("failed") {
-                    ("\u{2717} ", Color32::from_rgba_premultiplied(243, 139, 168, alpha)) // ✗ red
-                } else if msg_lower.contains("copied") || msg_lower.contains("clipboard") {
+                let (icon, icon_color) = if msg_lower.contains("copied") || msg_lower.contains("clipboard") {
                     ("\u{2398} ", Color32::from_rgba_premultiplied(137, 180, 250, alpha)) // ⎘ blue
-                } else if msg_lower.contains("saved") || msg_lower.contains("save") {
-                    ("\u{2713} ", Color32::from_rgba_premultiplied(166, 227, 161, alpha)) // ✓ green
                 } else if msg_lower.contains("undo") {
                     ("\u{21A9} ", Color32::from_rgba_premultiplied(249, 226, 175, alpha)) // ↩ yellow
                 } else if msg_lower.contains("redo") {
@@ -2358,15 +2342,54 @@ impl FlowchartApp {
                     ("\u{2192} ", Color32::from_rgba_premultiplied(137, 180, 250, alpha)) // → blue
                 } else if msg_lower.contains("template") || msg_lower.contains("loaded") {
                     ("\u{2605} ", Color32::from_rgba_premultiplied(249, 226, 175, alpha)) // ★ yellow
-                } else if msg_lower.contains("fresh canvas") || msg_lower.contains("new") {
+                } else if msg_lower.contains("fresh canvas") {
                     ("\u{2728} ", Color32::from_rgba_premultiplied(203, 166, 247, alpha)) // sparkles purple
                 } else {
-                    ("\u{2713} ", Color32::from_rgba_premultiplied(166, 227, 161, alpha)) // ✓ green
+                    // Fall back to level-based default
+                    (default_icon, level_color_a)
                 };
+
+                // Measure text to draw pill background
+                let display_text = format!("{}{}", icon, msg);
+                let galley = painter.layout_no_wrap(display_text.clone(), font.clone(), level_color_a);
+                let pill_rect = Rect::from_center_size(
+                    toast_pos,
+                    Vec2::new(galley.size().x + 24.0, galley.size().y + 12.0),
+                );
+                let bg_alpha = (alpha as f32 * 0.85) as u8;
+                painter.rect_filled(
+                    pill_rect,
+                    CornerRadius::same(16),
+                    self.theme.mantle.gamma_multiply(bg_alpha as f32 / 255.0),
+                );
+                // Left color stripe (3px wide, level color)
+                let stripe_rect = Rect::from_min_size(
+                    pill_rect.min,
+                    Vec2::new(3.0, pill_rect.height()),
+                );
+                painter.rect_filled(
+                    stripe_rect,
+                    CornerRadius {
+                        nw: 16, sw: 16, ne: 0, se: 0,
+                    },
+                    level_color.gamma_multiply(bg_alpha as f32 / 255.0),
+                );
+                painter.rect_stroke(
+                    pill_rect,
+                    CornerRadius::same(16),
+                    Stroke::new(
+                        1.0,
+                        Color32::from_rgba_premultiplied(
+                            level_color.r(), level_color.g(), level_color.b(), bg_alpha / 2,
+                        ),
+                    ),
+                    StrokeKind::Outside,
+                );
+
                 painter.text(
                     toast_pos,
                     Align2::CENTER_CENTER,
-                    &format!("{}{}", icon, msg),
+                    &display_text,
                     font,
                     icon_color,
                 );
@@ -2429,7 +2452,7 @@ impl FlowchartApp {
             painter.text(
                 Pos2::new(tx + pad, note_y),
                 Align2::LEFT_CENTER,
-                &format!("💬 {}", edge.comment),
+                format!("💬 {}", edge.comment),
                 note_font,
                 self.theme.text_dim,
             );
@@ -2442,8 +2465,7 @@ impl FlowchartApp {
 
         // Determine hover duration to decide tooltip richness
         let now = painter.ctx().input(|i| i.time);
-        let hover_duration = self.hover_node_start
-            .and_then(|(_, start)| Some(now - start))
+        let hover_duration = self.hover_node_start.map(|(_, start)| now - start)
             .unwrap_or(0.0);
 
         // Find hovered node
@@ -2675,7 +2697,7 @@ impl FlowchartApp {
             egui::Stroke::new(1.0, border_col), egui::StrokeKind::Outside);
 
         // Label header
-        painter.text(Pos2::new(tx + pad, ty + pad), egui::Align2::LEFT_TOP, &label,
+        painter.text(Pos2::new(tx + pad, ty + pad), egui::Align2::LEFT_TOP, label,
             egui::FontId::proportional(12.0), self.theme.text_secondary);
 
         // Separator line when rich
@@ -2941,10 +2963,7 @@ impl FlowchartApp {
                 }
                 if count > 0 {
                     self.zoom_to_selection();
-                    self.status_message = Some((
-                        format!("Selected {} nodes in \"{}\"", count, section_name),
-                        std::time::Instant::now(),
-                    ));
+                    self.set_status(format!("Selected {} nodes in \"{}\"", count, section_name), StatusLevel::Info);
                 }
                 break;
             }
@@ -3017,7 +3036,7 @@ impl FlowchartApp {
                 Pos2::new(x, pill_y),
                 Vec2::new(*pw, pill_h),
             );
-            let hovered = hover_pos.map_or(false, |p| pill_rect.contains(p));
+            let hovered = hover_pos.is_some_and(|p| pill_rect.contains(p));
 
             // Dominant status color for pill border
             let border_col = if info.critical > 0 {
@@ -3043,7 +3062,7 @@ impl FlowchartApp {
             if info.critical_overdue > 0 {
                 let t = ui.ctx().input(|i| i.time) as f32;
                 // Pulse at ~1.2 Hz between alpha 60 and 160
-                let pulse = ((t * 1.2 * std::f32::consts::TAU).sin() * 0.5 + 0.5) as f32;
+                let pulse = (t * 1.2 * std::f32::consts::TAU).sin() * 0.5 + 0.5 ;
                 let glow_alpha = (60.0 + pulse * 100.0) as u8;
                 let glow_expand = 3.0 + pulse * 3.0;
                 let glow_rect = pill_rect.expand(glow_expand);
@@ -3112,10 +3131,7 @@ impl FlowchartApp {
                     let target_ox = cx - bb.center().x * zoom;
                     let target_oy = cy - bb.center().y * zoom;
                     self.pan_target = Some([target_ox, target_oy]);
-                    self.status_message = Some((
-                        format!("→ \"{}\" ({} nodes)", name, info.total),
-                        std::time::Instant::now(),
-                    ));
+                    self.set_status(format!("→ \"{}\" ({} nodes)", name, info.total), StatusLevel::Info);
                 }
             }
 
@@ -3215,7 +3231,7 @@ impl FlowchartApp {
                 }
             }
 
-            let [done, wip, _review, blocked, total] = *counts;
+            let [done, wip, _review, blocked, _total] = *counts;
 
             // Completion indicator: ✅ prefix when all tagged nodes are done
             let tagged = done + wip + blocked;
@@ -3238,11 +3254,11 @@ impl FlowchartApp {
             let rx = panel_x + panel_w - pad_x;
 
             painter.text(Pos2::new(rx - 0.0, ry), egui::Align2::RIGHT_TOP,
-                &format!("{blocked}"), font.clone(), if blocked > 0 { color_blocked } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
+                format!("{blocked}"), font.clone(), if blocked > 0 { color_blocked } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
             painter.text(Pos2::new(rx - 22.0, ry), egui::Align2::RIGHT_TOP,
-                &format!("{wip}"), font.clone(), if wip > 0 { color_wip } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
+                format!("{wip}"), font.clone(), if wip > 0 { color_wip } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
             painter.text(Pos2::new(rx - 44.0, ry), egui::Align2::RIGHT_TOP,
-                &format!("{done}"), font.clone(), if done > 0 { color_done } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
+                format!("{done}"), font.clone(), if done > 0 { color_done } else { egui::Color32::from_rgba_unmultiplied(100, 100, 120, 100) });
         }
     }
 
@@ -3328,8 +3344,8 @@ impl FlowchartApp {
             if edge.style.curve_bend.abs() > 0.1 {
                 let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
                 let perp = Vec2::new(-dir.y, dir.x);
-                cp1 = cp1 + perp * edge.style.curve_bend * self.viewport.zoom;
-                cp2 = cp2 + perp * edge.style.curve_bend * self.viewport.zoom;
+                cp1 += perp * edge.style.curve_bend * self.viewport.zoom;
+                cp2 += perp * edge.style.curve_bend * self.viewport.zoom;
             }
 
             // Direction-coded color: outgoing = blue accent, incoming = green
@@ -3406,8 +3422,8 @@ impl FlowchartApp {
             let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
             let perp = Vec2::new(-dir.y, dir.x);
             let bend_screen = edge.style.curve_bend * self.viewport.zoom;
-            cp1 = cp1 + perp * bend_screen;
-            cp2 = cp2 + perp * bend_screen;
+            cp1 += perp * bend_screen;
+            cp2 += perp * bend_screen;
         }
         let highlight_color = Color32::from_rgba_premultiplied(250, 179, 135, 200);
         let glow = egui::epaint::CubicBezierShape::from_points_stroke(
@@ -3479,13 +3495,13 @@ impl FlowchartApp {
                     match action {
                         0 => { // Reverse
                             if let Some(e) = self.document.find_edge_mut(&edge_id) {
-                                let old_src = e.source.clone();
-                                let old_tgt = e.target.clone();
+                                let old_src = e.source;
+                                let old_tgt = e.target;
                                 e.source = old_tgt;
                                 e.target = old_src;
                             }
                             self.history.push(&self.document);
-                            self.status_message = Some(("Edge direction reversed".to_string(), std::time::Instant::now()));
+                            self.set_status("Edge direction reversed", StatusLevel::Info);
                         }
                         1 => { self.focus_label_edit = true; }
                         2 => { // Duplicate edge
@@ -3739,7 +3755,7 @@ impl FlowchartApp {
                     if let Some(id) = self.selection.node_ids.iter().next() {
                         if let Some(node) = self.document.find_node(id) {
                             self.style_clipboard = Some(node.style.clone());
-                            self.status_message = Some(("Style copied — Cmd+Shift+V to apply".to_string(), std::time::Instant::now()));
+                            self.set_status("Style copied — Cmd+Shift+V to apply", StatusLevel::Info);
                         }
                     }
                 }
@@ -3785,7 +3801,7 @@ impl FlowchartApp {
                             self.selection.select_node(child_id);
                             self.inline_node_edit = Some((child_id, String::new()));
                             self.history.push(&self.document);
-                            self.status_message = Some(("Child node spawned — type to label".to_string(), std::time::Instant::now()));
+                            self.set_status("Child node spawned — type to label", StatusLevel::Success);
                         }
                     }
                 }
@@ -3799,26 +3815,27 @@ impl FlowchartApp {
                     if let Some(style) = self.style_clipboard.clone() {
                         let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
                         for id in &ids {
-                            if let Some(node) = self.document.find_node_mut(&id) {
+                            if let Some(node) = self.document.find_node_mut(id) {
                                 node.style = style.clone();
                             }
                         }
                         self.history.push(&self.document);
                         let n = ids.len();
-                        self.status_message = Some((format!("Style applied to {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                        self.set_status(format!("Style applied to {} node{}", n, if n == 1 { "" } else { "s" }), StatusLevel::Success);
                     }
                 }
                 6 => { // Lock / unlock toggle
                     let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
                     let new_locked = !all_locked;
                     for id in &ids {
-                        if let Some(node) = self.document.find_node_mut(&id) {
+                        if let Some(node) = self.document.find_node_mut(id) {
                             node.locked = new_locked;
                         }
                     }
                     self.history.push(&self.document);
                     let msg = if new_locked { "Locked" } else { "Unlocked" };
-                    self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                    let lock_level = if new_locked { StatusLevel::Warning } else { StatusLevel::Info };
+                    self.set_status(msg, lock_level);
                 }
                 7 => { // Glow toggle (single-node)
                     if let Some(&sel_id) = self.selection.node_ids.iter().next() {
@@ -3957,7 +3974,7 @@ impl FlowchartApp {
                         }
                     });
                 let msg = celebration.unwrap_or_else(|| "Status updated".to_string());
-                self.status_message = Some((msg, std::time::Instant::now()));
+                self.set_status(msg, StatusLevel::Success);
                 self.history.push(&self.document);
             }
         }
@@ -3982,7 +3999,7 @@ impl FlowchartApp {
                         format!("→ {}", next)
                     };
                     node.section_name = next;
-                    self.status_message = Some((msg, std::time::Instant::now()));
+                    self.set_status(msg, StatusLevel::Info);
                     self.history.push(&self.document);
                 }
             }
@@ -3996,10 +4013,7 @@ impl FlowchartApp {
                 self.search_query = format!("assigned:{}", name);
                 self.persist_search_filter = true;
                 self.show_search = false;
-                self.status_message = Some((
-                    format!("Filtering: {}", a_str),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("Filtering: {}", a_str), StatusLevel::Info);
             }
         }
 
@@ -4012,7 +4026,7 @@ impl FlowchartApp {
             let swatch_gap = 3.0_f32;
             let pad2 = 6.0_f32;
             let popup_w = popup_cols as f32 * swatch_sz + (popup_cols - 1) as f32 * swatch_gap + pad2 * 2.0;
-            let popup_rows = (NODE_COLORS.len() + popup_cols - 1) / popup_cols;
+            let popup_rows = NODE_COLORS.len().div_ceil(popup_cols);
             let popup_h = popup_rows as f32 * swatch_sz + (popup_rows.saturating_sub(1)) as f32 * swatch_gap + pad2 * 2.0;
             let popup_rect = Rect::from_min_size(
                 egui::Pos2::new(bar_center_x - popup_w / 2.0, bar_rect.max.y + 6.0),
@@ -4048,12 +4062,12 @@ impl FlowchartApp {
                 if resp.clicked() {
                     let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
                     for id in &ids {
-                        if let Some(node) = self.document.find_node_mut(&id) {
+                        if let Some(node) = self.document.find_node_mut(id) {
                             node.style.fill_color = *rgba;
                         }
                     }
                     self.history.push(&self.document);
-                    self.status_message = Some((format!("Fill: {}", name), std::time::Instant::now()));
+                    self.set_status(format!("Fill: {}", name), StatusLevel::Success);
                     self.fab_color_picker_open = false;
                     color_applied = true;
                 }
@@ -4218,7 +4232,7 @@ impl FlowchartApp {
                 }
                 if align_clicked.is_some() {
                     self.history.push(&self.document);
-                    self.status_message = Some((align_icons[idx].1.to_string(), std::time::Instant::now()));
+                    self.set_status(align_icons[idx].1, StatusLevel::Success);
                 }
             }
         }
@@ -4363,6 +4377,7 @@ impl FlowchartApp {
         }
 
         // Pass 1: compute row data and process interactions
+        #[allow(dead_code)]
         struct RowData {
             row_y: f32, short_name: String, name_rect: Rect, is_filtered: bool,
             is_hovered: bool, clicked: bool,
@@ -4383,11 +4398,11 @@ impl FlowchartApp {
                 if self.search_query == filter {
                     self.search_query.clear();
                     self.persist_search_filter = false;
-                    self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+                    self.set_status("Filter cleared", StatusLevel::Info);
                 } else {
                     self.search_query = filter;
                     self.persist_search_filter = true;
-                    self.status_message = Some((format!("Showing: {}", assignee), std::time::Instant::now()));
+                    self.set_status(format!("Showing: {}", assignee), StatusLevel::Info);
                 }
             }
             let mut section_cells: Vec<(Rect, Color32, String)> = Vec::new();
@@ -4468,7 +4483,7 @@ impl FlowchartApp {
                 }
                 painter.text(
                     egui::pos2(rd.total_x + col_w * 0.5, rd.row_y + row_h * 0.5), Align2::CENTER_CENTER,
-                    &rd.total.to_string(), egui::FontId::proportional(11.0), self.theme.text_secondary,
+                    rd.total.to_string(), egui::FontId::proportional(11.0), self.theme.text_secondary,
                 );
             }
         }
@@ -4580,7 +4595,7 @@ impl FlowchartApp {
                 let txt_col = if p1 > 0 {
                     // Pulsing red for P1 alert (slow 1.5s pulse)
                     let t = ui.ctx().input(|i| i.time) as f32;
-                    let pulse = ((t * std::f32::consts::PI / 1.5).sin() * 0.5 + 0.5) as f32;
+                    let pulse = (t * std::f32::consts::PI / 1.5).sin() * 0.5 + 0.5 ;
                     let a = (180.0 + pulse * 50.0) as u8;
                     Color32::from_rgba_unmultiplied(243, 100, 100, a)
                 } else if overdue > 0 {
@@ -4611,11 +4626,11 @@ impl FlowchartApp {
                 // Toggle off
                 self.search_query.clear();
                 self.persist_search_filter = false;
-                self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+                self.set_status("Filter cleared", StatusLevel::Info);
             } else {
                 self.search_query = filter;
                 self.persist_search_filter = true;
-                self.status_message = Some((format!("Showing: {}", sec), std::time::Instant::now()));
+                self.set_status(format!("Showing: {}", sec), StatusLevel::Info);
             }
         }
     }
@@ -4898,7 +4913,7 @@ impl FlowchartApp {
                     painter.text(
                         Pos2::new(sx + 2.0, canvas_rect.min.y + 1.0),
                         Align2::LEFT_TOP,
-                        &format!("{}", wx as i32),
+                        format!("{}", wx as i32),
                         label_font.clone(),
                         tick_color,
                     );
@@ -4924,7 +4939,7 @@ impl FlowchartApp {
                     painter.text(
                         Pos2::new(canvas_rect.min.x + 1.0, sy - 1.0),
                         Align2::LEFT_BOTTOM,
-                        &format!("{}", wy as i32),
+                        format!("{}", wy as i32),
                         label_font.clone(),
                         tick_color,
                     );
@@ -4971,7 +4986,7 @@ impl FlowchartApp {
             painter.text(
                 Pos2::new(mouse.x + 3.0, canvas_rect.min.y + 1.5),
                 Align2::LEFT_TOP,
-                &format!("{:.0}", wx),
+                format!("{:.0}", wx),
                 FontId::proportional(7.5),
                 Color32::from_rgba_unmultiplied(255, 160, 160, 230),
             );
@@ -5000,7 +5015,7 @@ impl FlowchartApp {
             painter.text(
                 Pos2::new(canvas_rect.min.x + 1.0, mouse.y + 3.0),
                 Align2::LEFT_TOP,
-                &format!("{:.0}", wy),
+                format!("{:.0}", wy),
                 FontId::proportional(7.5),
                 Color32::from_rgba_unmultiplied(255, 160, 160, 230),
             );
@@ -5408,7 +5423,7 @@ impl FlowchartApp {
                 for nid in search_matches { self.selection.node_ids.insert(*nid); }
                 if !search_matches.is_empty() { self.zoom_to_selection(); }
                 if total_count > 1 {
-                    self.status_message = Some((format!("Selected {} nodes — filter pinned (⌘F to clear)", total_count), std::time::Instant::now()));
+                    self.set_status(format!("Selected {} nodes — filter pinned (⌘F to clear)", total_count), StatusLevel::Info);
                 }
                 // Pin filter so dimming stays active after closing search
                 if shift && total_count > 0 {
@@ -5555,10 +5570,7 @@ impl FlowchartApp {
                 let raw_q = self.search_query.clone();
                 let canvas_pos = egui::Pos2::new(canvas_center[0], canvas_center[1]);
                 let mut new_node = Node::new(NodeShape::Rectangle, canvas_pos);
-                match &mut new_node.kind {
-                    NodeKind::Shape { label, .. } => { *label = raw_q.clone(); }
-                    _ => {}
-                }
+                if let NodeKind::Shape { label, .. } = &mut new_node.kind { *label = raw_q.clone(); }
                 let new_id = new_node.id;
                 self.document.nodes.push(new_node);
                 self.selection.clear();
@@ -5568,10 +5580,7 @@ impl FlowchartApp {
                 self.show_search = false;
                 self.search_query.clear();
                 self.search_cursor = 0;
-                self.status_message = Some((
-                    format!("Created \"{}\"", raw_q.chars().take(24).collect::<String>()),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("Created \"{}\"", raw_q.chars().take(24).collect::<String>()), StatusLevel::Success);
             }
         }
     }
@@ -5806,7 +5815,7 @@ impl FlowchartApp {
                 painter.text(
                     clipped.center(),
                     Align2::CENTER_CENTER,
-                    &format!("{}%", zoom_pct),
+                    format!("{}%", zoom_pct),
                     FontId::proportional(6.5),
                     self.theme.accent.gamma_multiply(0.7),
                 );
@@ -5836,7 +5845,7 @@ impl FlowchartApp {
                     painter.text(
                         pin,
                         Align2::CENTER_CENTER,
-                        &(slot + 1).to_string(),
+                        (slot + 1).to_string(),
                         FontId::proportional(6.0),
                         Color32::from_rgb(30, 30, 46),
                     );
@@ -5887,8 +5896,8 @@ impl FlowchartApp {
                 };
                 let perp = Vec2::new(-dir.y, dir.x);
                 let bend_screen = edge.style.curve_bend * self.viewport.zoom;
-                cp1 = cp1 + perp * bend_screen;
-                cp2 = cp2 + perp * bend_screen;
+                cp1 += perp * bend_screen;
+                cp2 += perp * bend_screen;
             }
 
             // Base color from edge, brightened
@@ -5991,10 +6000,7 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some((
-                    format!("Section renamed to \"{new_name}\""),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("Section renamed to \"{new_name}\""), StatusLevel::Success);
             }
             self.section_rename = None;
         }
@@ -6180,8 +6186,7 @@ impl FlowchartApp {
         let q = self.quick_assign_buf.as_deref().unwrap_or("").to_lowercase();
         let suggestions: Vec<String> = known_assignees.iter()
             .filter(|a| q.is_empty() || a.to_lowercase().starts_with(&q))
-            .take(4)
-            .map(|s| s.clone())
+            .take(4).cloned()
             .collect();
         let sug_h = 22.0;
         let mut clicked_suggestion: Option<String> = None;
@@ -6264,11 +6269,11 @@ impl FlowchartApp {
                     let count = sel_ids2.len();
                     if !assignee.is_empty() {
                         self.history.push(&self.document);
-                        self.status_message = Some((
+                        self.set_status(
                             if count == 1 { format!("Assigned: {}", assignee) }
                             else { format!("Assigned: {} ({} nodes)", assignee, count) },
-                            std::time::Instant::now(),
-                        ));
+                            StatusLevel::Success,
+                        );
                     }
                     self.quick_assign_buf = None;
                 } else if cancel {
@@ -6319,7 +6324,8 @@ impl FlowchartApp {
         let mut cancel = false;
         let sel_ids2 = sel_ids.clone();
 
-        ui.allocate_ui_at_rect(text_rect, |ui| {
+        {
+            let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
             let resp = ui.add(
                 egui::TextEdit::multiline(self.quick_comment_buf.as_mut().unwrap())
                     .font(egui::FontId::proportional(11.0))
@@ -6337,7 +6343,7 @@ impl FlowchartApp {
             if !resp.has_focus() && !resp.gained_focus() {
                 resp.request_focus();
             }
-        });
+        }
 
         if submit {
             let comment = self.quick_comment_buf.clone().unwrap_or_default();
@@ -6349,11 +6355,11 @@ impl FlowchartApp {
             let count = sel_ids2.len();
             if !comment.is_empty() {
                 self.history.push(&self.document);
-                self.status_message = Some((
+                self.set_status(
                     if count == 1 { "💬 Comment saved".to_string() }
                     else { format!("💬 Comment saved ({} nodes)", count) },
-                    std::time::Instant::now(),
-                ));
+                    StatusLevel::Success,
+                );
             }
             self.quick_comment_buf = None;
         } else if cancel {
@@ -6397,7 +6403,7 @@ impl FlowchartApp {
             if !canvas_rect.contains(*center) { continue; }
 
             let hovered = ui.ctx().input(|i| {
-                i.pointer.hover_pos().map_or(false, |p| btn_rect.contains(p))
+                i.pointer.hover_pos().is_some_and(|p| btn_rect.contains(p))
             });
             let clicked = hovered && ui.ctx().input(|i| i.pointer.primary_clicked());
 
@@ -6442,7 +6448,7 @@ impl FlowchartApp {
                 self.selection.select_node(new_id);
                 self.inline_node_edit = Some((new_id, String::new()));
                 self.history.push(&self.document);
-                self.status_message = Some(("Quick connect: node added".to_string(), std::time::Instant::now()));
+                self.set_status("Quick connect: node added", StatusLevel::Success);
                 break; // only one click per frame
             }
         }
@@ -6480,28 +6486,28 @@ impl FlowchartApp {
             // Left: node is to the left, and Y-overlaps
             if h_overlap && r.max.x <= src_rect.min.x {
                 let gap = src_rect.min.x - r.max.x;
-                if closest[0].map_or(true, |(_, g)| gap < g) {
+                if closest[0].is_none_or(|(_, g)| gap < g) {
                     closest[0] = Some((node, gap));
                 }
             }
             // Right: node is to the right, and Y-overlaps
             if h_overlap && r.min.x >= src_rect.max.x {
                 let gap = r.min.x - src_rect.max.x;
-                if closest[1].map_or(true, |(_, g)| gap < g) {
+                if closest[1].is_none_or(|(_, g)| gap < g) {
                     closest[1] = Some((node, gap));
                 }
             }
             // Up: node is above, and X-overlaps
             if v_overlap && r.max.y <= src_rect.min.y {
                 let gap = src_rect.min.y - r.max.y;
-                if closest[2].map_or(true, |(_, g)| gap < g) {
+                if closest[2].is_none_or(|(_, g)| gap < g) {
                     closest[2] = Some((node, gap));
                 }
             }
             // Down: node is below, and X-overlaps
             if v_overlap && r.min.y >= src_rect.max.y {
                 let gap = r.min.y - src_rect.max.y;
-                if closest[3].map_or(true, |(_, g)| gap < g) {
+                if closest[3].is_none_or(|(_, g)| gap < g) {
                     closest[3] = Some((node, gap));
                 }
             }
@@ -6766,10 +6772,7 @@ impl FlowchartApp {
                                     c.x - cx * self.viewport.zoom,
                                     c.y - cy * self.viewport.zoom,
                                 ]);
-                                self.status_message = Some((
-                                    format!("Jumped to ({:.0}, {:.0})", cx, cy),
-                                    std::time::Instant::now(),
-                                ));
+                                self.set_status(format!("Jumped to ({:.0}, {:.0})", cx, cy), StatusLevel::Info);
                             }
                             self.show_goto = false;
                             self.goto_query.clear();
@@ -6810,7 +6813,7 @@ impl FlowchartApp {
         if resp.clicked() {
             self.persist_search_filter = false;
             self.search_query.clear();
-            self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+            self.set_status("Filter cleared", StatusLevel::Info);
         }
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -7012,7 +7015,7 @@ impl FlowchartApp {
                 Stroke::new(0.5, Color32::from_rgba_unmultiplied(137, 180, 250, 40)),
                 StrokeKind::Outside);
             painter.text(ghost_rect.center_bottom() + Vec2::new(0.0, 6.0), Align2::CENTER_TOP,
-                &format!("{:.0} × {:.0}", sr[2], sr[3]), FontId::proportional(9.0),
+                format!("{:.0} × {:.0}", sr[2], sr[3]), FontId::proportional(9.0),
                 Color32::from_rgba_unmultiplied(137, 180, 250, 160));
         }
     }
@@ -7097,7 +7100,7 @@ impl FlowchartApp {
         let w = (bb.width() / self.viewport.zoom).round() as i32;
         let h = (bb.height() / self.viewport.zoom).round() as i32;
         painter.text(expanded.center_top() - Vec2::new(0.0, 14.0), Align2::CENTER_BOTTOM,
-            &format!("{w} × {h}"), FontId::proportional(9.0),
+            format!("{w} × {h}"), FontId::proportional(9.0),
             Color32::from_rgba_unmultiplied(137, 180, 250, 160));
     }
 }

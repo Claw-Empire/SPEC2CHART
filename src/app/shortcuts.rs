@@ -1,6 +1,6 @@
 use egui::{Key, Modifiers, Vec2};
 use crate::model::*;
-use super::FlowchartApp;
+use super::{FlowchartApp, StatusLevel};
 
 impl FlowchartApp {
     pub(crate) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
@@ -35,10 +35,10 @@ impl FlowchartApp {
                 } else {
                     String::new()
                 };
-                self.status_message = Some((
+                self.set_status(
                     format!("Undo{} — {} step{} remaining", detail, remaining, if remaining == 1 { "" } else { "s" }),
-                    std::time::Instant::now(),
-                ));
+                    StatusLevel::Info,
+                );
             }
         }
 
@@ -67,10 +67,10 @@ impl FlowchartApp {
                 } else {
                     String::new()
                 };
-                self.status_message = Some((
+                self.set_status(
                     format!("Redo{} — {} step{} ahead", detail, remaining, if remaining == 1 { "" } else { "s" }),
-                    std::time::Instant::now(),
-                ));
+                    StatusLevel::Info,
+                );
             }
         }
 
@@ -83,7 +83,7 @@ impl FlowchartApp {
         {
             // Skip locked nodes
             let node_ids: Vec<NodeId> = self.selection.node_ids.iter()
-                .filter(|id| !self.document.find_node(id).map_or(false, |n| n.locked))
+                .filter(|id| !self.document.find_node(id).is_some_and(|n| n.locked))
                 .copied().collect();
             let edge_ids: Vec<EdgeId> = self.selection.edge_ids.iter().copied().collect();
             // Capture ghost data before removal for shrink-fade animation
@@ -109,10 +109,10 @@ impl FlowchartApp {
                 let mut parts = Vec::new();
                 if n_deleted > 0 { parts.push(format!("{} node{}", n_deleted, if n_deleted == 1 { "" } else { "s" })); }
                 if e_deleted > 0 { parts.push(format!("{} edge{}", e_deleted, if e_deleted == 1 { "" } else { "s" })); }
-                self.status_message = Some((
+                self.set_status(
                     format!("Deleted {} — Cmd+Z to undo", parts.join(", ")),
-                    std::time::Instant::now(),
-                ));
+                    StatusLevel::Info,
+                );
             }
         }
 
@@ -149,7 +149,7 @@ impl FlowchartApp {
         // Cmd+B = toggle bold for selected nodes
         if ctx.input(|i| i.key_pressed(Key::B) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
-            let all_bold = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.style.bold));
+            let all_bold = ids.iter().all(|id| self.document.find_node(id).is_some_and(|n| n.style.bold));
             for id in &ids {
                 if let Some(node) = self.document.find_node_mut(id) {
                     node.style.bold = !all_bold;
@@ -161,7 +161,7 @@ impl FlowchartApp {
         // B (no modifier) = toggle border dashed for selected nodes
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::B) && i.modifiers.is_none()) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
-            let all_dashed = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.style.border_dashed));
+            let all_dashed = ids.iter().all(|id| self.document.find_node(id).is_some_and(|n| n.style.border_dashed));
             for id in &ids {
                 if let Some(node) = self.document.find_node_mut(id) {
                     node.style.border_dashed = !all_dashed;
@@ -169,13 +169,13 @@ impl FlowchartApp {
             }
             self.history.push(&self.document);
             let label = if !all_dashed { "Dashed border" } else { "Solid border" };
-            self.status_message = Some((label.to_string(), std::time::Instant::now()));
+            self.set_status(label.to_string(), StatusLevel::Success);
         }
 
         // Cmd+I = toggle italic for selected nodes
         if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
-            let all_italic = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.style.italic));
+            let all_italic = ids.iter().all(|id| self.document.find_node(id).is_some_and(|n| n.style.italic));
             for id in &ids {
                 if let Some(node) = self.document.find_node_mut(id) {
                     node.style.italic = !all_italic;
@@ -187,14 +187,14 @@ impl FlowchartApp {
         // Cmd+L = toggle lock on selected nodes
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd)) && !self.selection.node_ids.is_empty() {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
-            let all_locked = ids.iter().all(|id| self.document.find_node(id).map_or(false, |n| n.locked));
+            let all_locked = ids.iter().all(|id| self.document.find_node(id).is_some_and(|n| n.locked));
             for id in &ids {
                 if let Some(node) = self.document.find_node_mut(id) {
                     node.locked = !all_locked;
                 }
             }
             let msg = if all_locked { "Unlocked" } else { "Locked" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
             self.history.push(&self.document);
         }
 
@@ -204,7 +204,7 @@ impl FlowchartApp {
             if let Some(id) = self.selection.node_ids.iter().next() {
                 if let Some(node) = self.document.find_node(id) {
                     self.style_clipboard = Some(node.style.clone());
-                    self.status_message = Some(("Style copied — paste with Cmd+Shift+V".to_string(), std::time::Instant::now()));
+                    self.set_status("Style copied — paste with Cmd+Shift+V".to_string(), StatusLevel::Success);
                 }
             }
         }
@@ -221,7 +221,7 @@ impl FlowchartApp {
                 if !ids.is_empty() {
                     self.history.push(&self.document);
                     let n = ids.len();
-                    self.status_message = Some((format!("Style applied to {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                    self.set_status(format!("Style applied to {} node{}", n, if n == 1 { "" } else { "s" }), StatusLevel::Success);
                 }
             }
         }
@@ -255,7 +255,7 @@ impl FlowchartApp {
                 format!("Copied {} node{} — Cmd+V to paste",
                     n_nodes, if n_nodes == 1 { "" } else { "s" })
             };
-            self.status_message = Some((msg, std::time::Instant::now()));
+            self.set_status(msg, StatusLevel::Info);
         }
 
         // Cmd+V with empty node clipboard + text in system clipboard → create node from text
@@ -302,7 +302,7 @@ impl FlowchartApp {
                         self.selection.select_node(id);
                     }
                     self.history.push(&self.document);
-                    self.status_message = Some((format!("Pasted {} items as nodes", lines.len()), std::time::Instant::now()));
+                    self.set_status(format!("Pasted {} items as nodes", lines.len()), StatusLevel::Success);
                 } else {
                     // Single line → sticky note (existing behavior)
                     let mut node = Node::new_sticky(
@@ -321,7 +321,7 @@ impl FlowchartApp {
                     self.selection.select_node(id);
                     self.inline_node_edit = Some((id, label_copy));
                     self.history.push(&self.document);
-                    self.status_message = Some(("Text pasted as sticky note — editing".to_string(), std::time::Instant::now()));
+                    self.set_status("Text pasted as sticky note — editing".to_string(), StatusLevel::Success);
                 }
             }
         }
@@ -381,7 +381,7 @@ impl FlowchartApp {
             } else {
                 format!("Pasted {} node{}", n_pasted, if n_pasted == 1 { "" } else { "s" })
             };
-            self.status_message = Some((msg, std::time::Instant::now()));
+            self.set_status(msg, StatusLevel::Success);
         }
 
         // V = select tool (skip when editing text)
@@ -436,7 +436,7 @@ impl FlowchartApp {
                 self.selection.select_node(new_id);
                 self.focus_label_edit = true;
                 self.history.push(&self.document);
-                self.status_message = Some(("Connected node added — type to rename".to_string(), std::time::Instant::now()));
+                self.set_status("Connected node added — type to rename".to_string(), StatusLevel::Info);
             }
         }
 
@@ -474,7 +474,7 @@ impl FlowchartApp {
                 if count == 1 { format!("✓ Resolved → {}", sec) }
                 else { format!("✓ Resolved {} tickets → {}", count, sec) }
             } else { "✓ Resolved".to_string() };
-            self.status_message = Some((msg, std::time::Instant::now()));
+            self.set_status(msg, StatusLevel::Info);
         }
 
         // Quick shape creation shortcuts (skip when editing text)
@@ -513,7 +513,7 @@ impl FlowchartApp {
                 crate::model::NodeShape::Diamond => "Diamond",
                 _ => "Shape",
             };
-            self.status_message = Some((format!("{name} created"), std::time::Instant::now()));
+            self.set_status(format!("{name} created"), StatusLevel::Success);
         }
         // Escape also closes shape picker
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
@@ -529,7 +529,7 @@ impl FlowchartApp {
         ];
         // H = Hypothesis, Y = Assumption (A conflicts with select all), W = evidence (E conflicts with Connect)
         let dt_keys = [Key::H, Key::Y, Key::W];
-        for ((&key, preset)) in dt_keys.iter().zip(dt_presets.iter()) {
+        for (&key, preset) in dt_keys.iter().zip(dt_presets.iter()) {
             if !any_text_focused && self.selection.node_ids.is_empty() && ctx.input(|i| i.key_pressed(key) && i.modifiers.is_none()) {
                 let (shape, fill, label, status) = preset;
                 let canvas_center = {
@@ -549,7 +549,7 @@ impl FlowchartApp {
                 self.selection.select_node(id);
                 self.focus_label_edit = true;
                 self.history.push(&self.document);
-                self.status_message = Some((format!("{status}: {label} created"), std::time::Instant::now()));
+                self.set_status(format!("{status}: {label} created"), StatusLevel::Success);
             }
         }
 
@@ -567,7 +567,7 @@ impl FlowchartApp {
                 }
             }
             let cnt = self.selection.node_ids.len();
-            self.status_message = Some((format!("{cnt} nodes"), std::time::Instant::now()));
+            self.set_status(format!("{cnt} nodes"), StatusLevel::Info);
         }
 
         // Cmd+A = select all
@@ -606,29 +606,27 @@ impl FlowchartApp {
                     }
                 }
                 let n = visited.len();
-                self.status_message = Some((format!("Connected: {} nodes", n), std::time::Instant::now()));
+                self.set_status(format!("Connected: {} nodes", n), StatusLevel::Info);
             }
         }
 
         // 2 = switch to 2D view (no modifier, skip when editing text)
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.is_none()) {
-            if self.view_mode != super::ViewMode::TwoD {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Num2) && i.modifiers.is_none())
+            && self.view_mode != super::ViewMode::TwoD {
                 self.sync_viewport_to_camera();
                 self.view_mode = super::ViewMode::TwoD;
                 self.view_transition_target = 0.0;
-                self.status_message = Some(("2D View".to_string(), std::time::Instant::now()));
+                self.set_status("2D View".to_string(), StatusLevel::Info);
             }
-        }
 
         // 3 = switch to 3D view (no modifier, skip when editing text)
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Num3) && i.modifiers.is_none()) {
-            if self.view_mode != super::ViewMode::ThreeD {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Num3) && i.modifiers.is_none())
+            && self.view_mode != super::ViewMode::ThreeD {
                 self.view_mode = super::ViewMode::ThreeD;
                 self.view_transition_target = 1.0;
                 self.sync_camera_to_viewport();
-                self.status_message = Some(("3D View".to_string(), std::time::Instant::now()));
+                self.set_status("3D View".to_string(), StatusLevel::Info);
             }
-        }
 
         // Cmd+1 = fit to content
         if ctx.input(|i| i.key_pressed(Key::Num1) && i.modifiers.matches_exact(cmd)) {
@@ -657,7 +655,7 @@ impl FlowchartApp {
         if ctx.input(|i| i.key_pressed(Key::Num0) && i.modifiers.matches_exact(cmd)) {
             self.zoom_target = 1.0;
             self.pan_target = Some([0.0, 0.0]);
-            self.status_message = Some(("View reset to 100% — Cmd+1 to fit all".to_string(), std::time::Instant::now()));
+            self.set_status("View reset to 100% — Cmd+1 to fit all".to_string(), StatusLevel::Info);
         }
 
         // Cmd+Shift+> = increase font size for selected nodes
@@ -676,7 +674,7 @@ impl FlowchartApp {
             self.history.push(&self.document);
             let new_size = self.document.find_node(ids.first().unwrap())
                 .map(|n| n.style.font_size as i32).unwrap_or(13);
-            self.status_message = Some((format!("Font size: {new_size}pt"), std::time::Instant::now()));
+            self.set_status(format!("Font size: {new_size}pt"), StatusLevel::Success);
         }
 
         // F = fit selection (or all if nothing selected)
@@ -720,7 +718,7 @@ impl FlowchartApp {
                         n.rect().expand(-4.0).intersects(snap_r)
                     });
                     if !overlaps { break; }
-                    candidate = candidate + base_offset;
+                    candidate += base_offset;
                     attempts += 1;
                 }
                 node.set_pos(candidate);
@@ -729,7 +727,7 @@ impl FlowchartApp {
             }
             self.history.push(&self.document);
             let n_duped = self.selection.node_ids.len();
-            self.status_message = Some((format!("Duplicated {} node{}", n_duped, if n_duped == 1 { "" } else { "s" }), std::time::Instant::now()));
+            self.set_status(format!("Duplicated {} node{}", n_duped, if n_duped == 1 { "" } else { "s" }), StatusLevel::Success);
         }
 
         // Cmd+Shift+D = duplicate selected node AND connect original → duplicate
@@ -767,7 +765,7 @@ impl FlowchartApp {
                 self.selection.select_node(dup_id);
                 self.inline_node_edit = Some((dup_id, String::new()));
                 self.history.push(&self.document);
-                self.status_message = Some(("Duplicated and connected — type to label".to_string(), std::time::Instant::now()));
+                self.set_status("Duplicated and connected — type to label".to_string(), StatusLevel::Success);
             }
         }
 
@@ -794,11 +792,11 @@ impl FlowchartApp {
             }
             self.history.push(&self.document);
             if marked > 0 && unmarked == 0 {
-                self.status_message = Some((format!("Marked {} node{} as done", marked, if marked == 1 { "" } else { "s" }), std::time::Instant::now()));
+                self.set_status(format!("Marked {} node{} as done", marked, if marked == 1 { "" } else { "s" }), StatusLevel::Success);
             } else if unmarked > 0 && marked == 0 {
-                self.status_message = Some((format!("Unmarked {} node{}", unmarked, if unmarked == 1 { "" } else { "s" }), std::time::Instant::now()));
+                self.set_status(format!("Unmarked {} node{}", unmarked, if unmarked == 1 { "" } else { "s" }), StatusLevel::Info);
             } else {
-                self.status_message = Some((format!("Toggled {} node{}", marked + unmarked, if marked + unmarked == 1 { "" } else { "s" }), std::time::Instant::now()));
+                self.set_status(format!("Toggled {} node{}", marked + unmarked, if marked + unmarked == 1 { "" } else { "s" }), StatusLevel::Info);
             }
         }
 
@@ -809,8 +807,8 @@ impl FlowchartApp {
 
         // Tab = navigate to next connected node (follows outgoing edges)
         // Shift+Tab = navigate to previous connected node (follows incoming edges)
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Tab)) {
-            if self.selection.node_ids.len() == 1 {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::Tab))
+            && self.selection.node_ids.len() == 1 {
                 let current_id = *self.selection.node_ids.iter().next().unwrap();
                 let is_shift = ctx.input(|i| i.modifiers.shift);
                 let neighbors: Vec<NodeId> = if is_shift {
@@ -841,26 +839,18 @@ impl FlowchartApp {
                         .map(|n| n.display_label().to_string())
                         .unwrap_or_default();
                     let dir = if is_shift { "upstream" } else { "downstream" };
-                    self.status_message = Some((
-                        format!("Navigated {} to \"{}\"", dir, label),
-                        std::time::Instant::now(),
-                    ));
+                    self.set_status(format!("Navigated {} to \"{}\"", dir, label), StatusLevel::Info);
                 } else {
                     let dir = if is_shift { "incoming" } else { "outgoing" };
-                    self.status_message = Some((
-                        format!("No {} connections from this node", dir),
-                        std::time::Instant::now(),
-                    ));
+                    self.set_status(format!("No {} connections from this node", dir), StatusLevel::Warning);
                 }
             }
-        }
 
         // F2 = rename: focus the label editor in the properties panel
-        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F2)) {
-            if !self.selection.node_ids.is_empty() || !self.selection.edge_ids.is_empty() {
+        if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F2))
+            && (!self.selection.node_ids.is_empty() || !self.selection.edge_ids.is_empty()) {
                 self.focus_label_edit = true;
             }
-        }
 
         // Shift+R = toggle coordinate rulers
         let shift_only = egui::Modifiers { shift: true, ..Default::default() };
@@ -875,7 +865,7 @@ impl FlowchartApp {
                 self.persist_search_filter = false;
                 self.search_query.clear();
                 self.show_search = false;
-                self.status_message = Some(("Filter cleared".to_string(), std::time::Instant::now()));
+                self.set_status("Filter cleared".to_string(), StatusLevel::Info);
             } else {
                 self.show_search = !self.show_search;
                 if self.show_search { self.search_query.clear(); }
@@ -887,14 +877,14 @@ impl FlowchartApp {
         if ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.matches_exact(cmd_shift_f)) {
             if self.persist_search_filter {
                 self.persist_search_filter = false;
-                self.status_message = Some(("Search filter unpinned".to_string(), std::time::Instant::now()));
+                self.set_status("Search filter unpinned".to_string(), StatusLevel::Info);
             } else if !self.search_query.is_empty() {
                 self.persist_search_filter = true;
                 self.show_search = false;
-                self.status_message = Some((format!("Search filter pinned: \"{}\"", self.search_query), std::time::Instant::now()));
+                self.set_status(format!("Search filter pinned: \"{}\"", self.search_query), StatusLevel::Info);
             } else {
                 self.show_search = true;
-                self.status_message = Some(("Type a search query, then Cmd+Shift+F to pin it".to_string(), std::time::Instant::now()));
+                self.set_status("Type a search query, then Cmd+Shift+F to pin it".to_string(), StatusLevel::Info);
             }
         }
 
@@ -981,7 +971,7 @@ impl FlowchartApp {
                 self.selection.select_node(ids[0]);
                 self.inline_node_edit = Some((ids[0], "Hypothesis".to_string()));
                 self.history.push(&self.document);
-                self.status_message = Some(("Experiment card created — edit label to begin".to_string(), std::time::Instant::now()));
+                self.set_status("Experiment card created — edit label to begin".to_string(), StatusLevel::Success);
             }
         }
 
@@ -1052,7 +1042,7 @@ impl FlowchartApp {
                 crate::specgraph::layout::auto_layout(&mut doc_clone);
                 self.layout_targets.clear();
                 for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
-                self.status_message = Some((format!("New ticket {} → {}", new_hrf_id, first_section), std::time::Instant::now()));
+                self.set_status(format!("New ticket {} → {}", new_hrf_id, first_section), StatusLevel::Success);
             }
         }
 
@@ -1111,7 +1101,7 @@ impl FlowchartApp {
                 self.selection.clear();
                 self.selection.select_node(ids[0]);
                 self.history.push(&self.document);
-                self.status_message = Some(("Support ticket card created — edit labels to begin".to_string(), std::time::Instant::now()));
+                self.set_status("Support ticket card created — edit labels to begin".to_string(), StatusLevel::Success);
             }
         }
 
@@ -1176,10 +1166,7 @@ impl FlowchartApp {
             };
             let hrf = crate::specgraph::hrf::export_hrf_ex(&self.document, "Untitled Diagram", Some(&vp));
             ctx.copy_text(hrf);
-            self.status_message = Some((
-                "Spec copied to clipboard".to_string(),
-                std::time::Instant::now(),
-            ));
+            self.set_status("Spec copied to clipboard".to_string(), StatusLevel::Success);
         }
 
         // Cmd+Shift+R = copy support status report as Markdown to clipboard
@@ -1255,10 +1242,7 @@ impl FlowchartApp {
 
             ctx.copy_text(md);
             let count = nodes.len();
-            self.status_message = Some((
-                format!("Support report copied ({} nodes)", count),
-                std::time::Instant::now(),
-            ));
+            self.set_status(format!("Support report copied ({} nodes)", count), StatusLevel::Success);
         }
 
         // Cmd+Shift+X = export nodes as CSV to clipboard (selection or all)
@@ -1324,10 +1308,7 @@ impl FlowchartApp {
 
                 ctx.copy_text(csv);
                 let count = nodes.len();
-                self.status_message = Some((
-                    format!("CSV copied — {} rows", count),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("CSV copied — {} rows", count), StatusLevel::Success);
             }
         }
 
@@ -1342,17 +1323,19 @@ impl FlowchartApp {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
             if !ids.is_empty() {
                 let all_collapsed = ids.iter().all(|id| {
-                    self.document.find_node(id).map_or(false, |n| n.collapsed)
+                    self.document.find_node(id).is_some_and(|n| n.collapsed)
                 });
                 for id in &ids {
                     if let Some(node) = self.document.find_node_mut(id) {
-                        if all_collapsed { node.toggle_collapsed(); } // expand
-                        else if !node.collapsed { node.toggle_collapsed(); } // collapse only uncollapsed ones
+                        // all_collapsed → expand all; otherwise collapse any that are still open
+                        if all_collapsed || !node.collapsed {
+                            node.toggle_collapsed();
+                        }
                     }
                 }
                 self.history.push(&self.document);
                 let msg = if all_collapsed { "Expanded" } else { "Collapsed" };
-                self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                self.set_status(msg.to_string(), StatusLevel::Info);
             }
         }
 
@@ -1366,23 +1349,17 @@ impl FlowchartApp {
         for &(key, slot) in &bookmark_keys {
             if ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_exact(cmd_shift)) {
                 self.bookmarks[slot] = Some(self.viewport.clone());
-                self.status_message = Some((
-                    format!("Bookmark {} saved", slot + 1),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("Bookmark {} saved", slot + 1), StatusLevel::Success);
             } else if !any_text_focused && self.selection.node_ids.is_empty() && ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_exact(shift_only)) {
                 if let Some(bv) = &self.bookmarks[slot].clone() {
                     self.zoom_target = bv.zoom;
                     self.pan_target = Some(bv.offset);
-                    self.status_message = Some((
-                        format!("Jumped to bookmark {}", slot + 1),
-                        std::time::Instant::now(),
-                    ));
+                    self.set_status(format!("Jumped to bookmark {}", slot + 1), StatusLevel::Info);
                 } else {
-                    self.status_message = Some((
+                    self.set_status(
                         format!("No bookmark {} set — use ⌘⇧{} to save", slot + 1, slot + 1),
-                        std::time::Instant::now(),
-                    ));
+                        StatusLevel::Warning,
+                    );
                 }
             }
         }
@@ -1392,7 +1369,7 @@ impl FlowchartApp {
         if ctx.input(|i| i.key_pressed(Key::L) && i.modifiers.matches_exact(cmd_shift_l)) {
             self.canvas_locked = !self.canvas_locked;
             let msg = if self.canvas_locked { "🔒 Canvas locked" } else { "🔓 Canvas unlocked" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // 3D camera preset shortcuts (only in 3D mode, no modifiers)
@@ -1408,7 +1385,7 @@ impl FlowchartApp {
                 if ctx.input(|i| i.key_pressed(key) && i.modifiers.is_none()) {
                     self.camera3d.yaw = yaw;
                     self.camera3d.pitch = pitch;
-                    self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                    self.set_status(msg.to_string(), StatusLevel::Info);
                 }
             }
         }
@@ -1418,7 +1395,7 @@ impl FlowchartApp {
             if let Some(saved) = self.saved_viewport.take() {
                 // Restore
                 self.viewport = saved;
-                self.status_message = Some(("Overview Off".to_string(), std::time::Instant::now()));
+                self.set_status("Overview Off".to_string(), StatusLevel::Info);
             } else {
                 // Save and zoom out
                 self.saved_viewport = Some(self.viewport.clone());
@@ -1430,7 +1407,7 @@ impl FlowchartApp {
                 self.viewport.offset[1] = cx.y - (cx.y - self.viewport.offset[1]) / extra;
                 self.viewport.zoom *= extra;
                 self.viewport.zoom = self.viewport.zoom.clamp(0.05, 10.0);
-                self.status_message = Some(("Overview Mode — press O to return".to_string(), std::time::Instant::now()));
+                self.set_status("Overview Mode — press O to return".to_string(), StatusLevel::Info);
             }
         }
 
@@ -1448,7 +1425,7 @@ impl FlowchartApp {
                 self.layout_targets.insert(node.id, node.position);
             }
             self.pending_fit = true;
-            self.status_message = Some(("Layout animating…".to_string(), std::time::Instant::now()));
+            self.set_status("Layout animating…".to_string(), StatusLevel::Info);
         }
 
         // Tab / Shift+Tab = cycle through nodes
@@ -1510,13 +1487,12 @@ impl FlowchartApp {
                 // Determine next priority from first selected node
                 let first = self.document.find_node(node_ids.first().unwrap());
                 let current_prio = first.map(|n| n.priority).unwrap_or(0);
-                let current_tag = first.and_then(|n| n.tag);
-                let (new_tag, new_prio, new_fill, label) = match (current_prio, current_tag) {
-                    (0, None)   | (0, Some(_)) => (Some(crate::model::NodeTag::Critical), 1u8, Some([243u8, 139, 168, 255]), "P1 — Critical"),
-                    (1, _) | (0, Some(crate::model::NodeTag::Critical)) => (Some(crate::model::NodeTag::Warning), 2u8, Some([250u8, 179, 135, 255]), "P2 — High"),
-                    (2, _) | (0, Some(crate::model::NodeTag::Warning))  => (Some(crate::model::NodeTag::Info),    3u8, Some([137u8, 180, 250, 255]), "P3 — Medium"),
-                    (3, _) | (0, Some(crate::model::NodeTag::Info))     => (None,                                 4u8, Some([166u8, 227, 161, 255]), "P4 — Low"),
-                    _                                                    => (None,                                 0u8, None,                         "No priority"),
+                let (new_tag, new_prio, new_fill, label) = match current_prio {
+                    0 => (Some(crate::model::NodeTag::Critical), 1u8, Some([243u8, 139, 168, 255]), "P1 — Critical"),
+                    1 => (Some(crate::model::NodeTag::Warning),  2u8, Some([250u8, 179, 135, 255]), "P2 — High"),
+                    2 => (Some(crate::model::NodeTag::Info),     3u8, Some([137u8, 180, 250, 255]), "P3 — Medium"),
+                    3 => (None,                                  4u8, Some([166u8, 227, 161, 255]), "P4 — Low"),
+                    _ => (None,                                  0u8, None,                         "No priority"),
                 };
                 for id in &node_ids {
                     if let Some(node) = self.document.find_node_mut(id) {
@@ -1531,7 +1507,7 @@ impl FlowchartApp {
                     }
                 }
                 self.history.push(&self.document);
-                self.status_message = Some((format!("Priority: {}", label), std::time::Instant::now()));
+                self.set_status(format!("Priority: {}", label), StatusLevel::Info);
             } else {
                 // No selection: cycle background pattern
                 self.bg_pattern = match self.bg_pattern {
@@ -1546,7 +1522,7 @@ impl FlowchartApp {
                     super::BgPattern::Crosshatch => "Crosshatch",
                     super::BgPattern::None       => "No pattern",
                 };
-                self.status_message = Some((name.to_string(), std::time::Instant::now()));
+                self.set_status(name.to_string(), StatusLevel::Info);
             }
         }
 
@@ -1561,7 +1537,25 @@ impl FlowchartApp {
             if !any_text_focused && ctx.input(|i| i.key_pressed(Key::W) && i.modifiers.matches_exact(cmd_shift_w)) {
                 self.show_workload_panel = !self.show_workload_panel;
                 let msg = if self.show_workload_panel { "Workload Panel On" } else { "Workload Panel Off" };
-                self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                self.set_status(msg.to_string(), StatusLevel::Info);
+            }
+        }
+
+        // Cmd+I = toggle diagram statistics panel
+        if ctx.input(|i| i.key_pressed(Key::I) && i.modifiers.matches_exact(cmd)) {
+            self.show_stats_panel = !self.show_stats_panel;
+            let msg = if self.show_stats_panel { "Statistics Panel On" } else { "Statistics Panel Off" };
+            self.set_status(msg.to_string(), StatusLevel::Info);
+        }
+
+        // Cmd+Shift+T (no text editing) = cycle color theme
+        if !any_text_focused {
+            let cmd_shift_t = Modifiers { shift: true, ..cmd };
+            if ctx.input(|i| i.key_pressed(Key::T) && i.modifiers.matches_exact(cmd_shift_t)) {
+                let themes = super::ColorTheme::ALL;
+                let idx = themes.iter().position(|t| *t == self.color_theme).unwrap_or(0);
+                let next = themes[(idx + 1) % themes.len()];
+                self.apply_color_theme(next);
             }
         }
 
@@ -1569,7 +1563,7 @@ impl FlowchartApp {
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::F) && i.modifiers.shift && !i.modifiers.command && !i.modifiers.alt) {
             self.focus_mode = !self.focus_mode;
             let msg = if self.focus_mode { "Focus Mode On" } else { "Focus Mode Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // F / F5 = toggle presentation mode with slide navigation
@@ -1593,21 +1587,21 @@ impl FlowchartApp {
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::P) && i.modifiers.shift && !i.modifiers.command) {
             self.show_quick_notes = !self.show_quick_notes;
             let msg = if self.show_quick_notes { "Quick Notes On" } else { "Quick Notes Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // K = toggle connectivity heatmap (H is reserved for design-thinking Hypothesis)
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::K) && i.modifiers.is_none()) {
             self.show_heatmap = !self.show_heatmap;
             let msg = if self.show_heatmap { "Heatmap On" } else { "Heatmap Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // M (no modifier) = toggle minimap overlay
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::M) && i.modifiers.is_none()) {
             self.show_minimap = !self.show_minimap;
             let msg = if self.show_minimap { "Minimap On" } else { "Minimap Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // Shift+H = distribute selected nodes horizontally (equal spacing on X)
@@ -1617,7 +1611,7 @@ impl FlowchartApp {
             self.distribute_nodes_h();
             self.history.push(&self.document);
             let n = self.selection.node_ids.len();
-            self.status_message = Some((format!("Distributed {} nodes horizontally", n), std::time::Instant::now()));
+            self.set_status(format!("Distributed {} nodes horizontally", n), StatusLevel::Info);
         }
 
         // Shift+V = distribute selected nodes vertically (equal spacing on Y)
@@ -1627,14 +1621,14 @@ impl FlowchartApp {
             self.distribute_nodes_v();
             self.history.push(&self.document);
             let n = self.selection.node_ids.len();
-            self.status_message = Some((format!("Distributed {} nodes vertically", n), std::time::Instant::now()));
+            self.set_status(format!("Distributed {} nodes vertically", n), StatusLevel::Info);
         }
 
         // Shift+A = toggle data-flow animation
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::A) && i.modifiers.shift_only()) {
             self.show_flow_animation = !self.show_flow_animation;
             let msg = if self.show_flow_animation { "Flow Animation On" } else { "Flow Animation Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // Shift+G = go to canvas position overlay
@@ -1647,7 +1641,7 @@ impl FlowchartApp {
         if !any_text_focused && ctx.input(|i| i.key_pressed(Key::G) && i.modifiers.is_none()) {
             self.show_grid = !self.show_grid;
             let msg = if self.show_grid { "Grid On" } else { "Grid Off" };
-            self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+            self.set_status(msg.to_string(), StatusLevel::Info);
         }
 
         // Cmd+G = wrap selected nodes in a frame
@@ -1676,7 +1670,7 @@ impl FlowchartApp {
                 self.selection.select_node(fid);
                 self.history.push(&self.document);
                 let n = self.selection.node_ids.len() - 1; // -1 for the frame itself
-                self.status_message = Some((format!("Group frame around {} node{}", n, if n == 1 { "" } else { "s" }), std::time::Instant::now()));
+                self.set_status(format!("Group frame around {} node{}", n, if n == 1 { "" } else { "s" }), StatusLevel::Success);
             }
         }
 
@@ -1713,7 +1707,7 @@ impl FlowchartApp {
                         }
                     }
                 }
-                self.status_message = Some((format!("Edge style: {}", style_label), std::time::Instant::now()));
+                self.set_status(format!("Edge style: {}", style_label), StatusLevel::Info);
                 self.history.push(&self.document);
             } else if !self.selection.node_ids.is_empty() {
                 // S + nodes selected → cycle node status: None→Todo→WIP→Review→Done→Blocked→None
@@ -1768,12 +1762,12 @@ impl FlowchartApp {
                 } else {
                     format!("Status: {label}")
                 };
-                self.status_message = Some((status_text, std::time::Instant::now()));
+                self.set_status(status_text, StatusLevel::Info);
                 self.history.push(&self.document);
             } else {
                 self.snap_to_grid = !self.snap_to_grid;
                 let msg = if self.snap_to_grid { "Snap On" } else { "Snap Off" };
-                self.status_message = Some((msg.to_string(), std::time::Instant::now()));
+                self.set_status(msg.to_string(), StatusLevel::Info);
             }
         }
 
@@ -1802,7 +1796,7 @@ impl FlowchartApp {
                         }
                     }
                     self.history.push(&self.document);
-                    self.status_message = Some((format!("Color: {name}"), std::time::Instant::now()));
+                    self.set_status(format!("Color: {name}"), StatusLevel::Success);
                     break;
                 }
             }
@@ -1836,7 +1830,7 @@ impl FlowchartApp {
                     } else {
                         format!("Status: {status_name} ({count} nodes)")
                     };
-                    self.status_message = Some((msg, std::time::Instant::now()));
+                    self.set_status(msg, StatusLevel::Info);
                     break;
                 }
             }
@@ -1893,11 +1887,11 @@ impl FlowchartApp {
                 }
                 self.history.push(&self.document);
                 let label = if shift_d { "today" } else { "next week" };
-                self.status_message = Some((
+                self.set_status(
                     if count == 1 { format!("Due: {}", label) }
                     else { format!("Due: {} ({} nodes)", label, count) },
-                    std::time::Instant::now(),
-                ));
+                    StatusLevel::Info,
+                );
             }
         }
 
@@ -2056,7 +2050,7 @@ impl FlowchartApp {
                 }
                 self.history.push(&self.document);
                 let n = selected.len();
-                self.status_message = Some((format!("{} nodes spaced evenly", n), std::time::Instant::now()));
+                self.set_status(format!("{} nodes spaced evenly", n), StatusLevel::Info);
             }
         }
 
@@ -2140,11 +2134,11 @@ impl FlowchartApp {
                         }
                         self.history.push(&self.document);
                         let count = sel_ids.len();
-                        self.status_message = Some((
+                        self.set_status(
                             if count == 1 { format!("→ {}", new_section) }
                             else { format!("→ {} ({} nodes)", new_section, count) },
-                            std::time::Instant::now(),
-                        ));
+                            StatusLevel::Info,
+                        );
                         // Trigger animated re-layout (same as Cmd+L)
                         let mut doc_clone = self.document.clone();
                         for node in doc_clone.nodes.iter_mut() {
@@ -2215,7 +2209,7 @@ impl FlowchartApp {
                 Some(format!("{:04}-{:02}-{:02}", yr, mo, dd))
             };
             let ids: Vec<_> = self.selection.node_ids.iter().copied().collect();
-            let count = ids.len();
+            let _count = ids.len();
             let mut snoozed = 0u32;
             for id in &ids {
                 if let Some(n) = self.document.find_node_mut(id) {
@@ -2238,11 +2232,11 @@ impl FlowchartApp {
             }
             if snoozed > 0 {
                 self.history.push(&self.document);
-                self.status_message = Some((
+                self.set_status(
                     if snoozed == 1 { "💤 Snoozed +1 day".to_string() }
                     else { format!("💤 Snoozed {} tickets +1 day", snoozed) },
-                    std::time::Instant::now(),
-                ));
+                    StatusLevel::Info,
+                );
             }
         }
 
@@ -2283,7 +2277,7 @@ impl FlowchartApp {
             } else {
                 "🚨 Escalated: P1 Critical".to_string()
             };
-            self.status_message = Some((msg, std::time::Instant::now()));
+            self.set_status(msg, StatusLevel::Info);
         }
 
         // Cmd+Enter = mark all selected nodes as Done (tag=Ok, progress=1.0)
@@ -2300,11 +2294,11 @@ impl FlowchartApp {
                 }
             }
             self.history.push(&self.document);
-            self.status_message = Some((
+            self.set_status(
                 if count == 1 { "✓ Done".to_string() }
                 else { format!("✓ Done ({} tickets)", count) },
-                std::time::Instant::now(),
-            ));
+                StatusLevel::Success,
+            );
         }
 
         // Ctrl+1..4 = jump selected tickets to section N (direct column assignment in kanban)
@@ -2339,11 +2333,11 @@ impl FlowchartApp {
                     crate::specgraph::layout::auto_layout(&mut doc_clone);
                     self.layout_targets.clear();
                     for n in &doc_clone.nodes { self.layout_targets.insert(n.id, n.position); }
-                    self.status_message = Some((
+                    self.set_status(
                         if count == 1 { format!("→ {}", target_sec) }
                         else { format!("→ {} ({} tickets)", target_sec, count) },
-                        std::time::Instant::now(),
-                    ));
+                        StatusLevel::Info,
+                    );
                 }
             }
         }
@@ -2371,7 +2365,7 @@ impl FlowchartApp {
                     sections.entry(n.section_name.clone()).or_default().push((n.id, rank));
                 }
                 let mut changed = false;
-                for (_, group) in &sections {
+                for group in sections.values() {
                     // Get current Y positions
                     let mut positioned: Vec<(crate::model::NodeId, i32, f32)> = group.iter().filter_map(|&(id, rank)| {
                         self.document.find_node(&id).map(|n| (id, rank, n.position[1]))
@@ -2390,7 +2384,7 @@ impl FlowchartApp {
                 }
                 if changed {
                     self.history.push(&self.document);
-                    self.status_message = Some(("⬆ Sorted by priority".to_string(), std::time::Instant::now()));
+                    self.set_status("⬆ Sorted by priority".to_string(), StatusLevel::Info);
                 }
             }
         }
@@ -2412,7 +2406,7 @@ impl FlowchartApp {
                     sections.entry(n.section_name.clone()).or_default().push((n.id, due_rank(n)));
                 }
                 let mut changed = false;
-                for (_, group) in &sections {
+                for group in sections.values() {
                     let mut positioned: Vec<(crate::model::NodeId, i32, f32)> = group.iter().filter_map(|&(id, rank)| {
                         self.document.find_node(&id).map(|n| (id, rank, n.position[1]))
                     }).collect();
@@ -2428,7 +2422,7 @@ impl FlowchartApp {
                 }
                 if changed {
                     self.history.push(&self.document);
-                    self.status_message = Some(("📅 Sorted by due date".to_string(), std::time::Instant::now()));
+                    self.set_status("📅 Sorted by due date".to_string(), StatusLevel::Info);
                 }
             }
         }
@@ -2517,7 +2511,7 @@ impl FlowchartApp {
         for (id, pos) in positions {
             self.layout_targets.insert(id, [pos.x, pos.y]);
         }
-        self.status_message = Some(("Layout animating…".to_string(), std::time::Instant::now()));
+        self.set_status("Layout animating…".to_string(), StatusLevel::Info);
     }
 
     /// Advance the animated layout one frame; call each frame while layout_targets is non-empty.
@@ -2548,7 +2542,7 @@ impl FlowchartApp {
         if settled {
             self.layout_targets.clear();
             self.history.push(&self.document);
-            self.status_message = Some(("Layout complete".to_string(), std::time::Instant::now()));
+            self.set_status("Layout complete".to_string(), StatusLevel::Success);
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
@@ -2616,10 +2610,10 @@ impl FlowchartApp {
         self.history.push(&self.document);
 
         let dir = if downward { "below" } else { "right" };
-        self.status_message = Some((
+        self.set_status(
             format!("New node → chained {dir} (Enter to continue)"),
-            std::time::Instant::now(),
-        ));
+            StatusLevel::Info,
+        );
     }
 
     /// Zoom the 3D camera to fit all nodes (adjusts distance only, resets to iso view).
@@ -2642,9 +2636,9 @@ impl FlowchartApp {
         self.camera3d.target = [cx, cy, 0.0];
         let now = ctx.input(|i| i.time);
         self.camera3d.animate_to(-0.4, 0.6, now, 0.4);
-        self.camera3d.distance = span.max(400.0).min(8000.0);
+        self.camera3d.distance = span.clamp(400.0, 8000.0);
         self.cam3d_zoom_vel = 0.0; // cancel any in-progress zoom inertia
         ctx.request_repaint();
-        self.status_message = Some(("3D Fit".to_string(), std::time::Instant::now()));
+        self.set_status("3D Fit".to_string(), StatusLevel::Info);
     }
 }

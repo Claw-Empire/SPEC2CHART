@@ -5,7 +5,7 @@ use crate::export;
 use crate::io;
 use crate::model::*;
 use crate::specgraph;
-use super::{FlowchartApp, DiagramMode, DragState, Tool};
+use super::{FlowchartApp, DiagramMode, DragState, Tool, StatusLevel};
 use super::theme::{TOOLBAR_WIDTH, CANVAS_BG_PRESETS, to_color32};
 
 impl FlowchartApp {
@@ -139,7 +139,7 @@ impl FlowchartApp {
                             match io::save_document(&self.document, &path) {
                                 Ok(()) => {
                                     self.status_message =
-                                        Some(("Saved!".to_string(), std::time::Instant::now()));
+                                        Some(("Saved!".to_string(), std::time::Instant::now(), StatusLevel::Success));
                                 }
                                 Err(e) => eprintln!("Save error: {}", e),
                             }
@@ -217,12 +217,14 @@ impl FlowchartApp {
                                         self.status_message = Some((
                                             format!("Exported {} ({}) — {} nodes, {} edges", fname, size_str, n, e),
                                             std::time::Instant::now(),
+                                            StatusLevel::Success,
                                         ));
                                     }
                                     Err(e) => {
                                         self.status_message = Some((
                                             format!("Export failed: {}", e),
                                             std::time::Instant::now(),
+                                            StatusLevel::Error,
                                         ));
                                     }
                                 }
@@ -294,12 +296,14 @@ impl FlowchartApp {
                                             self.status_message = Some((
                                                 format!("Imported {}!", fmt_name),
                                                 std::time::Instant::now(),
+                                                StatusLevel::Success,
                                             ));
                                         }
                                         Err(e) => {
                                             self.status_message = Some((
                                                 format!("Import error: {}", e),
                                                 std::time::Instant::now(),
+                                                StatusLevel::Error,
                                             ));
                                         }
                                     }
@@ -308,6 +312,7 @@ impl FlowchartApp {
                                     self.status_message = Some((
                                         format!("Read error: {}", e),
                                         std::time::Instant::now(),
+                                        StatusLevel::Error,
                                     ));
                                 }
                             }
@@ -328,7 +333,7 @@ impl FlowchartApp {
                             .save_file()
                         {
                             let is_hrf = path.extension()
-                                .map_or(false, |ext| ext == "spec" || ext == "md");
+                                .is_some_and(|ext| ext == "spec" || ext == "md");
                             let result = if is_hrf {
                                 let bg_str = match self.bg_pattern {
                                     super::BgPattern::Dots => "dots",
@@ -367,12 +372,14 @@ impl FlowchartApp {
                                         self.status_message = Some((
                                             format!("Exported {} ({}) — {} nodes, {} edges", fname, size_str, self.document.nodes.len(), self.document.edges.len()),
                                             std::time::Instant::now(),
+                                            StatusLevel::Success,
                                         ));
                                     }
                                     Err(e) => {
                                         self.status_message = Some((
                                             format!("Write error: {}", e),
                                             std::time::Instant::now(),
+                                            StatusLevel::Error,
                                         ));
                                     }
                                 },
@@ -380,6 +387,7 @@ impl FlowchartApp {
                                     self.status_message = Some((
                                         format!("Export error: {}", e),
                                         std::time::Instant::now(),
+                                        StatusLevel::Error,
                                     ));
                                 }
                             }
@@ -440,6 +448,7 @@ impl FlowchartApp {
                         self.status_message = Some((
                             "Spec copied to clipboard".to_string(),
                             std::time::Instant::now(),
+                            StatusLevel::Info,
                         ));
                     }
                     if ui
@@ -575,12 +584,14 @@ impl FlowchartApp {
                                     self.status_message = Some((
                                         "Spec imported!".to_string(),
                                         std::time::Instant::now(),
+                                        StatusLevel::Success,
                                     ));
                                 }
                                 Err(e) => {
                                     self.status_message = Some((
                                         format!("Import error: {}", e),
                                         std::time::Instant::now(),
+                                        StatusLevel::Error,
                                     ));
                                 }
                             }
@@ -1010,7 +1021,7 @@ impl FlowchartApp {
                         self.sync_viewport_to_camera();
                         self.view_mode = super::ViewMode::TwoD;
                         self.view_transition_target = 0.0;
-                        self.status_message = Some(("2D View".to_string(), std::time::Instant::now()));
+                        self.status_message = Some(("2D View".to_string(), std::time::Instant::now(), StatusLevel::Info));
                     }
                     if ui.add_sized(btn_size, egui::Button::new(text_3d)
                         .fill(if is_3d { self.theme.surface1 } else { self.theme.surface0 })
@@ -1018,7 +1029,7 @@ impl FlowchartApp {
                         self.sync_camera_to_viewport();
                         self.view_mode = super::ViewMode::ThreeD;
                         self.view_transition_target = 1.0;
-                        self.status_message = Some(("3D View".to_string(), std::time::Instant::now()));
+                        self.status_message = Some(("3D View".to_string(), std::time::Instant::now(), StatusLevel::Info));
                     }
                 });
                 ui.add_space(4.0);
@@ -1051,6 +1062,7 @@ impl FlowchartApp {
                                 self.status_message = Some((
                                     format!("Camera: {} view", label),
                                     std::time::Instant::now(),
+                                    StatusLevel::Info,
                                 ));
                             }
                         }

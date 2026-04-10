@@ -161,7 +161,7 @@ fn node_to_spec(node: &Node, id_map: &HashMap<NodeId, String>) -> SpecNode {
 fn spec_to_node(sn: &SpecNode, _index: usize) -> Result<Node, String> {
     let position = sn.position.as_deref().unwrap_or(&[]);
     let pos = Pos2::new(
-        position.get(0).copied().unwrap_or(0.0),
+        position.first().copied().unwrap_or(0.0),
         position.get(1).copied().unwrap_or(0.0),
     );
     let z_offset = position.get(2).copied().unwrap_or(0.0);
@@ -494,7 +494,7 @@ fn infer_mode(doc: &FlowchartDocument) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::specgraph::import_yaml;
 
     #[test]

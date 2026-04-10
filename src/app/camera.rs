@@ -235,8 +235,8 @@ pub(crate) fn compute_z_layers(doc: &FlowchartDocument) -> HashMap<NodeId, i32> 
         let current_depth = depths[&nid];
         if let Some(neighbors) = adjacency.get(&nid) {
             for &neighbor in neighbors {
-                if !depths.contains_key(&neighbor) {
-                    depths.insert(neighbor, current_depth + 1);
+                if let std::collections::hash_map::Entry::Vacant(e) = depths.entry(neighbor) {
+                    e.insert(current_depth + 1);
                     queue.push_back(neighbor);
                 }
             }

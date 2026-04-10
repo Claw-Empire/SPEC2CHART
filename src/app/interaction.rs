@@ -136,8 +136,8 @@ impl FlowchartApp {
             } else { Vec2::X };
             let perp = Vec2::new(-dir.y, dir.x);
             let bend_screen = edge.style.curve_bend * self.viewport.zoom;
-            cp1 = cp1 + perp * bend_screen;
-            cp2 = cp2 + perp * bend_screen;
+            cp1 += perp * bend_screen;
+            cp2 += perp * bend_screen;
         }
         if let Some(o) = edge.style.cp1_override {
             cp1 = self.viewport.canvas_to_screen(Pos2::new(o[0], o[1]));
@@ -503,8 +503,8 @@ pub fn resolve_edge_cps_canvas(edge: &Edge, src: Pos2, tgt: Pos2) -> (Pos2, Pos2
     if edge.style.curve_bend.abs() > 0.02 {
         let dir = if (tgt - src).length() > 1.0 { (tgt - src).normalized() } else { Vec2::X };
         let perp = Vec2::new(-dir.y, dir.x);
-        cp1 = cp1 + perp * edge.style.curve_bend;
-        cp2 = cp2 + perp * edge.style.curve_bend;
+        cp1 += perp * edge.style.curve_bend;
+        cp2 += perp * edge.style.curve_bend;
     }
     if let Some(o) = edge.style.cp1_override {
         cp1 = Pos2::new(o[0], o[1]);

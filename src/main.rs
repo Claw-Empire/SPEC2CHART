@@ -90,6 +90,30 @@ enum Commands {
         #[arg(long, default_value = "8080")]
         port: u16,
     },
+    /// Print diagram statistics (node/edge counts, shape distribution, connectivity)
+    Stats {
+        input: PathBuf,
+        /// Output as JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check diagram for common quality issues
+    Lint {
+        input: PathBuf,
+        /// Treat warnings as errors (exit 1 on any finding)
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Merge two diagrams into one
+    Merge {
+        /// First diagram file (HRF or spec JSON)
+        base: PathBuf,
+        /// Second diagram file to merge in
+        overlay: PathBuf,
+        /// Output file (omit to write to stdout as HRF)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -146,6 +170,18 @@ fn main() -> eframe::Result<()> {
         }
         Some(Commands::Serve { port }) => {
             cli_serve(port);
+            return Ok(());
+        }
+        Some(Commands::Stats { input, json }) => {
+            cli_stats(input, json);
+            return Ok(());
+        }
+        Some(Commands::Lint { input, strict }) => {
+            cli_lint(input, strict);
+            return Ok(());
+        }
+        Some(Commands::Merge { base, overlay, out }) => {
+            cli_merge(base, overlay, out.as_deref());
             return Ok(());
         }
         None => {} // Fall through to GUI
@@ -265,8 +301,8 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     let node_key = |n: &crate::model::Node| -> String {
         if n.hrf_id.is_empty() { n.display_label().to_string() } else { n.hrf_id.clone() }
     };
-    let ids_a: std::collections::HashSet<String> = doc_a.nodes.iter().map(|n| node_key(n)).collect();
-    let ids_b: std::collections::HashSet<String> = doc_b.nodes.iter().map(|n| node_key(n)).collect();
+    let ids_a: std::collections::HashSet<String> = doc_a.nodes.iter().map(&node_key).collect();
+    let ids_b: std::collections::HashSet<String> = doc_b.nodes.iter().map(&node_key).collect();
 
     for id in ids_b.difference(&ids_a) {
         println!("+ node: {}", id);
@@ -511,6 +547,320 @@ fn cli_serve(port: u16) {
     }
 }
 
+/// Load an HRF or spec-JSON file into a FlowchartDocument.
+fn load_doc(path: &std::path::Path) -> crate::model::FlowchartDocument {
+    let src = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| { eprintln!("Error reading {:?}: {}", path, e); std::process::exit(1); });
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    match ext {
+        "hrf" => crate::specgraph::hrf::parse_hrf(&src)
+            .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); }),
+        "spec" => crate::specgraph::hrf::parse_hrf(&src)
+            .or_else(|_| serde_json::from_str::<crate::model::FlowchartDocument>(&src).map_err(|e| e.to_string()))
+            .unwrap_or_else(|e| { eprintln!("Parse error: {}", e); std::process::exit(1); }),
+        "json" => serde_json::from_str(&src)
+            .unwrap_or_else(|e| { eprintln!("JSON parse error: {}", e); std::process::exit(1); }),
+        _ => crate::specgraph::hrf::parse_hrf(&src)
+            .or_else(|_| serde_json::from_str::<crate::model::FlowchartDocument>(&src).map_err(|e| e.to_string()))
+            .unwrap_or_else(|_| { eprintln!("Could not parse {:?} as HRF or spec JSON.", path); std::process::exit(1); }),
+    }
+}
+
+fn cli_stats(input: PathBuf, json: bool) {
+    use std::collections::HashMap;
+    let doc = load_doc(&input);
+
+    let node_count = doc.nodes.len();
+    let edge_count = doc.edges.len();
+
+    // Shape distribution
+    let mut shapes: HashMap<&str, usize> = HashMap::new();
+    let mut sections: HashMap<&str, usize> = HashMap::new();
+    let mut frames = 0usize;
+    let mut locked = 0usize;
+    let mut with_comment = 0usize;
+    let mut with_url = 0usize;
+    let mut with_owner = 0usize;
+
+    for node in &doc.nodes {
+        if node.is_frame { frames += 1; }
+        if node.locked { locked += 1; }
+        if !node.comment.is_empty() { with_comment += 1; }
+        if !node.url.is_empty() { with_url += 1; }
+        if node.owner.is_some() { with_owner += 1; }
+        if !node.section_name.is_empty() {
+            *sections.entry(node.section_name.as_str()).or_default() += 1;
+        }
+        let shape_name = match &node.kind {
+            crate::model::NodeKind::Shape { shape, .. } => match shape {
+                crate::model::NodeShape::Rectangle => "Rectangle",
+                crate::model::NodeShape::RoundedRect => "RoundedRect",
+                crate::model::NodeShape::Diamond => "Diamond",
+                crate::model::NodeShape::Circle => "Circle",
+                crate::model::NodeShape::Parallelogram => "Parallelogram",
+                crate::model::NodeShape::Connector => "Connector",
+                crate::model::NodeShape::Hexagon => "Hexagon",
+                crate::model::NodeShape::Triangle => "Triangle",
+                crate::model::NodeShape::Callout => "Callout",
+                crate::model::NodeShape::Person => "Person",
+                crate::model::NodeShape::Screen => "Screen",
+                crate::model::NodeShape::Cylinder => "Cylinder",
+                crate::model::NodeShape::Cloud => "Cloud",
+                crate::model::NodeShape::Document => "Document",
+                crate::model::NodeShape::Channel => "Channel",
+                crate::model::NodeShape::Segment => "Segment",
+            },
+            crate::model::NodeKind::StickyNote { .. } => "StickyNote",
+            crate::model::NodeKind::Entity { .. } => "Entity",
+            crate::model::NodeKind::Text { .. } => "Text",
+        };
+        *shapes.entry(shape_name).or_default() += 1;
+    }
+
+    // Connectivity: count edges per node (degree)
+    let mut in_degree: HashMap<crate::model::NodeId, usize> = HashMap::new();
+    let mut out_degree: HashMap<crate::model::NodeId, usize> = HashMap::new();
+    for edge in &doc.edges {
+        *out_degree.entry(edge.source.node_id).or_default() += 1;
+        *in_degree.entry(edge.target.node_id).or_default() += 1;
+    }
+    let max_in = in_degree.values().max().copied().unwrap_or(0);
+    let max_out = out_degree.values().max().copied().unwrap_or(0);
+    let connected_nodes: std::collections::HashSet<_> = in_degree.keys().chain(out_degree.keys()).collect();
+    let disconnected = node_count.saturating_sub(connected_nodes.len());
+
+    // Edge label stats
+    let labeled_edges = doc.edges.iter().filter(|e| !e.label.is_empty()).count();
+
+    if json {
+        let mut shape_list: Vec<_> = shapes.iter().collect();
+        shape_list.sort_by(|a, b| b.1.cmp(a.1));
+        let mut section_list: Vec<_> = sections.iter().collect();
+        section_list.sort_by(|a, b| b.1.cmp(a.1));
+        println!("{{");
+        println!("  \"file\": {:?},", input.display().to_string());
+        println!("  \"nodes\": {},", node_count);
+        println!("  \"edges\": {},", edge_count);
+        println!("  \"frames\": {},", frames);
+        println!("  \"disconnected_nodes\": {},", disconnected);
+        println!("  \"locked_nodes\": {},", locked);
+        println!("  \"nodes_with_comments\": {},", with_comment);
+        println!("  \"nodes_with_urls\": {},", with_url);
+        println!("  \"nodes_with_owners\": {},", with_owner);
+        println!("  \"labeled_edges\": {},", labeled_edges);
+        println!("  \"max_in_degree\": {},", max_in);
+        println!("  \"max_out_degree\": {},", max_out);
+        println!("  \"shapes\": {{");
+        for (i, (name, count)) in shape_list.iter().enumerate() {
+            let comma = if i + 1 < shape_list.len() { "," } else { "" };
+            println!("    \"{}\": {}{}", name, count, comma);
+        }
+        println!("  }},");
+        println!("  \"sections\": {{");
+        for (i, (name, count)) in section_list.iter().enumerate() {
+            let comma = if i + 1 < section_list.len() { "," } else { "" };
+            println!("    \"{}\": {}{}", name, count, comma);
+        }
+        println!("  }}");
+        println!("}}");
+    } else {
+        println!("Diagram Statistics: {:?}", input);
+        println!("─────────────────────────────────────");
+        println!("  Nodes:             {}", node_count);
+        println!("  Edges:             {}", edge_count);
+        println!("  Frames/Groups:     {}", frames);
+        println!("  Disconnected:      {}", disconnected);
+        println!("  Locked:            {}", locked);
+        println!("  With comments:     {}", with_comment);
+        println!("  With URLs:         {}", with_url);
+        println!("  With owners:       {}", with_owner);
+        println!("  Labeled edges:     {}/{}", labeled_edges, edge_count);
+        println!("  Max in-degree:     {}", max_in);
+        println!("  Max out-degree:    {}", max_out);
+        if !shapes.is_empty() {
+            println!();
+            println!("  Shape distribution:");
+            let mut sorted: Vec<_> = shapes.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            for (name, count) in sorted {
+                println!("    {:16} {}", name, count);
+            }
+        }
+        if !sections.is_empty() {
+            println!();
+            println!("  Sections:");
+            let mut sorted: Vec<_> = sections.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            for (name, count) in sorted {
+                println!("    {:16} {} nodes", name, count);
+            }
+        }
+    }
+}
+
+fn cli_lint(input: PathBuf, strict: bool) {
+    let doc = load_doc(&input);
+    let mut warnings: Vec<String> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+
+    // Check for empty labels
+    for node in &doc.nodes {
+        let label = node.display_label();
+        if label.trim().is_empty() && !node.is_frame {
+            let id_str = if node.hrf_id.is_empty() { node.id.0.to_string() } else { node.hrf_id.clone() };
+            warnings.push(format!("Node [{}] has an empty label", id_str));
+        }
+    }
+
+    // Check for disconnected nodes (not frames)
+    let mut connected: std::collections::HashSet<crate::model::NodeId> = std::collections::HashSet::new();
+    for edge in &doc.edges {
+        connected.insert(edge.source.node_id);
+        connected.insert(edge.target.node_id);
+    }
+    for node in &doc.nodes {
+        if !node.is_frame && !connected.contains(&node.id) && doc.nodes.len() > 1 {
+            warnings.push(format!("Node {:?} is disconnected (no edges)", node.display_label()));
+        }
+    }
+
+    // Check for duplicate HRF IDs
+    let mut seen_ids: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for node in &doc.nodes {
+        if !node.hrf_id.is_empty() {
+            *seen_ids.entry(node.hrf_id.as_str()).or_default() += 1;
+        }
+    }
+    for (id, count) in &seen_ids {
+        if *count > 1 {
+            errors.push(format!("Duplicate HRF ID [{}] used {} times", id, count));
+        }
+    }
+
+    // Check for self-loops
+    for edge in &doc.edges {
+        if edge.source.node_id == edge.target.node_id {
+            warnings.push(format!("Self-loop on node {}",
+                doc.nodes.iter().find(|n| n.id == edge.source.node_id)
+                    .map(|n| n.display_label().to_string())
+                    .unwrap_or_else(|| "?".into())));
+        }
+    }
+
+    // Check for very high degree nodes (potential hub bottleneck)
+    let mut degrees: std::collections::HashMap<crate::model::NodeId, usize> = std::collections::HashMap::new();
+    for edge in &doc.edges {
+        *degrees.entry(edge.source.node_id).or_default() += 1;
+        *degrees.entry(edge.target.node_id).or_default() += 1;
+    }
+    for (nid, deg) in &degrees {
+        if *deg > 10 {
+            let label = doc.nodes.iter().find(|n| n.id == *nid)
+                .map(|n| n.display_label().to_string())
+                .unwrap_or_else(|| "?".into());
+            warnings.push(format!("Node {:?} has {} connections (consider splitting)", label, deg));
+        }
+    }
+
+    // Check for edges referencing missing nodes
+    let node_ids: std::collections::HashSet<crate::model::NodeId> = doc.nodes.iter().map(|n| n.id).collect();
+    for edge in &doc.edges {
+        if !node_ids.contains(&edge.source.node_id) {
+            errors.push(format!("Edge source references missing node {}", edge.source.node_id.0));
+        }
+        if !node_ids.contains(&edge.target.node_id) {
+            errors.push(format!("Edge target references missing node {}", edge.target.node_id.0));
+        }
+    }
+
+    // Check for overlapping nodes (same position, similar size)
+    for i in 0..doc.nodes.len() {
+        for j in (i + 1)..doc.nodes.len() {
+            let a = &doc.nodes[i];
+            let b = &doc.nodes[j];
+            if a.is_frame || b.is_frame { continue; }
+            let dx = (a.position[0] - b.position[0]).abs();
+            let dy = (a.position[1] - b.position[1]).abs();
+            if dx < 5.0 && dy < 5.0 {
+                warnings.push(format!("Nodes {:?} and {:?} overlap at same position",
+                    a.display_label(), b.display_label()));
+            }
+        }
+    }
+
+    // Output
+    let total = warnings.len() + errors.len();
+    if total == 0 {
+        println!("✓ No issues found in {:?} ({} nodes, {} edges)", input, doc.nodes.len(), doc.edges.len());
+    } else {
+        for e in &errors {
+            eprintln!("✗ ERROR: {}", e);
+        }
+        for w in &warnings {
+            eprintln!("⚠ WARNING: {}", w);
+        }
+        println!();
+        println!("{} error(s), {} warning(s) in {:?}", errors.len(), warnings.len(), input);
+        if !errors.is_empty() || (strict && !warnings.is_empty()) {
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cli_merge(base_path: PathBuf, overlay_path: PathBuf, out: Option<&std::path::Path>) {
+    let mut base = load_doc(&base_path);
+    let overlay = load_doc(&overlay_path);
+
+    // Build a mapping from overlay node IDs to new IDs to avoid conflicts
+    let mut id_map: std::collections::HashMap<crate::model::NodeId, crate::model::NodeId> = std::collections::HashMap::new();
+    let base_ids: std::collections::HashSet<crate::model::NodeId> = base.nodes.iter().map(|n| n.id).collect();
+
+    // Offset overlay nodes so they don't overlap with base nodes
+    let base_max_x = base.nodes.iter().map(|n| n.position[0] + n.size[0]).fold(0.0f32, f32::max);
+    let x_offset = if base_max_x > 0.0 { base_max_x + 100.0 } else { 0.0 };
+
+    for mut node in overlay.nodes {
+        let old_id = node.id;
+        if base_ids.contains(&old_id) {
+            // Assign a new ID to avoid collision
+            let new_id = crate::model::NodeId::new();
+            node.id = new_id;
+            id_map.insert(old_id, new_id);
+        } else {
+            id_map.insert(old_id, old_id);
+        }
+        node.position[0] += x_offset;
+        base.nodes.push(node);
+    }
+
+    for mut edge in overlay.edges {
+        edge.id = crate::model::EdgeId::new();
+        if let Some(&new_src) = id_map.get(&edge.source.node_id) {
+            edge.source.node_id = new_src;
+        }
+        if let Some(&new_tgt) = id_map.get(&edge.target.node_id) {
+            edge.target.node_id = new_tgt;
+        }
+        base.edges.push(edge);
+    }
+
+    // Merge layer names
+    for (k, v) in overlay.layer_names {
+        base.layer_names.entry(k).or_insert(v);
+    }
+
+    let output_text = crate::specgraph::hrf::export_hrf(&base, "");
+    match out {
+        Some(path) => {
+            std::fs::write(path, &output_text)
+                .unwrap_or_else(|e| { eprintln!("Write error: {}", e); std::process::exit(1); });
+            println!("Merged {:?} + {:?} → {:?} ({} nodes, {} edges)",
+                base_path, overlay_path, path, base.nodes.len(), base.edges.len());
+        }
+        None => print!("{}", output_text),
+    }
+}
+
 #[cfg(test)]
 mod cli_tests {
     #[test]
@@ -524,5 +874,42 @@ mod cli_tests {
         let _ = std::fs::remove_file(&tmp);
         assert!(content.contains("<svg"));
         assert!(content.contains("Alpha"));
+    }
+
+    #[test]
+    fn test_stats_counts() {
+        let spec = "## Nodes\n- [a] Alpha\n- [b] Beta\n- [c] Gamma\n## Flow\na --> b\nb --> c\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.nodes.len(), 3);
+        assert_eq!(doc.edges.len(), 2);
+    }
+
+    #[test]
+    fn test_lint_detects_disconnected() {
+        let spec = "## Nodes\n- [a] Alpha\n- [b] Beta\n- [c] Lonely\n## Flow\na --> b\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        // Lonely node 'c' has no edges
+        let connected: std::collections::HashSet<_> = doc.edges.iter()
+            .flat_map(|e| [e.source.node_id, e.target.node_id])
+            .collect();
+        let disconnected: Vec<_> = doc.nodes.iter()
+            .filter(|n| !n.is_frame && !connected.contains(&n.id))
+            .collect();
+        assert_eq!(disconnected.len(), 1);
+        assert_eq!(disconnected[0].display_label(), "Lonely");
+    }
+
+    #[test]
+    fn test_merge_combines_nodes() {
+        let spec_a = "## Nodes\n- [a] Alpha\n- [b] Beta\n## Flow\na --> b\n";
+        let spec_b = "## Nodes\n- [c] Gamma\n- [d] Delta\n## Flow\nc --> d\n";
+        let mut base = crate::specgraph::hrf::parse_hrf(spec_a).unwrap();
+        let overlay = crate::specgraph::hrf::parse_hrf(spec_b).unwrap();
+        let overlay_node_count = overlay.nodes.len();
+        let overlay_edge_count = overlay.edges.len();
+        for node in overlay.nodes { base.nodes.push(node); }
+        for edge in overlay.edges { base.edges.push(edge); }
+        assert_eq!(base.nodes.len(), 2 + overlay_node_count);
+        assert_eq!(base.edges.len(), 1 + overlay_edge_count);
     }
 }

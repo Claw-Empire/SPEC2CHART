@@ -30,6 +30,14 @@ pub enum Tool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusLevel {
+    Success,
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     TwoD,
     ThreeD,
@@ -119,7 +127,7 @@ pub struct FlowchartApp {
     pub(crate) selected_sticky_color: StickyColor,
     pub(crate) space_held: bool,
     pub(crate) canvas_rect: Rect,
-    pub(crate) status_message: Option<(String, std::time::Instant)>,
+    pub(crate) status_message: Option<(String, std::time::Instant, StatusLevel)>,
     pub(crate) focus_label_edit: bool,
     /// When Some, show a floating inline edge label editor at this screen position
     pub(crate) inline_edge_edit: Option<(EdgeId, Pos2)>,
@@ -221,6 +229,7 @@ pub struct FlowchartApp {
     /// Active tag filter: when set, non-matching nodes are dimmed
     pub(crate) tag_filter: Option<crate::model::NodeTag>,
     /// Deletion ghost animations: (canvas_center, canvas_size, fill_color, death_time)
+    #[allow(clippy::type_complexity)]
     pub(crate) deletion_ghosts: Vec<([f32; 2], [f32; 2], [u8; 4], f64)>,
     /// Toolbar (left panel) collapse state
     pub(crate) toolbar_collapsed: bool,
@@ -288,6 +297,118 @@ pub struct FlowchartApp {
     pub(crate) current_file_path: Option<std::path::PathBuf>,
     /// Recently opened/saved files, newest first. Max 10 entries. Persisted.
     pub(crate) recent_files: Vec<std::path::PathBuf>,
+    /// Diagram statistics overlay visible (toggle with Cmd+I)
+    pub(crate) show_stats_panel: bool,
+    /// Current quick color theme index applied to the diagram
+    pub(crate) color_theme: ColorTheme,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorTheme {
+    Default,
+    Ocean,
+    Forest,
+    Sunset,
+    Monochrome,
+    Neon,
+    Corporate,
+    Pastel,
+}
+
+impl ColorTheme {
+    pub const ALL: [ColorTheme; 8] = [
+        ColorTheme::Default,
+        ColorTheme::Ocean,
+        ColorTheme::Forest,
+        ColorTheme::Sunset,
+        ColorTheme::Monochrome,
+        ColorTheme::Neon,
+        ColorTheme::Corporate,
+        ColorTheme::Pastel,
+    ];
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            ColorTheme::Default => "Default",
+            ColorTheme::Ocean => "Ocean",
+            ColorTheme::Forest => "Forest",
+            ColorTheme::Sunset => "Sunset",
+            ColorTheme::Monochrome => "Monochrome",
+            ColorTheme::Neon => "Neon",
+            ColorTheme::Corporate => "Corporate",
+            ColorTheme::Pastel => "Pastel",
+        }
+    }
+
+    /// Returns a palette of 6 fill colors [r,g,b,a] for this theme.
+    pub fn palette(&self) -> [[u8; 4]; 6] {
+        match self {
+            ColorTheme::Default => [
+                [137, 180, 250, 255], // blue
+                [166, 227, 161, 255], // green
+                [243, 139, 168, 255], // red/pink
+                [249, 226, 175, 255], // yellow
+                [203, 166, 247, 255], // purple
+                [148, 226, 213, 255], // teal
+            ],
+            ColorTheme::Ocean => [
+                [30, 136, 229, 255],  // deep blue
+                [38, 198, 218, 255],  // cyan
+                [77, 182, 172, 255],  // teal
+                [100, 181, 246, 255], // light blue
+                [66, 165, 245, 255],  // mid blue
+                [0, 172, 193, 255],   // dark cyan
+            ],
+            ColorTheme::Forest => [
+                [67, 160, 71, 255],   // green
+                [139, 195, 74, 255],  // lime
+                [56, 142, 60, 255],   // dark green
+                [174, 213, 129, 255], // light green
+                [104, 159, 56, 255],  // olive
+                [129, 199, 132, 255], // sage
+            ],
+            ColorTheme::Sunset => [
+                [244, 81, 30, 255],   // deep orange
+                [255, 138, 101, 255], // salmon
+                [255, 183, 77, 255],  // amber
+                [255, 213, 79, 255],  // yellow
+                [239, 108, 0, 255],   // orange
+                [255, 167, 38, 255],  // light orange
+            ],
+            ColorTheme::Monochrome => [
+                [69, 71, 90, 255],    // dark gray
+                [108, 112, 134, 255], // mid gray
+                [147, 153, 178, 255], // light gray
+                [186, 194, 222, 255], // very light gray
+                [88, 91, 112, 255],   // charcoal
+                [127, 132, 156, 255], // silver
+            ],
+            ColorTheme::Neon => [
+                [0, 255, 136, 255],   // neon green
+                [0, 225, 255, 255],   // neon cyan
+                [255, 0, 128, 255],   // neon pink
+                [255, 234, 0, 255],   // neon yellow
+                [183, 0, 255, 255],   // neon purple
+                [255, 111, 0, 255],   // neon orange
+            ],
+            ColorTheme::Corporate => [
+                [33, 150, 243, 255],  // primary blue
+                [76, 175, 80, 255],   // success green
+                [96, 125, 139, 255],  // blue-grey
+                [69, 90, 100, 255],   // dark slate
+                [120, 144, 156, 255], // medium slate
+                [158, 158, 158, 255], // neutral grey
+            ],
+            ColorTheme::Pastel => [
+                [179, 229, 252, 255], // pastel blue
+                [200, 230, 201, 255], // pastel green
+                [255, 204, 188, 255], // pastel peach
+                [255, 236, 179, 255], // pastel yellow
+                [225, 190, 231, 255], // pastel purple
+                [178, 235, 242, 255], // pastel cyan
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -428,6 +549,8 @@ impl FlowchartApp {
             autosave_status: None,
             current_file_path: None,
             recent_files: load_recent_files(),
+            show_stats_panel: false,
+            color_theme: ColorTheme::Default,
         }
     }
 
@@ -443,27 +566,18 @@ impl FlowchartApp {
                         let name = path.file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "file".to_string());
-                        app.status_message = Some((
-                            format!("Opened {name}"),
-                            std::time::Instant::now(),
-                        ));
+                        app.set_status(format!("Opened {name}"), StatusLevel::Success);
                         app.push_recent(path.clone());
                         app.current_file_path = Some(path);
                         app.autosave_dirty = false;
                         save_recent_files(&app.recent_files);
                     }
                     Err(e) => {
-                        app.status_message = Some((
-                            format!("Failed to parse {:?}: {e}", path.file_name().unwrap_or_default()),
-                            std::time::Instant::now(),
-                        ));
+                        app.set_status(format!("Failed to parse {:?}: {e}", path.file_name().unwrap_or_default()), StatusLevel::Error);
                     }
                 },
                 Err(e) => {
-                    app.status_message = Some((
-                        format!("Failed to open {:?}: {e}", path.file_name().unwrap_or_default()),
-                        std::time::Instant::now(),
-                    ));
+                    app.set_status(format!("Failed to open {:?}: {e}", path.file_name().unwrap_or_default()), StatusLevel::Error);
                 }
             }
         }
@@ -499,6 +613,129 @@ impl FlowchartApp {
         None
     }
 
+    /// Set the status toast message with a severity level.
+    /// Replaces any existing toast immediately.
+    pub(crate) fn set_status(&mut self, msg: impl Into<String>, level: StatusLevel) {
+        self.status_message = Some((msg.into(), std::time::Instant::now(), level));
+    }
+
+    /// Apply a color theme to all non-frame nodes in the document.
+    /// Cycles through the theme's palette, assigning colors round-robin.
+    pub(crate) fn apply_color_theme(&mut self, theme: ColorTheme) {
+        self.color_theme = theme;
+        if theme == ColorTheme::Default {
+            // Default = don't override; leave existing colors as-is.
+            self.set_status("Theme: Default (no change)", StatusLevel::Info);
+            return;
+        }
+        let palette = theme.palette();
+        let mut idx = 0usize;
+        for node in &mut self.document.nodes {
+            if node.is_frame { continue; }
+            let fill = palette[idx % palette.len()];
+            node.style.fill_color = fill;
+            node.style.text_color = theme::auto_contrast_text(fill);
+            idx += 1;
+        }
+        self.history.push(&self.document);
+        self.set_status(format!("Applied theme: {}", theme.name()), StatusLevel::Success);
+    }
+
+    /// Draw the diagram statistics overlay panel (Cmd+I).
+    pub(crate) fn draw_stats_panel(&mut self, ctx: &egui::Context) {
+        if !self.show_stats_panel { return; }
+
+        let node_count = self.document.nodes.len();
+        let edge_count = self.document.edges.len();
+        let frame_count = self.document.nodes.iter().filter(|n| n.is_frame).count();
+        let locked_count = self.document.nodes.iter().filter(|n| n.locked).count();
+
+        // Connectivity
+        let mut connected: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+        for edge in &self.document.edges {
+            connected.insert(edge.source.node_id);
+            connected.insert(edge.target.node_id);
+        }
+        let disconnected = self.document.nodes.iter()
+            .filter(|n| !n.is_frame && !connected.contains(&n.id))
+            .count();
+
+        // Shape distribution
+        let mut shapes: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for node in &self.document.nodes {
+            let name = match &node.kind {
+                NodeKind::Shape { shape, .. } => shape.default_label(),
+                NodeKind::StickyNote { .. } => "Sticky",
+                NodeKind::Entity { .. } => "Entity",
+                NodeKind::Text { .. } => "Text",
+            };
+            *shapes.entry(name).or_default() += 1;
+        }
+
+        // Section breakdown
+        let mut sections: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for node in &self.document.nodes {
+            if !node.section_name.is_empty() {
+                *sections.entry(node.section_name.as_str()).or_default() += 1;
+            }
+        }
+
+        egui::Window::new("Diagram Statistics")
+            .collapsible(true)
+            .resizable(false)
+            .default_width(240.0)
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-60.0, 40.0))
+            .show(ctx, |ui| {
+                ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 3.0);
+
+                ui.heading("Overview");
+                ui.label(format!("Nodes: {}", node_count));
+                ui.label(format!("Edges: {}", edge_count));
+                ui.label(format!("Frames: {}", frame_count));
+                ui.label(format!("Locked: {}", locked_count));
+                ui.label(format!("Disconnected: {}", disconnected));
+
+                if !shapes.is_empty() {
+                    ui.add_space(4.0);
+                    ui.heading("Shapes");
+                    let mut sorted: Vec<_> = shapes.iter().collect();
+                    sorted.sort_by(|a, b| b.1.cmp(a.1));
+                    for (name, count) in sorted {
+                        ui.label(format!("  {} {}", count, name));
+                    }
+                }
+
+                if !sections.is_empty() {
+                    ui.add_space(4.0);
+                    ui.heading("Sections");
+                    let mut sorted: Vec<_> = sections.iter().collect();
+                    sorted.sort_by(|a, b| b.1.cmp(a.1));
+                    for (name, count) in sorted {
+                        ui.label(format!("  {} ({})", name, count));
+                    }
+                }
+
+                // Complexity rating
+                ui.add_space(4.0);
+                let complexity = if node_count == 0 { 0 }
+                    else if node_count <= 5 && edge_count <= 5 { 1 }
+                    else if node_count <= 15 && edge_count <= 20 { 2 }
+                    else if node_count <= 30 && edge_count <= 50 { 3 }
+                    else if node_count <= 60 { 4 }
+                    else { 5 };
+                let rating = match complexity {
+                    0 => "Empty",
+                    1 => "Simple",
+                    2 => "Moderate",
+                    3 => "Complex",
+                    4 => "Very Complex",
+                    _ => "Massive",
+                };
+                ui.heading("Complexity");
+                ui.label(format!("  {} (level {})", rating, complexity));
+            });
+    }
+
     /// Toggle between dark and light mode, re-applying egui visuals.
     pub(crate) fn toggle_dark_mode(&mut self, ctx: &egui::Context) {
         self.dark_mode = !self.dark_mode;
@@ -512,7 +749,7 @@ impl FlowchartApp {
         let bg = self.theme.canvas_bg;
         self.canvas_bg = [bg.r(), bg.g(), bg.b(), bg.a()];
         let label = if self.dark_mode { "Dark mode" } else { "Light mode" };
-        self.status_message = Some((label.to_string(), std::time::Instant::now()));
+        self.set_status(label, StatusLevel::Info);
     }
 
     /// Apply theme colors to egui visuals.
@@ -600,14 +837,14 @@ impl FlowchartApp {
         self.presentation_slide_index = 0;
         self.presentation_mode = true;
         self.fit_to_frame(0);
-        self.status_message = Some(("Presentation mode".to_string(), std::time::Instant::now()));
+        self.set_status("Presentation mode", StatusLevel::Info);
     }
 
     pub(crate) fn exit_presentation_mode(&mut self) {
         self.presentation_mode = false;
         self.presentation_slides.clear();
         self.pending_fit = true;
-        self.status_message = Some(("Presentation mode off".to_string(), std::time::Instant::now()));
+        self.set_status("Presentation mode off", StatusLevel::Info);
     }
 
     pub(crate) fn presentation_next_slide(&mut self) {
@@ -682,20 +919,20 @@ impl FlowchartApp {
                     self.push_recent(path.clone());
                     self.current_file_path = Some(path);
                     save_recent_files(&self.recent_files);
-                    self.status_message = Some((format!("Opened {fname}"), std::time::Instant::now()));
+                    self.set_status(format!("Opened {fname}"), StatusLevel::Success);
                 }
                 Err(e) => {
-                    self.status_message = Some((format!("Parse error: {e}"), std::time::Instant::now()));
+                    self.set_status(format!("Parse error: {e}"), StatusLevel::Error);
                 }
             },
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     self.recent_files.retain(|p| p != &path);
                     save_recent_files(&self.recent_files);
-                    self.status_message = Some((format!("File not found: {}", path.display()), std::time::Instant::now()));
+                    self.set_status(format!("File not found: {}", path.display()), StatusLevel::Warning);
                 } else {
                     let fname = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    self.status_message = Some((format!("Could not open {fname}: {e}"), std::time::Instant::now()));
+                    self.set_status(format!("Could not open {fname}: {e}"), StatusLevel::Error);
                 }
             }
         }
@@ -722,17 +959,11 @@ impl FlowchartApp {
                         .unwrap_or_default();
                     let n = self.document.nodes.len();
                     let e = self.document.edges.len();
-                    self.status_message = Some((
-                        format!("Saved {fname} ({n} nodes, {e} edges)"),
-                        std::time::Instant::now(),
-                    ));
+                    self.set_status(format!("Saved {fname} ({n} nodes, {e} edges)"), StatusLevel::Success);
                 }
             }
             Err(e) => {
-                self.status_message = Some((
-                    format!("Save failed: {e}"),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("Save failed: {e}"), StatusLevel::Error);
             }
         }
     }
@@ -744,9 +975,13 @@ impl FlowchartApp {
 
 impl eframe::App for FlowchartApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some((msg, time)) = &self.status_message {
-            // Longer messages get more reading time (min 2s, +0.5s per 20 chars)
-            let duration = 2.0_f32 + (msg.len() as f32 / 20.0).min(2.0) * 0.5;
+        if let Some((msg, time, level)) = &self.status_message {
+            // Error toasts stay longer (5s); others: min 2s + 0.5s per 20 chars
+            let duration = if *level == StatusLevel::Error {
+                5.0_f32
+            } else {
+                2.0_f32 + (msg.len() as f32 / 20.0).min(2.0) * 0.5
+            };
             if time.elapsed().as_secs_f32() > duration {
                 self.status_message = None;
             }
@@ -760,7 +995,7 @@ impl eframe::App for FlowchartApp {
         let has_active_toast = self
             .status_message
             .as_ref()
-            .map_or(false, |(_, t)| t.elapsed().as_secs_f32() < 2.5);
+            .is_some_and(|(_, t, _)| t.elapsed().as_secs_f32() < 2.5);
         match self.drag {
             DragState::None if !has_active_toast && !transitioning => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -790,10 +1025,10 @@ impl eframe::App for FlowchartApp {
                             self.pending_fit = true;
                             let n = self.document.nodes.len();
                             let e = self.document.edges.len();
-                            self.status_message = Some((format!("Template loaded — {n} nodes, {e} edges"), std::time::Instant::now()));
+                            self.set_status(format!("Template loaded — {n} nodes, {e} edges"), StatusLevel::Success);
                         }
                         Err(e) => {
-                            self.status_message = Some((format!("Template error: {}", e), std::time::Instant::now()));
+                            self.set_status(format!("Template error: {}", e), StatusLevel::Error);
                         }
                     }
                 }
@@ -803,7 +1038,7 @@ impl eframe::App for FlowchartApp {
                     self.autosave_dirty = true;
                     self.document = crate::model::FlowchartDocument::default();
                     self.selection.clear();
-                    self.status_message = Some(("Fresh canvas — double-click to add your first node".to_string(), std::time::Instant::now()));
+                    self.set_status("Fresh canvas — double-click to add your first node", StatusLevel::Info);
                 }
                 GallerySelection::RecentFile(path) => {
                     self.open_recent_file(path);
@@ -824,17 +1059,17 @@ impl eframe::App for FlowchartApp {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button("Restore").clicked() {
-                            if let Ok(json) = std::fs::read_to_string(&self.autosave_path.clone()) {
+                            if let Ok(json) = std::fs::read_to_string(self.autosave_path.clone()) {
                                 if let Ok(doc) = serde_json::from_str::<crate::model::FlowchartDocument>(&json) {
                                     self.document = doc;
                                     self.pending_fit = true;
-                                    self.status_message = Some(("Restored from autosave".to_string(), std::time::Instant::now()));
+                                    self.set_status("Restored from autosave", StatusLevel::Success);
                                 }
                             }
                             keep = false;
                         }
                         if ui.button("Discard").clicked() {
-                            let _ = std::fs::remove_file(&self.autosave_path.clone());
+                            let _ = std::fs::remove_file(self.autosave_path.clone());
                             keep = false;
                         }
                     });
@@ -897,6 +1132,7 @@ impl eframe::App for FlowchartApp {
         self.draw_comment_editor(ctx);
         self.draw_shortcuts_panel(ctx);
         self.draw_spec_editor(ctx);
+        self.draw_stats_panel(ctx);
 
         // Spec editor debounce: re-parse 400ms after last keystroke
         if self.show_spec_editor {
@@ -960,15 +1196,15 @@ impl eframe::App for FlowchartApp {
                             self.document = doc;
                             self.selection.clear();
                             self.pending_fit = do_fit;
-                            self.status_message = Some((format!("Imported {filename}"), std::time::Instant::now()));
+                            self.set_status(format!("Imported {filename}"), StatusLevel::Success);
                         }
                         Err(e) => {
-                            self.status_message = Some((format!("Drop failed: {e}"), std::time::Instant::now()));
+                            self.set_status(format!("Drop failed: {e}"), StatusLevel::Error);
                         }
                     }
                 }
                 Err(e) => {
-                    self.status_message = Some((format!("Drop failed: {e}"), std::time::Instant::now()));
+                    self.set_status(format!("Drop failed: {e}"), StatusLevel::Error);
                 }
             }
         }

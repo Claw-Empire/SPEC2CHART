@@ -1,18 +1,30 @@
 ## Config
 title: Incident Map
-flow = LR
+flow = TB
 
 ## Nodes
-- [alert] Alert Triggered {critical} {fill:#cc3333}
-- [oncall] On-Call Eng {person}
-- [slack] Slack Notify {rounded}
-- [runbook] Runbook {document}
-- [mitigate] Mitigation {rounded}
-- [postmortem] Post-Mortem {document}
+- [alert] Alert Triggered {rounded} {fill:#f38ba8} {critical}
+  PagerDuty high-sev page.
+- [oncall] On-Call Eng {person} {fill:#89b4fa}
+  Primary responder.
+- [slack] Slack Notify {rounded} {fill:#a6e3a1} {ok}
+  #incident channel ping.
+- [triage] Triage {diamond} {fill:#f9e2af} {wip}
+  Root cause hunt.
+- [runbook] Runbook {document} {fill:#cba6f7}
+  Step-by-step playbook.
+- [mitigate] Mitigation {rounded} {fill:#a6e3a1} {ok}
+  Apply fix + verify.
+- [comms] Status Comms {rounded} {fill:#f9e2af} {info}
+  Customer updates.
+- [postmortem] Post-Mortem {document} {fill:#cba6f7} {todo}
+  Blameless write-up.
 
 ## Flow
 alert --> oncall: pages
 oncall --> slack: notifies team
-oncall --> runbook: follows
+oncall --> triage: investigates
+triage --> runbook: follows
 runbook --> mitigate: applies fix
+mitigate --> comms: updates
 mitigate --> postmortem: creates

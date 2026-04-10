@@ -33,7 +33,7 @@ fn spec_syntax_layout_ex(ui: &egui::Ui, text: &str, wrap_width: f32, error_line:
     job.wrap.break_anywhere = false;
 
     let c_err_bg   = Color32::from_rgba_premultiplied(243, 139, 168, 30); // subtle red bg for error line
-    let fmt = |color: Color32| TextFormat { font_id: font.clone(), color, ..Default::default() };
+    let _fmt = |color: Color32| TextFormat { font_id: font.clone(), color, ..Default::default() };
     let fmt_bg = |color: Color32, bg: Color32| TextFormat { font_id: font.clone(), color, background: bg, ..Default::default() };
 
     let mut line_num: usize = 0;
@@ -76,11 +76,13 @@ fn spec_syntax_layout_ex(ui: &egui::Ui, text: &str, wrap_width: f32, error_line:
 }
 
 /// Compat wrapper: no error line highlighting.
+#[allow(dead_code)]
 fn spec_syntax_layout(ui: &egui::Ui, text: &str, wrap_width: f32) -> std::sync::Arc<egui::Galley> {
     spec_syntax_layout_ex(ui, text, wrap_width, None)
 }
 
 /// Append a line (no background highlight).
+#[allow(dead_code)]
 fn append_line_with_tags(
     job: &mut egui::text::LayoutJob,
     line: &str,
@@ -337,10 +339,7 @@ impl FlowchartApp {
             }
             if changed > 0 {
                 self.history.push(&self.document);
-                self.status_message = Some((
-                    format!("Replaced {changed} node(s)"),
-                    std::time::Instant::now(),
-                ));
+                self.set_status(format!("Replaced {changed} node(s)"), super::StatusLevel::Success);
             }
         }
         self.show_find_replace = open;
@@ -447,7 +446,7 @@ impl FlowchartApp {
                 if ui
                     .ctx()
                     .pointer_latest_pos()
-                    .map_or(false, |_p| !ui.ctx().is_pointer_over_area())
+                    .is_some_and(|_p| !ui.ctx().is_pointer_over_area())
                 {
                     close = true;
                 }
@@ -491,7 +490,7 @@ impl FlowchartApp {
             self.selection.select_node(id);
             self.focus_label_edit = true;
             self.history.push(&self.document);
-            self.status_message = Some(("Node inserted".to_string(), std::time::Instant::now()));
+            self.set_status("Node inserted", super::StatusLevel::Info);
         }
         if close {
             self.shape_picker = None;
@@ -861,7 +860,7 @@ impl FlowchartApp {
                         ui.add_space(4.0);
                         if ui.small_button("⎘").on_hover_text("Copy spec to clipboard").clicked() {
                             ui.ctx().copy_text(self.spec_editor_text.clone());
-                            self.status_message = Some(("Spec copied to clipboard".to_string(), std::time::Instant::now()));
+                            self.set_status("Spec copied to clipboard", super::StatusLevel::Success);
                         }
                         ui.add_space(4.0);
                         if ui.small_button("↻").on_hover_text("Sync text from current canvas state").clicked() {
@@ -1000,7 +999,7 @@ impl FlowchartApp {
                 let n = self.document.nodes.len();
                 let e = self.document.edges.len();
                 let total_lines = self.spec_editor_text.lines().count();
-                let (footer_text, footer_color) = if let Some(_) = self.spec_editor_last_edit {
+                let (footer_text, footer_color) = if self.spec_editor_last_edit.is_some() {
                     ("⏱ parsing…".to_string(), theme.text_dim)
                 } else if self.spec_editor_error.is_some() {
                     ("✗ parse error".to_string(), Color32::from_rgb(243, 139, 168))

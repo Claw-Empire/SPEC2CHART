@@ -7,6 +7,12 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub Uuid);
 
+impl Default for NodeId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NodeId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
@@ -15,6 +21,12 @@ impl NodeId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EdgeId(pub Uuid);
+
+impl Default for EdgeId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl EdgeId {
     pub fn new() -> Self {
@@ -604,16 +616,15 @@ pub struct Port {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ArrowHead {
+    #[default]
     Filled,
     Open,
     Circle,
     None,
 }
 
-impl Default for ArrowHead {
-    fn default() -> Self { Self::Filled }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeStyle {

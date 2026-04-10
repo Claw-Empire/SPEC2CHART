@@ -329,7 +329,7 @@ pub fn auto_layout(doc: &mut FlowchartDocument) {
         swimlane_layout(doc);
         return;
     }
-    if doc.timeline_mode || !doc.timeline_lanes.is_empty() {
+    if (doc.timeline_mode || !doc.timeline_lanes.is_empty()) && !doc.timeline_periods.is_empty() {
         timeline_layout(doc);
     } else {
         hierarchical_layout(doc);
@@ -385,8 +385,8 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
     let mut queue: VecDeque<usize> = VecDeque::new();
     let mut topo: Vec<usize> = Vec::with_capacity(n);
 
-    for i in 0..n {
-        if rem_in[i] == 0 {
+    for (i, &remaining) in rem_in.iter().enumerate() {
+        if remaining == 0 {
             queue.push_back(i);
         }
     }
@@ -417,8 +417,8 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
         layers[layer[i] as usize].push(i);
     }
     // Then add any remaining (cycle) nodes
-    for i in 0..n {
-        if rem_in[i] > 0 {
+    for (i, &remaining) in rem_in.iter().enumerate() {
+        if remaining > 0 {
             // still had unresolved in-edges → part of a cycle
             layers[0].push(i);
         }
@@ -427,8 +427,8 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
     // Layout constants — use config values when non-zero, else defaults
     let gap_main_default = 80.0_f32;
     let gap_cross_default = 60.0_f32;
-    let GAP_MAIN: f32 = if doc.layout_gap_main > 0.0 { doc.layout_gap_main } else { gap_main_default };
-    let GAP_CROSS: f32 = if doc.layout_gap_cross > 0.0 { doc.layout_gap_cross } else { gap_cross_default };
+    let gap_main: f32 = if doc.layout_gap_main > 0.0 { doc.layout_gap_main } else { gap_main_default };
+    let gap_cross: f32 = if doc.layout_gap_cross > 0.0 { doc.layout_gap_cross } else { gap_cross_default };
     const START: f32 = 100.0;
 
     // Determine if this is an LR/RL layout (horizontal main axis)
@@ -439,7 +439,7 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
         // LR/RL: layers advance along X, nodes within a layer stacked along Y
         let layer_heights: Vec<f32> = layers.iter().map(|nodes| {
             let h: f32 = nodes.iter().map(|&i| doc.nodes[i].size[1]).sum();
-            let g = GAP_CROSS * (nodes.len().saturating_sub(1) as f32);
+            let g = gap_cross * (nodes.len().saturating_sub(1) as f32);
             h + g
         }).collect();
 
@@ -463,15 +463,15 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
                     let x_offset = (max_w - node_w) / 2.0;
                     doc.nodes[i].position = [x + x_offset, y];
                 }
-                y += doc.nodes[i].size[1] + GAP_CROSS;
+                y += doc.nodes[i].size[1] + gap_cross;
             }
-            x += max_w + GAP_MAIN;
+            x += max_w + gap_main;
         }
     } else {
         // TB/BT (default): layers advance along Y, nodes within a layer spread along X
         let layer_widths: Vec<f32> = layers.iter().map(|nodes| {
             let w: f32 = nodes.iter().map(|&i| doc.nodes[i].size[0]).sum();
-            let g = GAP_CROSS * (nodes.len().saturating_sub(1) as f32);
+            let g = gap_cross * (nodes.len().saturating_sub(1) as f32);
             w + g
         }).collect();
 
@@ -495,9 +495,9 @@ fn hierarchical_layout_dir(doc: &mut FlowchartDocument, dir: &str) {
                     let y_offset = (max_h - node_h) / 2.0;
                     doc.nodes[i].position = [x, y + y_offset];
                 }
-                x += doc.nodes[i].size[0] + GAP_CROSS;
+                x += doc.nodes[i].size[0] + gap_cross;
             }
-            y += max_h + GAP_MAIN;
+            y += max_h + gap_main;
         }
     }
 }
@@ -567,5 +567,19 @@ mod tests {
             alpha.position[1],
             beta.position[1]
         );
+    }
+
+    #[test]
+    fn test_roadmap_lr_layout_separation() {
+        use crate::specgraph::hrf::parse_hrf;
+        // Include ## Timeline to match the actual template
+        let spec = "## Config\nflow = LR\n\n## Timeline\n\n## Nodes\n- [q1] Q1 {hexagon}\n- [q2] Q2 {hexagon}\n- [q3] Q3 {hexagon}\n- [f1] Feat1 {diamond}\n- [f2] Feat2 {diamond}\n- [f3] Feat3 {diamond}\n\n## Flow\nq1 --> q2: next\nq2 --> q3: next\nq1 --> f1: delivers\nq2 --> f2: delivers\nq3 --> f3: delivers\nf1 --> f2: unlocks\nf2 --> f3: enables\n";
+        let mut doc = parse_hrf(spec).unwrap();
+        auto_layout(&mut doc);
+        // Q1 should be leftmost (layer 0), Q3 should be rightmost
+        let q1 = doc.nodes.iter().find(|n| n.hrf_id == "q1").unwrap();
+        let q3 = doc.nodes.iter().find(|n| n.hrf_id == "q3").unwrap();
+        assert!(q1.position[0] < q3.position[0],
+            "Q1 should be left of Q3: q1.x={}, q3.x={}", q1.position[0], q3.position[0]);
     }
 }

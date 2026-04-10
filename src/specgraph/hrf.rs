@@ -118,7 +118,7 @@ use std::collections::HashMap;
 ///   `{weight:N}` — edge weight/importance (1=thin, 2=normal, 3=thick, 4+=very thick)
 ///   `{note:text}` / `{comment:text}` — annotation shown as tooltip when hovering the edge
 ///   Indented line after an edge → sets the edge comment (multi-word description):
-///   ```
+///   ```text
 ///   api -> db
 ///     Reads and writes user records. Uses connection pooling.
 ///   ```
@@ -213,8 +213,8 @@ fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
     // First pass: collect palette entries
     for line in input.lines() {
         let t = line.trim();
-        if t.starts_with("## ") {
-            let h = t[3..].trim().to_lowercase();
+        if let Some(rest) = t.strip_prefix("## ") {
+            let h = rest.trim().to_lowercase();
             in_palette = matches!(h.as_str(), "palette" | "colors" | "colour" | "colours" | "theme");
             continue;
         }
@@ -237,8 +237,8 @@ fn expand_palette(input: &str) -> (String, HashMap<String, [u8; 4]>) {
     let mut in_pal = false;
     for line in input.lines() {
         let t = line.trim();
-        if t.starts_with("## ") {
-            let h = t[3..].trim().to_lowercase();
+        if let Some(rest) = t.strip_prefix("## ") {
+            let h = rest.trim().to_lowercase();
             in_pal = matches!(h.as_str(), "palette" | "colors" | "colour" | "colours" | "theme");
             out.push_str(line); out.push('\n');
             continue;
@@ -277,8 +277,8 @@ fn expand_styles(input: &str) -> String {
     // First pass: collect style definitions
     for line in input.lines() {
         let t = line.trim();
-        if t.starts_with("## ") {
-            let h = t[3..].trim().to_lowercase();
+        if let Some(rest) = t.strip_prefix("## ") {
+            let h = rest.trim().to_lowercase();
             in_style = matches!(h.as_str(), "style" | "styles" | "template" | "templates" | "vars" | "macros");
             continue;
         }
@@ -308,8 +308,8 @@ fn expand_styles(input: &str) -> String {
     let mut skip = false;
     for line in input.lines() {
         let t = line.trim();
-        if t.starts_with("## ") {
-            let h = t[3..].trim().to_lowercase();
+        if let Some(rest) = t.strip_prefix("## ") {
+            let h = rest.trim().to_lowercase();
             skip = matches!(h.as_str(), "style" | "styles" | "template" | "templates" | "vars" | "macros");
             out.push_str(line); out.push('\n');
             continue;
@@ -345,8 +345,8 @@ fn expand_layers(input: &str) -> String {
     // First pass: collect layer definitions
     for line in input.lines() {
         let t = line.trim();
-        if t.starts_with("## ") {
-            let h = t[3..].trim().to_lowercase();
+        if let Some(rest) = t.strip_prefix("## ") {
+            let h = rest.trim().to_lowercase();
             in_layers = matches!(h.as_str(), "layers" | "layer-map" | "layer-names" | "z-layers");
             continue;
         }
@@ -384,8 +384,8 @@ fn expand_layers(input: &str) -> String {
     let mut in_layers_skip = false;
     for line in input.lines() {
         let t = line.trim();
-        if t.starts_with("## ") {
-            let h = t[3..].trim().to_lowercase();
+        if let Some(rest) = t.strip_prefix("## ") {
+            let h = rest.trim().to_lowercase();
             in_layers_skip = matches!(h.as_str(), "layers" | "layer-map" | "layer-names" | "z-layers");
             out.push_str(line); out.push('\n');
             continue;
@@ -436,6 +436,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     let mut last_flow_edge_ids: Vec<crate::model::EdgeId> = Vec::new();
 
     // ## Groups section: (group_id, label, fill_color, member_ids)
+    #[allow(clippy::type_complexity)]
     let mut groups: Vec<(String, String, Option<[u8;4]>, Vec<String>)> = Vec::new();
 
     // Inline group assignments from {group:name} tags in ## Nodes section
@@ -511,7 +512,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
 
         // Section headers
-        if trimmed.starts_with("## ") {
+        if let Some(after_hash) = trimmed.strip_prefix("## ") {
             seen_section = true;
             last_node_id = None;
             last_flow_edge_ids.clear();
@@ -527,7 +528,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             current_kanban_col = None;
             orgtree_parent_stack.clear();
             // Preserve original case for layer names, lowercase only for matching
-            let header_raw = trimmed[3..].trim();
+            let header_raw = after_hash.trim();
             let header = header_raw.to_lowercase();
             section = match header.as_str() {
                 // Node / component section aliases
@@ -716,8 +717,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     // Check for "Layer N" or "Layer N: Name" patterns
                     // "layer 0", "layer 1", "layer 2", ... → z = N * Z_SPACING (120)
                     // "layer z:120", "layer z=120" → z = 120 (explicit)
-                    } else if header.starts_with("layer") {
-                        let after_lower = header[5..].trim();
+                    } else if let Some(after_layer) = header.strip_prefix("layer") {
+                        let after_lower = after_layer.trim();
                         let after_raw = header_raw[5..].trim();
                         let z = if after_lower.is_empty() {
                             0.0_f32
@@ -833,7 +834,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         deferred_inline_edges.push((id.clone(), target_id, edge_tags));
                     }
                     // Find the parent: pop stack entries that are at same or deeper indent
-                    while orgtree_parent_stack.last().map_or(false, |&(d, _)| d >= indent_len) {
+                    while orgtree_parent_stack.last().is_some_and(|&(d, _)| d >= indent_len) {
                         orgtree_parent_stack.pop();
                     }
                     if let Some(&(_, parent_id)) = orgtree_parent_stack.last() {
@@ -846,9 +847,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     orgtree_parent_stack.push((indent_len, child_id));
                     last_node_id = Some(child_id);
                     doc.nodes.push(node);
-                } else if trimmed.starts_with("- ") {
+                } else if let Some(stripped) = trimmed.strip_prefix("- ") {
                     // New top-level node definition — may have inline edges: "- [id] Label → target1, target2 {tags}"
-                    let stripped = &trimmed[2..];
                     // Split on → or -> (outside braces) for inline edges
                     let (node_part, inline_targets) = split_inline_edges(stripped);
                     let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
@@ -963,8 +963,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 }
             }
             Section::Notes => {
-                if trimmed.starts_with("- ") {
-                    let stripped = &trimmed[2..];
+                if let Some(stripped) = trimmed.strip_prefix("- ") {
                     let node = parse_note_line(stripped)?;
                     doc.nodes.push(node);
                 }
@@ -973,7 +972,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 // Format: - [group_id] Group Name {fill:blue}
                 //           member1, member2, member3
                 if trimmed.starts_with("- ") || trimmed.starts_with("- [") {
-                    let stripped = if trimmed.starts_with("- ") { &trimmed[2..] } else { trimmed };
+                    let stripped = trimmed.strip_prefix("- ").unwrap_or(trimmed);
                     if stripped.contains('[') {
                         let id_start = stripped.find('[').unwrap();
                         let id_end = stripped.find(']').unwrap_or(stripped.len());
@@ -1036,7 +1035,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 let stripped = {
                     let t = trimmed;
                     if t.starts_with(|c: char| c.is_ascii_digit()) {
-                        let end = t.find(|c: char| c == '.' || c == ')').map(|i| i + 1).unwrap_or(0);
+                        let end = t.find(['.', ')']).map(|i| i + 1).unwrap_or(0);
                         if end > 0 && t[end..].starts_with(' ') { t[end..].trim_start() } else { t }
                     } else if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") {
                         &t[2..]
@@ -1052,7 +1051,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         .unwrap_or(raw_label_and_tags.len());
                     let after_first = raw_label_and_tags[first_word_end..].trim();
                     if let Some(colon_pos) = after_first.find(':') {
-                        if colon_pos > 0 && !after_first[..colon_pos].contains(|c: char| c == '/' || c == '{') {
+                        if colon_pos > 0 && !after_first[..colon_pos].contains(['/', '{']) {
                             let title = format!("{} {}", &raw_label_and_tags[..first_word_end], &after_first[..colon_pos]).trim().to_string();
                             let desc  = after_first[colon_pos + 1..].trim().to_string();
                             (title, if desc.is_empty() { None } else { Some(desc) })
@@ -1091,7 +1090,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 if let Some(prev_id) = s_last_id {
                     let e = Edge::new(
                         Port { node_id: prev_id, side: PortSide::Right },
-                        Port { node_id: node_id, side: PortSide::Left },
+                        Port { node_id, side: PortSide::Left },
                     );
                     doc.edges.push(e);
                 }
@@ -1103,8 +1102,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 doc.nodes.push(node);
             }
             Section::Grid { ref mut nodes, default_z, .. } => {
-                if trimmed.starts_with("- ") {
-                    let stripped = &trimmed[2..];
+                if let Some(stripped) = trimmed.strip_prefix("- ") {
                     let (node_part, inline_targets) = split_inline_edges(stripped);
                     let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
                     if node.z_offset == 0.0 && default_z != 0.0 {
@@ -1126,8 +1124,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 // Nodes parsed under a Period section are handled by Section::Nodes logic
                 // after the section header sets current_period. Here we parse them the
                 // same way — route through the Nodes arm by converting on the fly.
-                if trimmed.starts_with("- ") {
-                    let stripped = &trimmed[2..];
+                if let Some(stripped) = trimmed.strip_prefix("- ") {
                     let (node_part, inline_targets) = split_inline_edges(stripped);
                     let (id, mut node, deps) = parse_node_line(node_part, line_num)?;
                     node.timeline_period = current_period.clone();
@@ -1176,10 +1173,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 Port { node_id: tgt_node_id, side: PortSide::Left },
             );
             for etag in edge_tags {
-                if etag.starts_with("color:") {
-                    if let Some(c) = tag_to_edge_color(etag[6..].trim()) { edge.style.color = c; }
-                } else if etag.starts_with("note:") {
-                    edge.comment = etag[5..].trim().to_string();
+                if let Some(rest) = etag.strip_prefix("color:") {
+                    if let Some(c) = tag_to_edge_color(rest.trim()) { edge.style.color = c; }
+                } else if let Some(rest) = etag.strip_prefix("note:") {
+                    edge.comment = rest.trim().to_string();
                 } else {
                     match etag.as_str() {
                         "dashed" | "dash" => edge.style.dashed = true,
@@ -1506,7 +1503,7 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             let label = {
                 let mut s = group_name.clone();
                 if let Some(c) = s.get_mut(0..1) { c.make_ascii_uppercase(); }
-                s.replace('-', " ").replace('_', " ")
+                s.replace(['-', '_'], " ")
             };
             if let NodeKind::Shape { label: ref mut l, .. } = frame.kind {
                 *l = label;
@@ -2081,6 +2078,7 @@ enum Section {
     /// Nodes are collected in order; positions are assigned after the section ends.
     Grid { cols: usize, default_z: f32, nodes: Vec<NodeId> },
     /// `## Period N: Label` — nodes parsed below belong to this timeline period.
+    #[allow(dead_code)]
     Period { label: String },
     /// `## Lane N: Name` — declares a swim-lane (order preserved in doc.timeline_lanes).
     Lane,
@@ -2244,14 +2242,9 @@ fn parse_flow_line_chain(
         .replace("<===", "<--")
         .replace("<~~",  "<--")
         // Unicode arrows
-        .replace('→', "-->")   // U+2192 RIGHTWARDS ARROW
-        .replace('⇒', "-->")   // U+21D2 RIGHTWARDS DOUBLE ARROW
-        .replace('⟶', "-->")   // U+27F6 LONG RIGHTWARDS ARROW
-        .replace('←', "<--")   // U+2190 LEFTWARDS ARROW
-        .replace('⟵', "<--")   // U+27F5 LONG LEFTWARDS ARROW
-        .replace('↔', "<->")   // U+2194 LEFT RIGHT ARROW
-        .replace('⇔', "<->")   // U+21D4 LEFT RIGHT DOUBLE ARROW
-        .replace('⟷', "<->")   // U+27F7 LONG LEFT RIGHT ARROW
+        .replace(['→', '⇒', '⟶'], "-->")   // U+27F6 LONG RIGHTWARDS ARROW
+        .replace(['←', '⟵'], "<--")   // U+27F5 LONG LEFTWARDS ARROW
+        .replace(['↔', '⇔', '⟷'], "<->")   // U+27F7 LONG LEFT RIGHT ARROW
         ;
     let line = line_unicode_normalized.as_str();
 
@@ -2309,10 +2302,10 @@ fn parse_flow_line_chain(
 
         // right may start with a Mermaid-style pipe label: |label text| node_id {tags}
         // Detect and extract it BEFORE the extract_tags call.
-        let (right, pipe_label) = if right.starts_with('|') {
-            if let Some(close_pipe) = right[1..].find('|') {
-                let lbl = right[1..close_pipe + 1].trim().to_string();
-                let after_pipe = right[close_pipe + 2..].trim();
+        let (right, pipe_label) = if let Some(after_pipe_open) = right.strip_prefix('|') {
+            if let Some(close_pipe) = after_pipe_open.find('|') {
+                let lbl = after_pipe_open[..close_pipe].trim().to_string();
+                let after_pipe = after_pipe_open[close_pipe + 1..].trim();
                 (after_pipe, lbl)
             } else {
                 (right, String::new())
@@ -2329,10 +2322,10 @@ fn parse_flow_line_chain(
         // Now to_id_raw may be: "b" or "b: auth flow" or "b : auth flow" or `"Display Name"`
         let (to_id, colon_label) = {
             let raw = to_id_raw.trim();
-            if raw.starts_with('"') {
+            if let Some(after_quote) = raw.strip_prefix('"') {
                 // Quoted label reference: `"Display Name"` → node id = Display Name (label lookup)
-                let q_end = raw[1..].find('"').map(|i| i + 1).unwrap_or(raw.len());
-                let quoted = raw[1..q_end].to_string();
+                let q_end = after_quote.find('"').unwrap_or(after_quote.len());
+                let quoted = after_quote[..q_end].to_string();
                 (quoted, String::new())
             } else {
                 let first_token_end = raw.find(|c: char| c.is_whitespace() || c == ':')
@@ -2398,32 +2391,30 @@ fn parse_flow_line_chain(
         edge.label = label.clone();
         // Apply edge style tags
         for etag in &edge_tags {
-            if etag.starts_with("color:") {
-                if let Some(c) = tag_to_edge_color(etag[6..].trim()) {
+            if let Some(rest) = etag.strip_prefix("color:") {
+                if let Some(c) = tag_to_edge_color(rest.trim()) {
                     edge.style.color = c;
                 }
-            } else if etag.starts_with("bend:") {
-                if let Ok(b) = etag[5..].trim().parse::<f32>() {
+            } else if let Some(rest) = etag.strip_prefix("bend:") {
+                if let Ok(b) = rest.trim().parse::<f32>() {
                     edge.style.curve_bend = b.clamp(-1.0, 1.0);
                 }
-            } else if etag.starts_with("weight:") || etag.starts_with("w:") {
-                let v = if etag.starts_with("weight:") { &etag[7..] } else { &etag[2..] };
+            } else if let Some(v) = etag.strip_prefix("weight:").or_else(|| etag.strip_prefix("w:")) {
                 if let Ok(w) = v.trim().parse::<f32>() {
                     // weight 1=1.5px, 2=3px, 3=5px, 4+=7px
                     edge.style.width = (w * 1.8).clamp(1.0, 9.0);
                 }
-            } else if etag.starts_with("from:") {
-                edge.source_label = etag[5..].trim().to_string();
-            } else if etag.starts_with("to:") {
-                edge.target_label = etag[3..].trim().to_string();
-            } else if etag.starts_with("c-src:") {
-                edge.source_cardinality = parse_cardinality(etag[6..].trim());
-            } else if etag.starts_with("c-tgt:") {
-                edge.target_cardinality = parse_cardinality(etag[6..].trim());
-            } else if etag.starts_with("note:") || etag.starts_with("comment:") || etag.starts_with("annotation:") {
-                let val = if etag.starts_with("note:") { &etag[5..] }
-                    else if etag.starts_with("comment:") { &etag[8..] }
-                    else { &etag[11..] };
+            } else if let Some(rest) = etag.strip_prefix("from:") {
+                edge.source_label = rest.trim().to_string();
+            } else if let Some(rest) = etag.strip_prefix("to:") {
+                edge.target_label = rest.trim().to_string();
+            } else if let Some(rest) = etag.strip_prefix("c-src:") {
+                edge.source_cardinality = parse_cardinality(rest.trim());
+            } else if let Some(rest) = etag.strip_prefix("c-tgt:") {
+                edge.target_cardinality = parse_cardinality(rest.trim());
+            } else if let Some(val) = etag.strip_prefix("note:")
+                .or_else(|| etag.strip_prefix("comment:"))
+                .or_else(|| etag.strip_prefix("annotation:")) {
                 edge.comment = val.trim().to_string();
             } else if etag.starts_with("src-port:") || etag.starts_with("sport:")
                     || etag.starts_with("tgt-port:") || etag.starts_with("tport:") {
@@ -2542,8 +2533,8 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     let mut owner_value: Option<String> = None;
     let mut dep_targets: Vec<String> = Vec::new();
     for tag in &tags {
-        if tag.starts_with("z:") {
-            if let Ok(z) = tag[2..].trim().parse::<f32>() {
+        if let Some(rest) = tag.strip_prefix("z:") {
+            if let Ok(z) = rest.trim().parse::<f32>() {
                 z_offset = z;
             }
         } else if tag.starts_with("3d-depth:") || (tag.starts_with("depth:") && !tag.starts_with("depth-scale:")) {
@@ -2585,27 +2576,27 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                     _ => z_offset, // unknown name — leave z unchanged
                 };
             }
-        } else if tag.starts_with("fill:") {
-            fill_color = tag_to_fill_color(tag[5..].trim());
-        } else if tag.starts_with("size:") {
+        } else if let Some(rest) = tag.strip_prefix("fill:") {
+            fill_color = tag_to_fill_color(rest.trim());
+        } else if let Some(rest) = tag.strip_prefix("size:") {
             // {size:200x80} shorthand for {w:200} {h:80}
-            let dims = tag[5..].trim();
+            let dims = rest.trim();
             if let Some(x_pos) = dims.find('x') {
                 width_override  = dims[..x_pos].parse::<f32>().ok();
                 height_override = dims[x_pos+1..].parse::<f32>().ok();
             }
-        } else if tag.starts_with("pos:") {
+        } else if let Some(rest) = tag.strip_prefix("pos:") {
             // {pos:100,200} shorthand for {x:100} {y:200} + pinned
-            let coords = tag[4..].trim();
+            let coords = rest.trim();
             if let Some(comma) = coords.find(',') {
                 pos_x = coords[..comma].trim().parse::<f32>().ok();
                 pos_y = coords[comma+1..].trim().parse::<f32>().ok();
                 if pos_x.is_some() && pos_y.is_some() { pinned = true; }
             }
-        } else if tag.starts_with("w:") {
-            width_override = tag[2..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("h:") {
-            height_override = tag[2..].trim().parse::<f32>().ok();
+        } else if let Some(rest) = tag.strip_prefix("w:") {
+            width_override = rest.trim().parse::<f32>().ok();
+        } else if let Some(rest) = tag.strip_prefix("h:") {
+            height_override = rest.trim().parse::<f32>().ok();
         } else if tag == "tiny" || tag == "xs" {
             // Size shorthands — set both width and height
             width_override  = Some(70.0);
@@ -2705,9 +2696,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             let colon = tag.find(':').unwrap();
             let val = tag[colon+1..].trim();
             shape = tag_to_shape(val);
-        } else if tag.starts_with("status:") {
+        } else if let Some(rest) = tag.strip_prefix("status:") {
             // {status:done} / {status:wip} / {status:blocked} etc — property-style status
-            let val = tag[7..].trim();
+            let val = rest.trim();
             // Re-dispatch to status shorthands
             match val {
                 "done" | "complete" | "completed" | "finished" => {
@@ -2743,20 +2734,20 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             pinned = true;
         } else if tag == "frame" || tag == "group" || tag == "container" {
             is_frame = true;
-        } else if tag.starts_with("x:") {
-            pos_x = tag[2..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("y:") {
-            pos_y = tag[2..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("border:") {
-            border_width = tag[7..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("align:") {
-            text_align = match tag[6..].trim() {
+        } else if let Some(rest) = tag.strip_prefix("x:") {
+            pos_x = rest.trim().parse::<f32>().ok();
+        } else if let Some(rest) = tag.strip_prefix("y:") {
+            pos_y = rest.trim().parse::<f32>().ok();
+        } else if let Some(rest) = tag.strip_prefix("border:") {
+            border_width = rest.trim().parse::<f32>().ok();
+        } else if let Some(rest) = tag.strip_prefix("align:") {
+            text_align = match rest.trim() {
                 "left" => Some(crate::model::TextAlign::Left),
                 "right" => Some(crate::model::TextAlign::Right),
                 _ => Some(crate::model::TextAlign::Center),
             };
-        } else if tag.starts_with("valign:") {
-            text_valign = match tag[7..].trim() {
+        } else if let Some(rest) = tag.strip_prefix("valign:") {
+            text_valign = match rest.trim() {
                 "top" => Some(crate::model::TextVAlign::Top),
                 "bottom" => Some(crate::model::TextVAlign::Bottom),
                 _ => Some(crate::model::TextVAlign::Middle),
@@ -2764,8 +2755,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag.starts_with("font-size:") || tag.starts_with("fs:") || tag.starts_with("fontsize:") || tag.starts_with("text-size:") || tag.starts_with("textsize:") {
             let colon = tag.find(':').unwrap();
             font_size_override = tag[colon+1..].trim().parse::<f32>().ok();
-        } else if tag.starts_with("opacity:") || tag.starts_with("alpha:") {
-            let val_str = if tag.starts_with("opacity:") { &tag[8..] } else { &tag[6..] };
+        } else if let Some(val_str) = tag.strip_prefix("opacity:").or_else(|| tag.strip_prefix("alpha:")) {
             if let Ok(v) = val_str.trim().parse::<f32>() {
                 // Accept 0-100 percentage or 0.0-1.0 float
                 opacity_override = Some(if v > 1.0 { v / 100.0 } else { v });
@@ -2801,15 +2791,15 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag.starts_with("url:") || tag.starts_with("link:") {
             let prefix_len = if tag.starts_with("url:") { 4 } else { 5 };
             url_override = Some(tag[prefix_len..].trim().to_string());
-        } else if tag.starts_with("lane:") {
+        } else if let Some(rest) = tag.strip_prefix("lane:") {
             // {lane:Name} — assign node to a timeline swim-lane
-            let lane_name = tag[5..].trim().to_string();
+            let lane_name = rest.trim().to_string();
             if !lane_name.is_empty() {
                 lane_tag = Some(lane_name);
             }
-        } else if tag.starts_with("phase:") {
+        } else if let Some(rest) = tag.strip_prefix("phase:") {
             // {phase:Label} — assign node to a named timeline period/phase
-            let phase_name = tag[6..].trim().to_string();
+            let phase_name = rest.trim().to_string();
             if !phase_name.is_empty() {
                 period_tag = Some(phase_name);
             }
@@ -2854,8 +2844,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag.starts_with("section:") || tag.starts_with("stage:") || tag.starts_with("board:") || tag.starts_with("col:") || tag.starts_with("column:") {
             // {section:Intake} — assign node to a kanban section inline (overrides header-based section)
             let prefix = if tag.starts_with("section:") { 8 }
-                else if tag.starts_with("stage:") { 6 }
-                else if tag.starts_with("board:") { 6 }
+                else if tag.starts_with("stage:") || tag.starts_with("board:") { 6 }
                 else if tag.starts_with("col:") { 4 }
                 else { 7 }; // column:
             let sec = tag[prefix..].trim().to_string();
@@ -2872,11 +2861,9 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 else if tag.starts_with("annotation:") { 11 }
                 else { 8 }; // comment:
             node_note_text = Some(tag[prefix..].trim().to_string());
-        } else if tag.starts_with("border-color:") || tag.starts_with("stroke:") {
-            let v = if tag.starts_with("border-color:") { &tag[13..] } else { &tag[7..] };
+        } else if let Some(v) = tag.strip_prefix("border-color:").or_else(|| tag.strip_prefix("stroke:")) {
             border_color = tag_to_fill_color(v.trim());
-        } else if tag.starts_with("text-color:") || tag.starts_with("color:") {
-            let v = if tag.starts_with("text-color:") { &tag[11..] } else { &tag[6..] };
+        } else if let Some(v) = tag.strip_prefix("text-color:").or_else(|| tag.strip_prefix("color:")) {
             text_color = tag_to_fill_color(v.trim());
         } else if tag == "shadow" || tag == "drop-shadow" {
             shadow = true;
@@ -3013,12 +3000,23 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     }
     // Auto-size: expand width to fit label if no explicit {w:N} given.
     // Uses an approximation: ~7.5px per character at the default font size.
-    // Only expands (never shrinks) and caps at 320px to stay readable.
+    // Only expands (never shrinks) and caps at 400px to stay readable.
+    // Diamonds/hexagons/circles have less usable text area, so we scale up.
     if width_override.is_none() && !node.is_frame {
         let label_chars = node.display_label().chars().count() as f32;
         let sublabel_chars = node.sublabel.chars().count() as f32;
         let longest = label_chars.max(sublabel_chars);
-        let auto_w = (longest * 7.5 + 44.0).clamp(100.0, 320.0);
+        let shape_factor = match &node.kind {
+            NodeKind::Shape { shape, .. } => match shape {
+                NodeShape::Diamond => 1.8,
+                NodeShape::Hexagon => 1.3,
+                NodeShape::Circle => 1.7,
+                NodeShape::Parallelogram => 1.3,
+                _ => 1.0,
+            },
+            _ => 1.0,
+        };
+        let auto_w = ((longest * 7.5 + 44.0) * shape_factor).clamp(100.0, 400.0);
         if auto_w > node.size[0] {
             node.size[0] = auto_w;
         }
@@ -3110,22 +3108,20 @@ fn split_inline_edges(line: &str) -> (&str, Vec<(String, Vec<String>)>) {
     while i < bytes.len() {
         match bytes[i] {
             b'{' => depth += 1,
-            b'}' => { if depth > 0 { depth -= 1; } }
-            b'\xe2' if depth == 0 => {
+            b'}' => { depth = depth.saturating_sub(1); }
+            b'\xe2' if depth == 0
                 // UTF-8 for → is [0xe2, 0x86, 0x92]
-                if bytes.get(i+1) == Some(&0x86) && bytes.get(i+2) == Some(&0x92) {
+                && bytes.get(i+1) == Some(&0x86) && bytes.get(i+2) == Some(&0x92) => {
                     arrow_pos = Some(i);
                     break;
                 }
-            }
-            b'-' if depth == 0 => {
+            b'-' if depth == 0
                 // Check for " -> " or "-> " at start
-                if bytes.get(i+1) == Some(&b'>') {
+                && bytes.get(i+1) == Some(&b'>') => {
                     // Make sure it's not inside [id] brackets
                     arrow_pos = Some(i);
                     break;
                 }
-            }
             _ => {}
         }
         i += 1;
@@ -3202,8 +3198,6 @@ fn extract_tags(s: &str) -> (String, Vec<String>) {
 
     (label.trim().to_string(), tags)
 }
-
-/// Parse: `id "label" --> id` or `id --> id`
 
 /// Parse: `Note text {color}`
 fn parse_note_line(line: &str) -> Result<Node, String> {
@@ -5160,11 +5154,11 @@ auth --> api: builds on
 
         // nodes should have period and lane assigned
         let mvp = doc.nodes.iter().find(|n| n.display_label() == "MVP Launch").unwrap();
-        assert!(mvp.timeline_period.as_deref().map_or(false, |p| p.contains("Q1")));
+        assert!(mvp.timeline_period.as_deref().is_some_and(|p| p.contains("Q1")));
         assert_eq!(mvp.timeline_lane.as_deref(), Some("Product"));
 
         let api = doc.nodes.iter().find(|n| n.display_label() == "Public API").unwrap();
-        assert!(api.timeline_period.as_deref().map_or(false, |p| p.contains("Q2")));
+        assert!(api.timeline_period.as_deref().is_some_and(|p| p.contains("Q2")));
         assert_eq!(api.timeline_lane.as_deref(), Some("Backend"));
 
         // edges should be parsed

@@ -93,7 +93,7 @@ impl FlowchartApp {
         {
             let ids: Vec<NodeId> = self.selection.node_ids.iter().copied().collect();
             let all_highlighted = ids.iter().all(|id| {
-                self.document.find_node(id).map_or(false, |n| n.highlight)
+                self.document.find_node(id).is_some_and(|n| n.highlight)
             });
             let hl_label = if all_highlighted { "⭐ Remove Highlight All" } else { "⭐ Highlight All" };
             if ui.button(hl_label).clicked() {
@@ -213,7 +213,7 @@ impl FlowchartApp {
         }) {
             if ui.button("📋 Copy label").clicked() {
                 ui.ctx().copy_text(label);
-                self.status_message = Some(("Label copied to clipboard".to_string(), std::time::Instant::now()));
+                self.set_status("Label copied to clipboard", super::StatusLevel::Success);
                 ui.close_menu();
             }
         }
@@ -359,7 +359,7 @@ impl FlowchartApp {
                 .unwrap_or_default();
 
             // Collect unique sections currently used in the document (sorted, excluding blank)
-            let mut doc_sections: Vec<String> = {
+            let doc_sections: Vec<String> = {
                 let mut seen = std::collections::BTreeSet::new();
                 for n in &self.document.nodes {
                     if !n.section_name.is_empty() { seen.insert(n.section_name.clone()); }
@@ -523,7 +523,7 @@ impl FlowchartApp {
             ];
             let date_opts: Vec<(&str, &str)> = date_opts.iter().map(|(l, d)| (l.as_str(), d.as_str())).collect();
             for (label, date) in &date_opts {
-                if ui.button(label.clone()).clicked() {
+                if ui.button(*label).clicked() {
                     let ids: Vec<_> = if self.selection.node_ids.contains(&node_id) {
                         self.selection.node_ids.iter().copied().collect()
                     } else { vec![node_id] };
@@ -788,8 +788,8 @@ impl FlowchartApp {
             }
         });
 
-        if !self.clipboard.is_empty() {
-            if ui.button(format!("📋 Paste ({} node(s))", self.clipboard.len())).clicked() {
+        if !self.clipboard.is_empty()
+            && ui.button(format!("📋 Paste ({} node(s))", self.clipboard.len())).clicked() {
                 self.selection.clear();
                 let n = self.clipboard.len() as f32;
                 let centroid = self.clipboard.iter().fold(Vec2::ZERO, |a, nd| a + nd.pos().to_vec2()) / n;
@@ -804,7 +804,6 @@ impl FlowchartApp {
                 self.history.push(&self.document);
                 ui.close_menu();
             }
-        }
 
         if ui.button("🔍 Select All").clicked() {
             for n in &self.document.nodes { self.selection.node_ids.insert(n.id); }
