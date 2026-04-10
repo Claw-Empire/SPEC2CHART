@@ -44,6 +44,9 @@ enum Commands {
     Diff {
         before: PathBuf,
         after: PathBuf,
+        /// Output as JSON instead of human-readable text (for CI/IDE integration)
+        #[arg(long)]
+        json: bool,
     },
     /// Generate HRF from prose via LLM (reads stdin, writes HRF to stdout)
     Generate {
@@ -148,8 +151,8 @@ fn main() -> eframe::Result<()> {
             cli_schema(&template);
             return Ok(());
         }
-        Some(Commands::Diff { before, after }) => {
-            cli_diff(before, after);
+        Some(Commands::Diff { before, after, json }) => {
+            cli_diff(before, after, json);
             return Ok(());
         }
         Some(Commands::Generate { template, model, endpoint, api_key }) => {
@@ -291,7 +294,7 @@ fn cli_schema(template: &str) {
     println!("{}", schema);
 }
 
-fn cli_diff(before: PathBuf, after: PathBuf) {
+fn cli_diff(before: PathBuf, after: PathBuf, json: bool) {
     let spec_a = std::fs::read_to_string(&before)
         .unwrap_or_else(|e| { eprintln!("Error reading {:?}: {}", before, e); std::process::exit(1); });
     let spec_b = std::fs::read_to_string(&after)
@@ -464,6 +467,64 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     removed_edges.sort_by(|a, b| a.0.cmp(&b.0));
     modified_edges.sort_by(|a, b| a.0.cmp(&b.0));
 
+    let total_changes = added_nodes.len() + removed_nodes.len() + modified_nodes.len()
+        + added_edges.len() + removed_edges.len() + modified_edges.len();
+
+    // JSON output path: mirror the shape used by `lint --json` / `stats --json`
+    // so tooling can consume all three commands with the same JSON idioms.
+    if json {
+        let modified_nodes_json: Vec<serde_json::Value> = modified_nodes
+            .iter()
+            .map(|(key, changes)| serde_json::json!({ "key": key, "changes": changes }))
+            .collect();
+        let added_edges_json: Vec<serde_json::Value> = added_edges
+            .iter()
+            .map(|((s, t), label)| serde_json::json!({
+                "source": s,
+                "target": t,
+                "label": label.trim_start_matches(' ').trim_start_matches('[').trim_end_matches(']'),
+            }))
+            .collect();
+        let removed_edges_json: Vec<serde_json::Value> = removed_edges
+            .iter()
+            .map(|((s, t), label)| serde_json::json!({
+                "source": s,
+                "target": t,
+                "label": label.trim_start_matches(' ').trim_start_matches('[').trim_end_matches(']'),
+            }))
+            .collect();
+        let modified_edges_json: Vec<serde_json::Value> = modified_edges
+            .iter()
+            .map(|((s, t), changes)| serde_json::json!({
+                "source": s,
+                "target": t,
+                "changes": changes,
+            }))
+            .collect();
+        let payload = serde_json::json!({
+            "before": before.display().to_string(),
+            "after": after.display().to_string(),
+            "added_nodes": added_nodes,
+            "removed_nodes": removed_nodes,
+            "modified_nodes": modified_nodes_json,
+            "added_edges": added_edges_json,
+            "removed_edges": removed_edges_json,
+            "modified_edges": modified_edges_json,
+            "summary": {
+                "added_nodes": added_nodes.len(),
+                "removed_nodes": removed_nodes.len(),
+                "modified_nodes": modified_nodes.len(),
+                "added_edges": added_edges.len(),
+                "removed_edges": removed_edges.len(),
+                "modified_edges": modified_edges.len(),
+                "total_changes": total_changes,
+            },
+            "clean": total_changes == 0,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        return;
+    }
+
     // Output in sorted order
     for id in &added_nodes {
         println!("+ node: {}", id);
@@ -484,8 +545,6 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
         println!("~ edge: {} → {} ({})", s, t, changes.join(", "));
     }
 
-    let total_changes = added_nodes.len() + removed_nodes.len() + modified_nodes.len()
-        + added_edges.len() + removed_edges.len() + modified_edges.len();
     if total_changes == 0 {
         println!("✓ No differences");
     } else {
@@ -998,10 +1057,14 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
     }
 
     // Edge-style tag typo detection: mirror the node check on edges, using
-    // the edge-style vocabulary (dashed/dotted/thick/ortho/escalate/...).
+    // the edge-style vocabulary (dashed/dotted/thick/ortho/escalate/...). Also
+    // runs `suggest_arrow_style` for `arrow:*` sub-tags, which the bare-word
+    // suggestor explicitly skips.
     for edge in &doc.edges {
         for tag in &edge.unknown_tags {
-            if let Some(suggestion) = crate::specgraph::hrf::suggest_edge_style_alias(tag) {
+            let suggestion = crate::specgraph::hrf::suggest_edge_style_alias(tag)
+                .or_else(|| crate::specgraph::hrf::suggest_arrow_style(tag));
+            if let Some(suggestion) = suggestion {
                 let label = if edge.label.trim().is_empty() {
                     // Fall back to endpoint hrf_ids so the message is actionable
                     let src = doc.nodes.iter().find(|n| n.id == edge.source.node_id)
@@ -1745,6 +1808,67 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_arrow_style_typo_suggests_circle() {
+        use crate::specgraph::hrf::suggest_arrow_style;
+        assert_eq!(suggest_arrow_style("arrow:cirlce"), Some("arrow:circle"));
+        assert_eq!(suggest_arrow_style("arrow:cirle"),  Some("arrow:circle"));
+    }
+
+    #[test]
+    fn test_arrow_style_typo_suggests_open_and_none() {
+        use crate::specgraph::hrf::suggest_arrow_style;
+        assert_eq!(suggest_arrow_style("arrow:opn"),  Some("arrow:open"));
+        assert_eq!(suggest_arrow_style("arrow:non"),  Some("arrow:none"));
+    }
+
+    #[test]
+    fn test_arrow_style_ignores_exact_matches() {
+        use crate::specgraph::hrf::suggest_arrow_style;
+        for known in ["arrow:open", "arrow:circle", "arrow:none"] {
+            assert_eq!(
+                suggest_arrow_style(known),
+                None,
+                "exact-match arrow style '{known}' should not be flagged"
+            );
+        }
+    }
+
+    #[test]
+    fn test_arrow_style_ignores_non_arrow_prefixes() {
+        use crate::specgraph::hrf::suggest_arrow_style;
+        // color:/bend:/weight: are not arrow sub-tags — must never be
+        // suggested as `arrow:*`.
+        assert_eq!(suggest_arrow_style("color:#abc"), None);
+        assert_eq!(suggest_arrow_style("bend:0.5"),   None);
+        assert_eq!(suggest_arrow_style("weight:3"),   None);
+        assert_eq!(suggest_arrow_style("dashed"),     None);
+    }
+
+    #[test]
+    fn test_arrow_style_ignores_empty_and_wild_suffix() {
+        use crate::specgraph::hrf::suggest_arrow_style;
+        // Empty suffix: no suggestion
+        assert_eq!(suggest_arrow_style("arrow:"), None);
+        // Far-off suffix: no suggestion (keeps noise out of lint)
+        assert_eq!(suggest_arrow_style("arrow:totallyrandom"), None);
+    }
+
+    #[test]
+    fn test_arrow_style_typo_preserved_and_linted_e2e() {
+        // End-to-end: an `arrow:cirlce` typo on a flow edge lands in
+        // edge.unknown_tags, and the suggestor resolves it. This guards both
+        // the parser preservation path and the suggestion helper together.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {arrow:cirlce}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.edges.len(), 1);
+        assert_eq!(doc.edges[0].unknown_tags, vec!["arrow:cirlce".to_string()]);
+        assert_eq!(
+            crate::specgraph::hrf::suggest_arrow_style(&doc.edges[0].unknown_tags[0]),
+            Some("arrow:circle")
+        );
+    }
+
+    #[test]
     fn test_config_typo_suggests_title() {
         use crate::specgraph::hrf::suggest_config_key;
         assert_eq!(suggest_config_key("tilte"), Some("title"));
@@ -1884,5 +2008,133 @@ mod cli_tests {
         let warnings = parsed.get("warnings").unwrap().as_array().unwrap();
         assert!(warnings.iter().any(|w| w.as_str().unwrap_or("").contains("daimond")));
         std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn test_diff_json_output_is_valid_json() {
+        // End-to-end: run the diff command with --json and verify the full
+        // shape of the output. This covers adds, removes, modified nodes,
+        // modified edges (label change), and the summary block all in one
+        // pass so regressions in any branch fail loudly.
+        use std::process::Command;
+        let before = "## Nodes\n- [a] Start\n- [b] Middle\n- [c] End {diamond}\n\n## Flow\na --> b: original\nb --> c\n";
+        let after  = "## Nodes\n- [a] Start\n- [b] Middle\n- [c] End {circle}\n- [d] NewNode\n\n## Flow\na --> b: updated label\nb --> c\nc --> d\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp_before = std::env::temp_dir().join(format!("diff_json_before_{}.spec", uid));
+        let tmp_after  = std::env::temp_dir().join(format!("diff_json_after_{}.spec",  uid));
+        std::fs::write(&tmp_before, before).unwrap();
+        std::fs::write(&tmp_after,  after).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        let target_dir = exe.parent().unwrap().parent().unwrap();
+        let bin = target_dir.join("open-draftly");
+        if !bin.exists() {
+            eprintln!("skipping test_diff_json_output_is_valid_json: release binary not found at {:?}", bin);
+            let _ = std::fs::remove_file(&tmp_before);
+            let _ = std::fs::remove_file(&tmp_after);
+            return;
+        }
+        let out = Command::new(&bin)
+            .arg("diff")
+            .arg(&tmp_before)
+            .arg(&tmp_after)
+            .arg("--json")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|e| panic!("diff --json did not emit valid JSON: {}\n---\n{}", e, stdout));
+
+        // Top-level schema keys every consumer should rely on
+        for key in ["before", "after", "added_nodes", "removed_nodes",
+                    "modified_nodes", "added_edges", "removed_edges",
+                    "modified_edges", "summary", "clean"] {
+            assert!(parsed.get(key).is_some(), "missing top-level key `{}` in diff --json", key);
+        }
+
+        // clean must be a boolean, not an accidental stringified value
+        assert_eq!(parsed.get("clean").and_then(|v| v.as_bool()), Some(false),
+            "clean should be false when there are changes");
+
+        // added_nodes: ["d"]
+        let added = parsed.get("added_nodes").unwrap().as_array().unwrap();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].as_str(), Some("d"));
+
+        // removed_nodes: empty
+        assert_eq!(parsed.get("removed_nodes").unwrap().as_array().unwrap().len(), 0);
+
+        // modified_nodes: [{ key: "c", changes: ["shape: diamond → circle"] }]
+        let modified_nodes = parsed.get("modified_nodes").unwrap().as_array().unwrap();
+        assert_eq!(modified_nodes.len(), 1);
+        assert_eq!(modified_nodes[0].get("key").and_then(|v| v.as_str()), Some("c"));
+        let c_changes = modified_nodes[0].get("changes").unwrap().as_array().unwrap();
+        assert!(c_changes.iter().any(|c| c.as_str().unwrap_or("").contains("shape:")),
+            "expected a shape change for node c, got {:?}", c_changes);
+
+        // added_edges: [{ source: "c", target: "d", label: "" }]
+        let added_edges = parsed.get("added_edges").unwrap().as_array().unwrap();
+        assert_eq!(added_edges.len(), 1);
+        assert_eq!(added_edges[0].get("source").and_then(|v| v.as_str()), Some("c"));
+        assert_eq!(added_edges[0].get("target").and_then(|v| v.as_str()), Some("d"));
+
+        // modified_edges: [{ source: "a", target: "b", changes: [label change] }]
+        let modified_edges = parsed.get("modified_edges").unwrap().as_array().unwrap();
+        assert_eq!(modified_edges.len(), 1);
+        assert_eq!(modified_edges[0].get("source").and_then(|v| v.as_str()), Some("a"));
+        assert_eq!(modified_edges[0].get("target").and_then(|v| v.as_str()), Some("b"));
+        let ab_changes = modified_edges[0].get("changes").unwrap().as_array().unwrap();
+        assert!(ab_changes.iter().any(|c| c.as_str().unwrap_or("").contains("label")),
+            "expected a label change for edge a→b, got {:?}", ab_changes);
+
+        // summary: sum of all deltas = total_changes
+        let summary = parsed.get("summary").unwrap();
+        assert_eq!(summary.get("added_nodes").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(summary.get("removed_nodes").and_then(|v| v.as_u64()), Some(0));
+        assert_eq!(summary.get("modified_nodes").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(summary.get("added_edges").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(summary.get("removed_edges").and_then(|v| v.as_u64()), Some(0));
+        assert_eq!(summary.get("modified_edges").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(summary.get("total_changes").and_then(|v| v.as_u64()), Some(4));
+
+        let _ = std::fs::remove_file(&tmp_before);
+        let _ = std::fs::remove_file(&tmp_after);
+    }
+
+    #[test]
+    fn test_diff_json_clean_when_identical() {
+        // Regression: identical specs must produce clean=true and zero
+        // deltas across every array. Catches off-by-one errors in the
+        // delta accumulation.
+        use std::process::Command;
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp_a = std::env::temp_dir().join(format!("diff_clean_a_{}.spec", uid));
+        let tmp_b = std::env::temp_dir().join(format!("diff_clean_b_{}.spec", uid));
+        std::fs::write(&tmp_a, spec).unwrap();
+        std::fs::write(&tmp_b, spec).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        let bin = exe.parent().unwrap().parent().unwrap().join("open-draftly");
+        if !bin.exists() {
+            eprintln!("skipping test_diff_json_clean_when_identical: release binary not found");
+            let _ = std::fs::remove_file(&tmp_a);
+            let _ = std::fs::remove_file(&tmp_b);
+            return;
+        }
+        let out = Command::new(&bin).arg("diff").arg(&tmp_a).arg(&tmp_b).arg("--json").output().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("identical diff --json should still be valid JSON");
+        assert_eq!(parsed.get("clean").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(parsed.pointer("/summary/total_changes").and_then(|v| v.as_u64()), Some(0));
+        assert_eq!(parsed.get("added_nodes").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(parsed.get("removed_nodes").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(parsed.get("modified_nodes").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(parsed.get("added_edges").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(parsed.get("removed_edges").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(parsed.get("modified_edges").unwrap().as_array().unwrap().len(), 0);
+
+        let _ = std::fs::remove_file(&tmp_a);
+        let _ = std::fs::remove_file(&tmp_b);
     }
 }

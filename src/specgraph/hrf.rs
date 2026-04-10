@@ -3688,6 +3688,64 @@ pub fn suggest_edge_style_alias(tag: &str) -> Option<&'static str> {
     best.map(|(_, name)| name)
 }
 
+/// Suggest the closest known `arrow:*` edge sub-tag for a possibly-misspelled
+/// tag. Handles the `arrow:<suffix>` form only — bare words like `cirlce`
+/// belong to the edge-style vocabulary and are covered by
+/// `suggest_edge_style_alias`. Returns the full canonical tag (e.g.
+/// `arrow:circle`) so the "did you mean" message is directly copy-pasteable.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_arrow_style(tag: &str) -> Option<&'static str> {
+    // Only handle the `arrow:<suffix>` form. Require the prefix to be exactly
+    // right — otherwise we'd need to disambiguate typos in the prefix itself
+    // from typos in other colon-prefixed tags (color:, weight:, bend:, …).
+    let tag_lower = tag.to_ascii_lowercase();
+    let suffix = tag_lower.strip_prefix("arrow:")?;
+    if suffix.is_empty() { return None; }
+
+    const KNOWN_ARROW_STYLES: &[(&str, &str)] = &[
+        ("open",   "arrow:open"),
+        ("circle", "arrow:circle"),
+        ("none",   "arrow:none"),
+    ];
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for (canon_suffix, full_tag) in KNOWN_ARROW_STYLES {
+        let d = distance(suffix, canon_suffix);
+        if d == 0 { return None; } // exact match — handled by a known arm
+        // Tolerance scales with suffix length so 4-char "open"/"none" don't
+        // attract noise, but 6-char "circle" can still catch 2-edit typos.
+        let max_d = if canon_suffix.len() <= 4 { 1 } else { 2 };
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, full_tag)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
 /// Suggest the closest known `## Config` directive key for a possibly-misspelled
 /// key. Mirrors `suggest_shape_alias`/`suggest_edge_style_alias` but targets the
 /// config vocabulary (title, flow, zoom, bg, timeline, sla-p1, etc.). Returns
