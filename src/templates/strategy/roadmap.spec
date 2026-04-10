@@ -3,12 +3,18 @@ title: Product Roadmap
 flow = LR
 
 ## Nodes
-- [q1] Q1 {hexagon} {fill:#4a90d9}
-- [q2] Q2 {hexagon} {fill:#7b5ea7}
-- [q3] Q3 {hexagon} {fill:#cc5a4a}
-- [feat1] Alpha {diamond} {fill:#4a90d9} {done}
-- [feat2] Beta {diamond} {fill:#7b5ea7} {wip}
-- [feat3] Gamma {diamond} {fill:#cc5a4a} {todo}
+- [q1] Q1 2025 {hexagon} {fill:#4a90d9}
+  Jan–Mar: Foundation.
+- [q2] Q2 2025 {hexagon} {fill:#7b5ea7}
+  Apr–Jun: Growth.
+- [q3] Q3 2025 {hexagon} {fill:#cc5a4a}
+  Jul–Sep: Scale.
+- [feat1] Core Auth {rounded} {fill:#4a90d9} {done}
+  Login, SSO, MFA.
+- [feat2] Dashboard {rounded} {fill:#7b5ea7} {wip}
+  Analytics + reports.
+- [feat3] API v2 {rounded} {fill:#cc5a4a} {todo}
+  Public REST surface.
 
 ## Flow
 q1 --> q2: next

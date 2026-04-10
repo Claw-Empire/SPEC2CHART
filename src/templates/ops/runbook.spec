@@ -3,7 +3,7 @@ title: Runbook
 flow = TB
 
 ## Nodes
-- [trigger] Alert Page {rounded} {fill:#f38ba8} {critical}
+- [trigger] Alert Page {circle} {fill:#f38ba8} {critical}
   Initial PagerDuty ping.
 - [assess] Assess Severity {diamond} {fill:#f9e2af} {wip}
   SEV1 / SEV2 / SEV3?
@@ -21,7 +21,7 @@ flow = TB
   Dashboards green?
 - [postmortem] File Post-Mortem {document} {fill:#cba6f7} {todo}
   Blameless write-up.
-- [close] Close Incident {rounded} {fill:#a6e3a1} {done}
+- [close] Close Incident {circle} {fill:#a6e3a1} {done}
   Resolved + archived.
 
 ## Flow

@@ -13,9 +13,9 @@ flow = TB
   Self-serve binary.
 - [gh] GitHub Stars {hexagon} {fill:#cba6f7}
   Community signal.
-- [trial] Trial Signup {diamond} {fill:#f9e2af} {wip}
+- [trial] Trial Signup {rounded} {fill:#f9e2af} {wip}
   14-day full access.
-- [pro] Pro Plan {diamond} {fill:#a6e3a1} {done}
+- [pro] Pro Plan {rounded} {fill:#a6e3a1} {done}
   Paid conversion.
 
 ## Flow

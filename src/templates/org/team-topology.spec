@@ -26,11 +26,11 @@ flow = TB
 ## Flow
 org --> streams: delivers
 org --> support: sustains
-streams --> stream1
-streams --> stream2
-support --> platform
-support --> enabling
-support --> subsystem
+streams --> stream1: delivery
+streams --> stream2: delivery
+support --> platform: hosts
+support --> enabling: coaches
+support --> subsystem: owns
 platform --> stream1: X-as-a-Service
 platform --> stream2: X-as-a-Service
 enabling --> stream1: facilitates

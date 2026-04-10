@@ -17,6 +17,8 @@ flow = TB
   #incident broadcast.
 - [runbook2] Runbook {document} {fill:#b4befe}
   Playbook steps.
+- [resolved] Resolved {rounded} {fill:#a6e3a1} {done}
+  Incident closed, ack sent.
 
 ## Flow
 alert --> primary: pages
@@ -26,3 +28,5 @@ manager --> vp: SEV1 escalate
 primary --> sre: broadcast
 primary --> runbook2: follow
 secondary --> sre: broadcast
+runbook2 --> resolved: fix applied
+sre --> resolved: all clear

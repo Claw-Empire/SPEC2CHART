@@ -9,7 +9,7 @@ flow = TB
   Primary responder.
 - [slack] Slack Notify {rounded} {fill:#a6e3a1} {ok}
   #incident channel ping.
-- [triage] Triage {diamond} {fill:#f9e2af} {wip}
+- [triage] Triage {rounded} {fill:#f9e2af} {wip}
   Root cause hunt.
 - [runbook] Runbook {document} {fill:#cba6f7}
   Step-by-step playbook.
@@ -19,6 +19,8 @@ flow = TB
   Customer updates.
 - [postmortem] Post-Mortem {document} {fill:#cba6f7} {todo}
   Blameless write-up.
+- [closed] Incident Closed {rounded} {fill:#a6e3a1} {done}
+  Service restored, ticket resolved.
 
 ## Flow
 alert --> oncall: pages
@@ -28,3 +30,5 @@ triage --> runbook: follows
 runbook --> mitigate: applies fix
 mitigate --> comms: updates
 mitigate --> postmortem: creates
+comms --> closed: all clear
+postmortem --> closed: filed

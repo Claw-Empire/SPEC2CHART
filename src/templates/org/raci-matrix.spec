@@ -3,7 +3,7 @@ title: RACI Matrix
 flow = TB
 
 ## Nodes
-- [feature] Feature Launch {diamond} {fill:#f9e2af} {wip}
+- [feature] Feature Launch {hexagon} {fill:#f9e2af} {wip}
   Cross-functional delivery.
 - [pm] Product Manager {person} {fill:#89b4fa} {ok}
   Responsible — drives.

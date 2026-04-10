@@ -632,6 +632,48 @@ fn cli_stats(input: PathBuf, json: bool) {
     // Edge label stats
     let labeled_edges = doc.edges.iter().filter(|e| !e.label.is_empty()).count();
 
+    // Tag distribution
+    let mut tags: HashMap<&str, usize> = HashMap::new();
+    for node in &doc.nodes {
+        if let Some(tag) = &node.tag {
+            *tags.entry(tag.label()).or_default() += 1;
+        }
+    }
+
+    // Layout depth (longest path via BFS layering, same as layout engine)
+    let layout_depth = {
+        let node_idx: HashMap<crate::model::NodeId, usize> =
+            doc.nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let n = doc.nodes.len();
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut in_deg: Vec<i32> = vec![0; n];
+        for edge in &doc.edges {
+            if let (Some(&from), Some(&to)) =
+                (node_idx.get(&edge.source.node_id), node_idx.get(&edge.target.node_id))
+            {
+                if from != to {
+                    adj[from].push(to);
+                    in_deg[to] += 1;
+                }
+            }
+        }
+        let mut layer: Vec<i32> = vec![0; n];
+        let mut rem: Vec<i32> = in_deg.clone();
+        let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+        for (i, &d) in rem.iter().enumerate() {
+            if d == 0 { queue.push_back(i); }
+        }
+        while let Some(u) = queue.pop_front() {
+            for &v in &adj[u] {
+                let cand = layer[u] + 1;
+                if cand > layer[v] { layer[v] = cand; }
+                rem[v] -= 1;
+                if rem[v] == 0 { queue.push_back(v); }
+            }
+        }
+        layer.into_iter().max().unwrap_or(0) as usize + 1
+    };
+
     if json {
         let mut shape_list: Vec<_> = shapes.iter().collect();
         shape_list.sort_by(|a, b| b.1.cmp(a.1));
@@ -650,6 +692,15 @@ fn cli_stats(input: PathBuf, json: bool) {
         println!("  \"labeled_edges\": {},", labeled_edges);
         println!("  \"max_in_degree\": {},", max_in);
         println!("  \"max_out_degree\": {},", max_out);
+        println!("  \"layout_depth\": {},", layout_depth);
+        let mut tag_list: Vec<_> = tags.iter().collect();
+        tag_list.sort_by(|a, b| b.1.cmp(a.1));
+        println!("  \"tags\": {{");
+        for (i, (name, count)) in tag_list.iter().enumerate() {
+            let comma = if i + 1 < tag_list.len() { "," } else { "" };
+            println!("    \"{}\": {}{}", name, count, comma);
+        }
+        println!("  }},");
         println!("  \"shapes\": {{");
         for (i, (name, count)) in shape_list.iter().enumerate() {
             let comma = if i + 1 < shape_list.len() { "," } else { "" };
@@ -677,6 +728,16 @@ fn cli_stats(input: PathBuf, json: bool) {
         println!("  Labeled edges:     {}/{}", labeled_edges, edge_count);
         println!("  Max in-degree:     {}", max_in);
         println!("  Max out-degree:    {}", max_out);
+        println!("  Layout depth:      {} layer{}", layout_depth, if layout_depth == 1 { "" } else { "s" });
+        if !tags.is_empty() {
+            println!();
+            println!("  Tag distribution:");
+            let mut sorted: Vec<_> = tags.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            for (name, count) in sorted {
+                println!("    {:16} {}", name, count);
+            }
+        }
         if !shapes.is_empty() {
             println!();
             println!("  Shape distribution:");
