@@ -1032,6 +1032,31 @@ fn cli_stats(input: PathBuf, json: bool) {
     }
 }
 
+/// Byte-level Levenshtein distance. Used by lint passes that compare
+/// user-typed identifiers against each other (e.g. detecting inline
+/// group typo-splits). Not exposed from hrf.rs because the suggest_*
+/// helpers there each inline the same algorithm for encapsulation —
+/// cli_lint is the only cross-cutting consumer.
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let m = a_bytes.len();
+    let n = b_bytes.len();
+    if m == 0 { return n; }
+    if n == 0 { return m; }
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0usize; n + 1];
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
 fn cli_lint(input: PathBuf, strict: bool, json: bool) {
     let doc = load_doc(&input);
     let mut warnings: Vec<String> = Vec::new();
@@ -1129,6 +1154,49 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                     "Group [{}]: member `{}` does not exist in ## Nodes",
                     group_id, member_id
                 )),
+            }
+        }
+    }
+
+    // Inline group typo-split detection: when `{group:backend}` appears on
+    // several nodes and `{group:bakcend}` on one, the parser creates two
+    // frames silently. Detect pairs of inline group names that are within
+    // Levenshtein distance 2 and flag the minority spelling as a likely typo
+    // of the majority. Only reports when at least one of the two has a
+    // single member — typical typo split signature. Skips when both names
+    // have 2+ members (probably intentionally separate groups).
+    {
+        let names = &doc.import_hints.inline_group_name_counts;
+        if names.len() >= 2 {
+            for i in 0..names.len() {
+                for j in (i + 1)..names.len() {
+                    let (a, ac) = (&names[i].0, names[i].1);
+                    let (b, bc) = (&names[j].0, names[j].1);
+                    // Both 2+ members = likely intentional separate groups.
+                    if ac >= 2 && bc >= 2 { continue; }
+                    // Identify minority and majority for a clearer message.
+                    let (majority, maj_count, minority, min_count) =
+                        if ac > bc { (a, ac, b, bc) } else { (b, bc, a, ac) };
+                    // If both are equal counts (both 1), still flag — could
+                    // be two 1-node groups that should have been one.
+                    let d = levenshtein_distance(&minority.to_ascii_lowercase(),
+                                                 &majority.to_ascii_lowercase());
+                    // Require names of length ≥ 4 so 3-letter acronyms don't
+                    // attract noise (e.g. `api` vs `ipa`).
+                    let min_len = minority.len().min(majority.len());
+                    if min_len >= 4 && d > 0 && d <= 2 {
+                        warnings.push(format!(
+                            "Inline group `{}` ({} node{}) looks like a typo of \
+                            `{}` ({} node{}) — check for typo-split",
+                            minority,
+                            min_count,
+                            if min_count == 1 { "" } else { "s" },
+                            majority,
+                            maj_count,
+                            if maj_count == 1 { "" } else { "s" },
+                        ));
+                    }
+                }
             }
         }
     }
@@ -1323,6 +1391,86 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Duplicate parallel edges: same (source, target, label) tuple appearing
+    // more than once. Almost always a copy-paste typo in `## Flow` — the two
+    // edges get drawn on top of each other and look like one, so the user has
+    // no visual signal. Emit one warning per duplicated tuple with the count.
+    {
+        use std::collections::HashMap;
+        let mut edge_counts: HashMap<(crate::model::NodeId, crate::model::NodeId, String), usize> =
+            HashMap::new();
+        for edge in &doc.edges {
+            // Trim whitespace on labels so "foo " and "foo" collapse.
+            let key = (
+                edge.source.node_id,
+                edge.target.node_id,
+                edge.label.trim().to_string(),
+            );
+            *edge_counts.entry(key).or_insert(0) += 1;
+        }
+        // Sort so output is deterministic.
+        let mut dupes: Vec<_> = edge_counts
+            .into_iter()
+            .filter(|(_, c)| *c > 1)
+            .collect();
+        dupes.sort_by(|a, b| a.0.0.0.cmp(&b.0.0.0).then(a.0.1.0.cmp(&b.0.1.0)));
+        for ((src_id, tgt_id, label), count) in dupes {
+            let src_label = doc
+                .nodes
+                .iter()
+                .find(|n| n.id == src_id)
+                .map(|n| n.display_label().to_string())
+                .unwrap_or_else(|| "?".into());
+            let tgt_label = doc
+                .nodes
+                .iter()
+                .find(|n| n.id == tgt_id)
+                .map(|n| n.display_label().to_string())
+                .unwrap_or_else(|| "?".into());
+            let label_suffix = if label.is_empty() {
+                String::new()
+            } else {
+                format!(" labeled {:?}", label)
+            };
+            warnings.push(format!(
+                "Duplicate edge {:?} → {:?}{} appears {} times — likely a copy-paste typo",
+                src_label, tgt_label, label_suffix, count
+            ));
+        }
+    }
+
+    // Empty frame detection: a frame with no non-frame nodes inside its
+    // bounding box is almost always a leftover — either the contents were
+    // deleted or the frame was created empty as a placeholder. Both cases are
+    // silent failures: the frame still draws but looks like a random empty
+    // rectangle. Check spatial containment since frames don't track member
+    // IDs in the model.
+    {
+        for frame in doc.nodes.iter().filter(|n| n.is_frame) {
+            let fx0 = frame.position[0];
+            let fy0 = frame.position[1];
+            let fx1 = fx0 + frame.size[0];
+            let fy1 = fy0 + frame.size[1];
+            let mut inside = 0usize;
+            for node in &doc.nodes {
+                if node.is_frame { continue; }
+                if node.id == frame.id { continue; }
+                // Node center inside the frame bbox counts as containment.
+                let cx = node.position[0] + node.size[0] * 0.5;
+                let cy = node.position[1] + node.size[1] * 0.5;
+                if cx >= fx0 && cx <= fx1 && cy >= fy0 && cy <= fy1 {
+                    inside += 1;
+                }
+            }
+            if inside == 0 {
+                warnings.push(format!(
+                    "Frame {:?} is empty (contains 0 nodes) — likely a leftover placeholder",
+                    frame.display_label()
+                ));
+            }
+        }
+    }
+
     // Check for inconsistent edge labeling — when SOME outgoing edges of a node
     // are labeled but others aren't, that's a sign of forgotten labels rather than
     // a pure hierarchy. (A fully unlabeled fan-out is usually OrgTree-style.)
@@ -1467,9 +1615,14 @@ mod cli_tests {
             let mut doc = crate::specgraph::hrf::parse_hrf(template.content)
                 .unwrap_or_else(|e| panic!("template '{}' failed to parse: {}", template.name, e));
             crate::specgraph::layout::auto_layout(&mut doc);
+            let safe_name: String = template
+                .name
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
             let tmp = std::env::temp_dir().join(format!(
                 "test_svg_export_{}_{}.svg",
-                template.name.replace(' ', "_"),
+                safe_name,
                 uuid::Uuid::new_v4()
             ));
             crate::export::export_svg(&doc, &tmp)
@@ -2175,6 +2328,83 @@ mod cli_tests {
         // Exact match ignoring case returns None
         assert_eq!(suggest_node_id_from_candidates("api", &candidates), None);
         assert_eq!(suggest_node_id_from_candidates("Api", &candidates), None);
+    }
+
+    #[test]
+    fn test_inline_group_names_captured_with_counts() {
+        // Parser must record every inline `{group:X}` name along with how
+        // many nodes carried it, so the lint pass can compare them pairwise.
+        let spec = "\
+## Nodes
+- [db] Database {group:backend}
+- [api] API {group:backend}
+- [cache] Cache {group:backend}
+- [ui] Frontend {group:frontend}
+- [worker] Worker {group:bakcend}
+";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let counts = &doc.import_hints.inline_group_name_counts;
+        // Three distinct names: backend (×3), frontend (×1), bakcend (×1)
+        assert_eq!(counts.len(), 3, "expected 3 group names, got {:?}", counts);
+        let backend = counts.iter().find(|(n, _)| n == "backend");
+        assert_eq!(backend.map(|(_, c)| *c), Some(3), "backend should have 3 members");
+        let bakcend = counts.iter().find(|(n, _)| n == "bakcend");
+        assert_eq!(bakcend.map(|(_, c)| *c), Some(1), "bakcend should have 1 member");
+    }
+
+    #[test]
+    fn test_inline_group_different_via_cluster_and_in_aliases() {
+        // `cluster:` and `in:` are aliases for `group:` and must all flow
+        // into the same count map.
+        let spec = "\
+## Nodes
+- [db] Database {cluster:data}
+- [cache] Cache {in:data}
+- [ui] Frontend {group:web}
+";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let counts = &doc.import_hints.inline_group_name_counts;
+        let data = counts.iter().find(|(n, _)| n == "data");
+        assert_eq!(data.map(|(_, c)| *c), Some(2),
+            "cluster: and in: should merge into the same `data` group, got {:?}", counts);
+    }
+
+    #[test]
+    fn test_inline_group_distinct_names_not_captured_as_typo_split() {
+        // Regression: `backend` vs `frontend` are far apart and must NEVER
+        // both appear as one name looking like a typo of the other. The
+        // cli_lint walk does the comparison, but we can sanity-check by
+        // computing distance directly.
+        let spec = "\
+## Nodes
+- [db] Database {group:backend}
+- [api] API {group:backend}
+- [ui] Frontend {group:frontend}
+- [cdn] CDN {group:frontend}
+";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let counts = &doc.import_hints.inline_group_name_counts;
+        assert_eq!(counts.len(), 2);
+        // Both groups have 2 members — the lint walk skips these entirely
+        // (both_count >= 2 == intentional distinct groups).
+        let backend_count = counts.iter().find(|(n, _)| n == "backend").unwrap().1;
+        let frontend_count = counts.iter().find(|(n, _)| n == "frontend").unwrap().1;
+        assert_eq!(backend_count, 2);
+        assert_eq!(frontend_count, 2);
+        // Distance is large — even if one side had 1 member, this wouldn't
+        // trigger (distance > 2).
+        assert!(super::levenshtein_distance("backend", "frontend") > 2);
+    }
+
+    #[test]
+    fn test_levenshtein_distance_basic() {
+        use super::levenshtein_distance;
+        assert_eq!(levenshtein_distance("backend", "bakcend"), 2);
+        assert_eq!(levenshtein_distance("backend", "backend"), 0);
+        assert_eq!(levenshtein_distance("api", "apii"), 1);
+        assert_eq!(levenshtein_distance("", "abc"), 3);
+        assert_eq!(levenshtein_distance("abc", ""), 3);
+        assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
     }
 
     #[test]

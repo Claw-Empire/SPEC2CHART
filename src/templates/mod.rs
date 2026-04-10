@@ -20,6 +20,12 @@ pub const TEMPLATES: &[Template] = &[
         content: include_str!("engineering/data-pipeline.spec"),
     },
     Template {
+        name: "CI/CD Pipeline",
+        category: "Engineering",
+        description: "Build → test → deploy pipeline with quality gates",
+        content: include_str!("engineering/ci-cd-pipeline.spec"),
+    },
+    Template {
         name: "Threat Model",
         category: "Engineering",
         description: "Security threat model",
