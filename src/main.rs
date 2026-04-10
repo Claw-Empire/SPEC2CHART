@@ -1379,27 +1379,56 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
     // Edge-style tag typo detection: mirror the node check on edges, using
     // the edge-style vocabulary (dashed/dotted/thick/ortho/escalate/...). Also
     // runs `suggest_arrow_style` for `arrow:*` sub-tags, which the bare-word
-    // suggestor explicitly skips.
+    // suggestor explicitly skips. Also handles `color:X` silent drops by
+    // falling back to `suggest_fill_color_name` (edge color vocab is a
+    // subset of fill vocab).
     for edge in &doc.edges {
+        // Build edge label once, reused across warnings.
+        let edge_label = {
+            if edge.label.trim().is_empty() {
+                let src = doc.nodes.iter().find(|n| n.id == edge.source.node_id)
+                    .map(|n| if n.hrf_id.is_empty() { n.display_label().to_string() } else { format!("[{}]", n.hrf_id) })
+                    .unwrap_or_else(|| "?".into());
+                let tgt = doc.nodes.iter().find(|n| n.id == edge.target.node_id)
+                    .map(|n| if n.hrf_id.is_empty() { n.display_label().to_string() } else { format!("[{}]", n.hrf_id) })
+                    .unwrap_or_else(|| "?".into());
+                format!("{} → {}", src, tgt)
+            } else {
+                format!("{:?}", edge.label)
+            }
+        };
         for tag in &edge.unknown_tags {
+            // Edge color typo: unresolved `{color:X}` where X is neither a
+            // built-in edge color nor a hex. Previously silent drop.
+            if let Some(rest) = tag.strip_prefix("color:") {
+                let rest_trimmed = rest.trim();
+                if rest_trimmed.starts_with('#') {
+                    // Malformed hex — still warn so the user sees the drop.
+                    warnings.push(format!(
+                        "Edge {}: unresolved color {{{}}} — invalid hex value",
+                        edge_label, tag
+                    ));
+                    continue;
+                }
+                if let Some(color_name) = crate::specgraph::hrf::suggest_fill_color_name(rest_trimmed) {
+                    warnings.push(format!(
+                        "Edge {}: unresolved color {{{}}} — did you mean {{color:{}}}?",
+                        edge_label, tag, color_name
+                    ));
+                } else {
+                    warnings.push(format!(
+                        "Edge {}: unresolved color {{{}}} — not a built-in edge color or hex value",
+                        edge_label, tag
+                    ));
+                }
+                continue;
+            }
             let suggestion = crate::specgraph::hrf::suggest_edge_style_alias(tag)
                 .or_else(|| crate::specgraph::hrf::suggest_arrow_style(tag));
             if let Some(suggestion) = suggestion {
-                let label = if edge.label.trim().is_empty() {
-                    // Fall back to endpoint hrf_ids so the message is actionable
-                    let src = doc.nodes.iter().find(|n| n.id == edge.source.node_id)
-                        .map(|n| if n.hrf_id.is_empty() { n.display_label().to_string() } else { format!("[{}]", n.hrf_id) })
-                        .unwrap_or_else(|| "?".into());
-                    let tgt = doc.nodes.iter().find(|n| n.id == edge.target.node_id)
-                        .map(|n| if n.hrf_id.is_empty() { n.display_label().to_string() } else { format!("[{}]", n.hrf_id) })
-                        .unwrap_or_else(|| "?".into());
-                    format!("{} → {}", src, tgt)
-                } else {
-                    format!("{:?}", edge.label)
-                };
                 warnings.push(format!(
                     "Edge {}: unknown tag {{{}}} — did you mean {{{}}}?",
-                    label, tag, suggestion
+                    edge_label, tag, suggestion
                 ));
             }
         }
@@ -3705,6 +3734,117 @@ mod cli_tests {
             s.contains("unresolved color")
         });
         assert!(!has, "exact built-in color must not emit unresolved color warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_edge_color_typo_via_cli() {
+        // Edge `{color:blu}` should suggest `{color:blue}`. Previously the
+        // parser silently dropped the tag via `if let Some(c) = ...` with no
+        // else branch, so the user had no signal the color was lost.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b {color:blu}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_color_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("color:blu")
+                && s.contains("did you mean")
+                && s.contains("color:blue")
+        });
+        assert!(has, "expected edge color typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_edge_color_no_suggestion_via_cli() {
+        // Edge `{color:xyzzy}` has no close match — the lint should still
+        // emit a fallback warning so the silent drop is visible to the user.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b {color:xyzzy}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_color_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("color:xyzzy") && s.contains("unresolved color")
+        });
+        assert!(has, "expected fallback unresolved color warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_edge_color_exact_match_no_warning_via_cli() {
+        // Edges with exact built-in colors (red, blue, green, ...) must NOT
+        // emit unresolved color warnings — the parser consumes them and they
+        // never reach unknown_tags.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n\
+                    ## Flow\n\
+                    a --> b {color:red}\n\
+                    b --> c {color:green}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_color_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unresolved color")
+        });
+        assert!(!has, "exact edge color must not warn, got: {stdout}");
     }
 
     #[test]

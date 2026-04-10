@@ -1242,7 +1242,14 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             );
             for etag in edge_tags {
                 if let Some(rest) = etag.strip_prefix("color:") {
-                    if let Some(c) = tag_to_edge_color(rest.trim()) { edge.style.color = c; }
+                    if let Some(c) = tag_to_edge_color(rest.trim()) {
+                        edge.style.color = c;
+                    } else {
+                        // Unresolved edge color (not a built-in name or hex) —
+                        // preserve the raw tag so lint can emit a did-you-mean
+                        // hint instead of silently dropping it.
+                        edge.unknown_tags.push(etag.clone());
+                    }
                 } else if let Some(rest) = etag.strip_prefix("note:") {
                     edge.comment = rest.trim().to_string();
                 } else {
@@ -2590,6 +2597,9 @@ fn parse_flow_line_chain(
             if let Some(rest) = etag.strip_prefix("color:") {
                 if let Some(c) = tag_to_edge_color(rest.trim()) {
                     edge.style.color = c;
+                } else {
+                    // Unresolved edge color — preserve for lint did-you-mean.
+                    edge.unknown_tags.push(etag.clone());
                 }
             } else if let Some(rest) = etag.strip_prefix("bend:") {
                 if let Ok(b) = rest.trim().parse::<f32>() {
