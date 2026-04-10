@@ -1047,9 +1047,23 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         let gid = stripped[id_start+1..id_end].trim().to_string();
                         let rest = stripped[id_end+1..].trim();
                         let (label, tags) = extract_tags(rest);
-                        let fill = tags.iter()
-                            .find(|t| t.starts_with("fill:"))
-                            .and_then(|t| tag_to_fill_color(t[5..].trim()));
+                        // Resolve {fill:X} — on typo (`{fill:blu}`, `{fill:gren}`)
+                        // preserve the raw tag in import_hints so cli_lint can
+                        // emit a did-you-mean hint. Previously silent-dropped.
+                        let mut fill = None;
+                        for t in &tags {
+                            if let Some(v) = t.strip_prefix("fill:") {
+                                let trimmed = v.trim();
+                                match tag_to_fill_color(trimmed) {
+                                    Some(c) => { fill = Some(c); }
+                                    None => {
+                                        doc.import_hints
+                                            .unknown_group_fill
+                                            .push((gid.clone(), t.clone()));
+                                    }
+                                }
+                            }
+                        }
                         groups.push((gid, label, fill, Vec::new()));
                     }
                 } else if !trimmed.is_empty() && !groups.is_empty() {
@@ -1303,31 +1317,60 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 };
             }
             "grid-size" | "grid_size" | "grid" => {
-                if let Ok(sz) = val.trim().parse::<f32>() {
-                    doc.import_hints.grid_size = Some(sz.clamp(5.0, 200.0));
+                let trimmed = val.trim();
+                match trimmed.parse::<f32>() {
+                    Ok(sz) => doc.import_hints.grid_size = Some(sz.clamp(5.0, 200.0)),
+                    Err(_) if !trimmed.is_empty() => {
+                        // Previously silent-dropped typos like `grid = small`.
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
                 }
             }
             "zoom" | "initial-zoom" | "scale" => {
-                match val.trim().to_lowercase().as_str() {
+                let trimmed = val.trim();
+                match trimmed.to_lowercase().as_str() {
                     "fit" | "auto" | "auto-fit" | "autofit" => {
                         doc.import_hints.auto_fit = true;
                     }
                     _ => {
-                        if let Ok(z) = val.trim().parse::<f32>() {
-                            doc.import_hints.zoom = Some(z.clamp(0.1, 4.0));
+                        match trimmed.parse::<f32>() {
+                            Ok(z) => doc.import_hints.zoom = Some(z.clamp(0.1, 4.0)),
+                            Err(_) if !trimmed.is_empty() => {
+                                doc.import_hints
+                                    .unknown_numeric_config
+                                    .push((key.clone(), trimmed.to_string()));
+                            }
+                            Err(_) => {}
                         }
                     }
                 }
             }
             // 3D camera: camera_yaw = -0.4, camera_pitch = 0.6, view = 3d
             "camera_yaw" | "camera-yaw" | "yaw" => {
-                if let Ok(v) = val.trim().parse::<f32>() {
-                    doc.import_hints.camera_yaw = Some(v);
+                let trimmed = val.trim();
+                match trimmed.parse::<f32>() {
+                    Ok(v) => doc.import_hints.camera_yaw = Some(v),
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
                 }
             }
             "camera_pitch" | "camera-pitch" | "pitch" => {
-                if let Ok(v) = val.trim().parse::<f32>() {
-                    doc.import_hints.camera_pitch = Some(v);
+                let trimmed = val.trim();
+                match trimmed.parse::<f32>() {
+                    Ok(v) => doc.import_hints.camera_pitch = Some(v),
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
                 }
             }
             "view" | "view-mode" | "mode" => {
@@ -1460,16 +1503,43 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             // layer names: layer0 = Data Tier, layer 1 = Backend
             // layout spacing: spacing=120 or gap=80 or gap-main=80 gap-cross=50
             "spacing" | "gap" | "node-spacing" | "node_spacing" => {
-                if let Ok(v) = val.parse::<f32>() {
-                    doc.layout_gap_main = v;
-                    doc.layout_gap_cross = v * 0.75; // cross is 3/4 of main by default
+                let trimmed = val.trim();
+                match trimmed.parse::<f32>() {
+                    Ok(v) => {
+                        doc.layout_gap_main = v;
+                        doc.layout_gap_cross = v * 0.75; // cross is 3/4 of main by default
+                    }
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
                 }
             }
             "gap-main" | "gap_main" | "layer-spacing" | "layer_spacing" | "main-gap" => {
-                if let Ok(v) = val.parse::<f32>() { doc.layout_gap_main = v; }
+                let trimmed = val.trim();
+                match trimmed.parse::<f32>() {
+                    Ok(v) => doc.layout_gap_main = v,
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
+                }
             }
             "gap-cross" | "gap_cross" | "cross-gap" | "node-gap" | "node_gap" => {
-                if let Ok(v) = val.parse::<f32>() { doc.layout_gap_cross = v; }
+                let trimmed = val.trim();
+                match trimmed.parse::<f32>() {
+                    Ok(v) => doc.layout_gap_cross = v,
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
+                }
             }
             _ if key.starts_with("layer") => {
                 let num_part = key.trim_start_matches("layer").trim();
@@ -1481,16 +1551,52 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             // SLA target days by priority: sla-p1 = 1, sla-p2 = 3, etc.
             "sla-p1" | "sla_p1" => {
-                if let Ok(v) = val.parse::<u32>() { doc.sla_days[0] = v; }
+                let trimmed = val.trim();
+                match trimmed.parse::<u32>() {
+                    Ok(v) => doc.sla_days[0] = v,
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
+                }
             }
             "sla-p2" | "sla_p2" => {
-                if let Ok(v) = val.parse::<u32>() { doc.sla_days[1] = v; }
+                let trimmed = val.trim();
+                match trimmed.parse::<u32>() {
+                    Ok(v) => doc.sla_days[1] = v,
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
+                }
             }
             "sla-p3" | "sla_p3" => {
-                if let Ok(v) = val.parse::<u32>() { doc.sla_days[2] = v; }
+                let trimmed = val.trim();
+                match trimmed.parse::<u32>() {
+                    Ok(v) => doc.sla_days[2] = v,
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
+                }
             }
             "sla-p4" | "sla_p4" => {
-                if let Ok(v) = val.parse::<u32>() { doc.sla_days[3] = v; }
+                let trimmed = val.trim();
+                match trimmed.parse::<u32>() {
+                    Ok(v) => doc.sla_days[3] = v,
+                    Err(_) if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_numeric_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    Err(_) => {}
+                }
             }
             _ => {
                 // Preserve the unknown key so `lint` can emit a

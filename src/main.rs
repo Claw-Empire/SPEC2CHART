@@ -1710,6 +1710,26 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // `## Groups` fill typos: when `{fill:X}` on a group line doesn't resolve
+    // (`{fill:blu}`, `{fill:gren}`, bad hex), the frame silently falls back
+    // to the default color with no feedback. The parser now records these
+    // into `import_hints.unknown_group_fill`. Emit did-you-mean hints via
+    // `suggest_fill_color_name` so typos are actionable instead of silent.
+    for (group_id, raw_tag) in &doc.import_hints.unknown_group_fill {
+        let val = raw_tag.strip_prefix("fill:").unwrap_or(raw_tag).trim();
+        if let Some(suggestion) = crate::specgraph::hrf::suggest_fill_color_name(val) {
+            warnings.push(format!(
+                "Group [{}]: unresolved {{{}}} — did you mean {{fill:{}}}?",
+                group_id, raw_tag, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "Group [{}]: unresolved {{{}}} — not a recognized color name (blue/green/red/...), palette entry, or hex value",
+                group_id, raw_tag
+            ));
+        }
+    }
+
     // Inline group typo-split detection: when `{group:backend}` appears on
     // several nodes and `{group:bakcend}` on one, the parser creates two
     // frames silently. Detect pairs of inline group names that are within
@@ -2214,6 +2234,19 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 key, raw
             ));
         }
+    }
+
+    // Unknown numeric config values: `grid = small`, `camera_yaw = tilted`,
+    // `gap = wide`, `sla-p1 = three` used to silently drop because the parser
+    // did `if let Ok(v) = val.parse::<f32>()` with no else branch. The parser
+    // now records (key, raw_value) when parse fails and the value is
+    // non-empty. Surface a clear warning so the user knows their directive
+    // was ignored.
+    for (key, raw) in &doc.import_hints.unknown_numeric_config {
+        warnings.push(format!(
+            "Config: `{} = {}` is not a number — this directive was ignored",
+            key, raw
+        ));
     }
 
     // Duplicate parallel edges: same (source, target, label) tuple appearing
@@ -5011,6 +5044,195 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_gradient_angle_non_numeric_via_cli() {
+        // `{gradient-angle:half}` and `{grad-angle:90deg}` should warn because
+        // the gradient angle parser requires an integer 0-255. Previously the
+        // arm was `if let Ok(...)` and silently dropped bad values.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {gradient-angle:half}\n\
+                    - [b] Beta {grad-angle:90deg}\n\
+                    - [c] Gamma {gradient-angle:45}\n\
+                    - [d] Delta {grad-angle:180}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("gradient_angle_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["gradient-angle:half", "grad-angle:90deg"] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("unresolved")
+                    && s.contains(needle)
+                    && s.contains("gradient direction")
+            });
+            assert!(has, "expected {needle} warning, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_gradient_angle_valid_values_no_warning_via_cli() {
+        // Regression guard: valid gradient-angle values should not produce
+        // `unresolved` warnings.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {gradient-angle:0}\n\
+                    - [b] Beta {gradient-angle:90}\n\
+                    - [c] Gamma {gradient-angle:180}\n\
+                    - [d] Delta {grad-angle:45}\n\
+                    - [e] Epsilon {grad-angle:255}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("gradient_angle_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in [
+            "gradient-angle:0",
+            "gradient-angle:90",
+            "gradient-angle:180",
+            "grad-angle:45",
+            "grad-angle:255",
+        ] {
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("unresolved") && s.contains(needle)
+            });
+            assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_group_fill_typo_via_cli() {
+        // `## Groups` {fill:X} typos (`{fill:blu}`, `{fill:gren}`) used to
+        // silently drop to the default frame color. Verify they now surface
+        // as lint warnings with did-you-mean hints.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    ## Groups\n\
+                    - [g1] Backend {fill:blu}\n\
+                    \x20\x20a, b\n\
+                    - [g2] Frontend {fill:gren}\n\
+                    \x20\x20c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("group_fill_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_blu = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("g1")
+                && s.contains("fill:blu")
+                && s.contains("did you mean")
+                && s.contains("fill:blue")
+        });
+        let has_gren = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("g2")
+                && s.contains("fill:gren")
+                && s.contains("did you mean")
+                && s.contains("fill:green")
+        });
+        assert!(has_blu, "expected g1 fill:blu typo warning, got: {stdout}");
+        assert!(has_gren, "expected g2 fill:gren typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_group_fill_valid_no_warning_via_cli() {
+        // Regression guard: valid group fill colors should not produce any
+        // `unresolved` warnings.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    ## Groups\n\
+                    - [g1] Backend {fill:blue}\n\
+                    \x20\x20a\n\
+                    - [g2] Frontend {fill:green}\n\
+                    \x20\x20b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("group_fill_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["fill:blue", "fill:green"] {
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("unresolved") && s.contains(needle)
+            });
+            assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_status_typo_via_cli() {
         // `{status:doen}` should warn and suggest `{status:done}`. Previously
         // the parser's `status:` arm fell through to `tag_to_node_tag` which
@@ -6051,6 +6273,107 @@ mod cli_tests {
             w.as_str().unwrap_or("").contains("not recognized")
         });
         assert!(!bad, "canonical bool/view values must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_numeric_config_non_numeric_via_cli() {
+        // Typos like `grid = small`, `camera_yaw = tilted`, `gap = wide`,
+        // `sla-p1 = three` used to silently drop because the parser did
+        // `if let Ok(v) = val.parse::<f32>()` with no else branch. They
+        // should now emit "is not a number" warnings so the author knows
+        // their directive was ignored.
+        let spec = "## Config\n\
+                    grid = small\n\
+                    camera_yaw = tilted\n\
+                    gap = wide\n\
+                    sla-p1 = three\n\
+                    ## Nodes\n\
+                    - [a] A\n\
+                    - [b] B\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("num_bad_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_grid = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("grid") && s.contains("small") && s.contains("not a number")
+        });
+        let has_yaw = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("camera_yaw") && s.contains("tilted") && s.contains("not a number")
+        });
+        let has_gap = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("gap") && s.contains("wide") && s.contains("not a number")
+        });
+        let has_sla = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("sla-p1") && s.contains("three") && s.contains("not a number")
+        });
+        assert!(has_grid, "expected grid numeric warning, got: {stdout}");
+        assert!(has_yaw, "expected camera_yaw numeric warning, got: {stdout}");
+        assert!(has_gap, "expected gap numeric warning, got: {stdout}");
+        assert!(has_sla, "expected sla-p1 numeric warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_numeric_config_valid_values_not_flagged_via_cli() {
+        // Regression guard: valid numeric values across the numeric-config
+        // key family must not fire the "not a number" warning.
+        let spec = "## Config\n\
+                    grid-size = 32\n\
+                    camera_yaw = 45\n\
+                    camera_pitch = -30\n\
+                    gap = 80\n\
+                    sla-p1 = 5\n\
+                    sla-p2 = 10\n\
+                    sla-p3 = 20\n\
+                    sla-p4 = 40\n\
+                    ## Nodes\n\
+                    - [a] A\n\
+                    - [b] B\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("num_ok_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("not a number")
+        });
+        assert!(!bad, "canonical numeric values must not warn, got: {stdout}");
     }
 
     #[test]

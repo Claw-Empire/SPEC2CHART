@@ -880,6 +880,21 @@ pub struct ImportHints {
     /// hints from the canonical boolean vocabulary (true/false/yes/no/
     /// on/off/1/0) or, for `view`, the 2d/3d vocabulary. Never serialized.
     pub unknown_bool_config: Vec<(String, String)>,
+    /// Unrecognized non-numeric values supplied to numeric config keys
+    /// like `grid-size`, `camera_yaw`, `camera_pitch`, `spacing`/`gap`,
+    /// `sla-p1..p4`, etc. The parser used `if let Ok(v) = val.parse::<f32>()`
+    /// without else, silently dropping non-numeric values so typos like
+    /// `grid = small` or `camera_yaw = tilted` no-op'd with no user
+    /// feedback. Pair is (key_name, raw_value). Used by `lint` to emit
+    /// "expected number" warnings. Never serialized.
+    pub unknown_numeric_config: Vec<(String, String)>,
+    /// Unresolved `{fill:X}` references on `## Groups` entries: pairs of
+    /// (group_id, raw_tag) where `tag_to_fill_color` returned None so the
+    /// frame fill silently dropped to the default. Previously typos like
+    /// `{fill:blu}` or `{fill:gren}` vanished without a warning and the
+    /// group rendered with the default frame color. Used by `lint` to emit
+    /// did-you-mean hints from `suggest_fill_color_name`. Never serialized.
+    pub unknown_group_fill: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
