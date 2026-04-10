@@ -2314,7 +2314,10 @@ fn parse_flow_line_chain(
     // Strategy: tokenise by splitting on "-->" then pair up segments
     let segments: Vec<&str> = normalized.split("-->").collect();
     if segments.len() < 2 {
-        return Err(format!("Line {}: expected '-->' or '->' in flow definition", line_num + 1));
+        return Err(format!(
+            "Line {}: expected '-->' or '->' in flow definition (e.g. `source --> target: label`)",
+            line_num + 1
+        ));
     }
 
     let mut edges = Vec::new();
@@ -2520,11 +2523,23 @@ fn parse_flow_line_chain(
 /// Parse: `[id] Label text {shape} {z:50}`
 fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<String>), String> {
     let id_start = line.find('[').ok_or_else(|| {
-        format!("Line {}: expected [id] in node definition", line_num + 1)
+        format!(
+            "Line {}: expected [id] in node definition (e.g. `- [api] API Gateway {{rounded}}`)",
+            line_num + 1
+        )
     })?;
     let id_end = line.find(']').ok_or_else(|| {
-        format!("Line {}: missing closing ] in node id", line_num + 1)
+        format!(
+            "Line {}: missing closing ] in node id (e.g. `- [api] API Gateway`)",
+            line_num + 1
+        )
     })?;
+    if id_end < id_start {
+        return Err(format!(
+            "Line {}: ']' appears before '[' in node id — expected `[id]` (e.g. `- [api] API Gateway`)",
+            line_num + 1
+        ));
+    }
     let id = line[id_start + 1..id_end].trim().to_string();
     let rest = line[id_end + 1..].trim();
 
@@ -3309,15 +3324,17 @@ fn parse_entity_attribute(line: &str) -> EntityAttribute {
     // Extract [PK, FK] suffix
     if let Some(bracket_start) = line.rfind('[') {
         if let Some(bracket_end) = line.rfind(']') {
-            let tags_str = &line[bracket_start + 1..bracket_end];
-            for part in tags_str.split(',') {
-                match part.trim().to_uppercase().as_str() {
-                    "PK" | "PRIMARY" | "PRIMARY KEY" => is_pk = true,
-                    "FK" | "FOREIGN" | "FOREIGN KEY" => is_fk = true,
-                    _ => {}
+            if bracket_end > bracket_start {
+                let tags_str = &line[bracket_start + 1..bracket_end];
+                for part in tags_str.split(',') {
+                    match part.trim().to_uppercase().as_str() {
+                        "PK" | "PRIMARY" | "PRIMARY KEY" => is_pk = true,
+                        "FK" | "FOREIGN" | "FOREIGN KEY" => is_fk = true,
+                        _ => {}
+                    }
                 }
+                name = line[..bracket_start].trim().to_string();
             }
-            name = line[..bracket_start].trim().to_string();
         }
     }
 
@@ -3903,6 +3920,32 @@ mod tests {
     fn test_suggest_id_prefers_prefix_match_over_listing() {
         let hint = suggest_id("api2", ["api", "client", "db"].into_iter());
         assert!(hint.contains("did you mean: api"), "got: {hint}");
+    }
+
+    #[test]
+    fn test_parse_node_line_rejects_inverted_brackets_without_panic() {
+        // Regression: `]foo[` used to panic with `begin > end` slicing error.
+        let err = parse_node_line("]bad[ order", 1).unwrap_err();
+        assert!(
+            err.contains("appears before '['") || err.contains("expected [id]"),
+            "expected bracket-order error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_node_line_error_includes_example() {
+        let err = parse_node_line("no brackets here", 0).unwrap_err();
+        assert!(err.contains("e.g."), "error should include an example: {err}");
+    }
+
+    #[test]
+    fn test_parse_flow_error_includes_example() {
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na - > b\n";
+        let err = parse_hrf(spec).unwrap_err();
+        assert!(
+            err.contains("-->") && err.contains("e.g."),
+            "flow error should include an example: {err}"
+        );
     }
 
     #[test]
