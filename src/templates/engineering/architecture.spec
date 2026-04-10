@@ -28,4 +28,4 @@ api --> svc2: process
 svc2 --> db: read/write
 svc2 --> cache: cache
 svc2 --> queue: emit events
-queue --> svc1: audit log
+svc1 --> queue: audit log

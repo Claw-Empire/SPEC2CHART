@@ -727,7 +727,7 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
         let stroke_width = node.style.border_width;
 
         match &node.kind {
-            NodeKind::Shape { shape, label, .. } => {
+            NodeKind::Shape { shape, label, description } => {
                 match shape {
                     NodeShape::Rectangle => {
                         svg.push_str(&format!(
@@ -1046,12 +1046,33 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                 }
                 svg.push('\n');
 
-                // Shape label centered
+                // Compute vertical stacking for label + sublabel + tag badge.
+                // We center the stack vertically around the node's mid-Y.
+                // Sublabel source: explicit `node.sublabel` (set by some parsers) or
+                // the indented continuation description parsed into `description`.
+                let sublabel_text: &str = if !node.sublabel.is_empty() {
+                    &node.sublabel
+                } else if !description.is_empty() {
+                    // Use only the first line of description to keep nodes compact.
+                    description.lines().next().unwrap_or("")
+                } else {
+                    ""
+                };
+                let has_sublabel = !sublabel_text.is_empty();
+                let has_tag = node.tag.is_some();
+                let label_h = node.style.font_size;
+                let sub_h = if has_sublabel { 14.0 } else { 0.0 };
+                let tag_badge_h = if has_tag { 16.0 } else { 0.0 };
+                let gap = if has_sublabel || has_tag { 4.0 } else { 0.0 };
+                let stack_h = label_h + sub_h + tag_badge_h + gap * 2.0;
+                let stack_top = ny + nh / 2.0 - stack_h / 2.0;
+
+                // Shape label (top of stack)
                 if !label.is_empty() {
                     let text_color = rgba_to_svg_color(node.style.text_color);
                     let text_opacity = node.style.text_color[3] as f32 / 255.0;
                     let text_x = nx + nw / 2.0;
-                    let text_y = ny + nh / 2.0;
+                    let text_y = stack_top + label_h / 2.0;
                     svg.push_str(&format!(
                         r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="{:.0}" fill="{}" fill-opacity="{:.2}">{}</text>"#,
                         text_x, text_y, node.style.font_size, text_color, text_opacity, xml_escape(label),
@@ -1059,23 +1080,47 @@ pub fn export_svg(doc: &FlowchartDocument, path: &Path) -> Result<(), String> {
                     svg.push('\n');
                 }
 
-                // Tag badge (small colored pill below label)
+                // Sublabel (second line, smaller, muted)
+                if has_sublabel {
+                    let sub_color = {
+                        // Derive a muted variant of the text color (55% opacity mixed look)
+                        let [r, g, b, _] = node.style.text_color;
+                        format!("#{:02x}{:02x}{:02x}", r, g, b)
+                    };
+                    let sub_x = nx + nw / 2.0;
+                    let sub_y = stack_top + label_h + gap + sub_h / 2.0;
+                    // Truncate overly long sublabels to fit the node width.
+                    // Approx 6px per character at font-size 10.
+                    let max_chars = ((nw - 16.0) / 6.0).max(8.0) as usize;
+                    let display_sub: String = if sublabel_text.chars().count() > max_chars {
+                        let truncated: String = sublabel_text.chars().take(max_chars.saturating_sub(1)).collect();
+                        format!("{}…", truncated)
+                    } else {
+                        sublabel_text.to_string()
+                    };
+                    svg.push_str(&format!(
+                        r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="10" fill="{}" fill-opacity="0.65">{}</text>"#,
+                        sub_x, sub_y, sub_color, xml_escape(&display_sub),
+                    ));
+                    svg.push('\n');
+                }
+
+                // Tag badge (bottom of stack)
                 if let Some(tag) = &node.tag {
                     let tag_rgba = tag.color();
                     let tag_fill = rgba_to_svg_color(tag_rgba);
                     let tag_text = tag.label();
                     let badge_w = tag_text.len() as f32 * 7.0 + 12.0;
-                    let badge_h = 16.0;
                     let badge_x = nx + nw / 2.0 - badge_w / 2.0;
-                    let badge_y = ny + nh / 2.0 + node.style.font_size * 0.6;
+                    let badge_y = stack_top + label_h + if has_sublabel { gap + sub_h + gap } else { gap };
                     svg.push_str(&format!(
                         r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="8" ry="8" fill="{}" fill-opacity="0.85"/>"#,
-                        badge_x, badge_y, badge_w, badge_h, tag_fill,
+                        badge_x, badge_y, badge_w, tag_badge_h, tag_fill,
                     ));
                     svg.push('\n');
                     svg.push_str(&format!(
                         r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="10" fill="#1e1e2e" font-weight="bold">{}</text>"##,
-                        badge_x + badge_w / 2.0, badge_y + badge_h / 2.0, xml_escape(tag_text),
+                        badge_x + badge_w / 2.0, badge_y + tag_badge_h / 2.0, xml_escape(tag_text),
                     ));
                     svg.push('\n');
                 }

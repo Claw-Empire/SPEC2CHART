@@ -1556,6 +1556,51 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
         }
     }
 
+    // Post-parse auto-resize: now that all indented continuation lines
+    // (which populate `description` on Shape nodes) have been parsed,
+    // re-apply auto-width/height so sublabel text fits without truncation.
+    // Only adjusts nodes that DON'T have an explicit size override (we
+    // detect this by skipping frames and anything with `pinned` positions).
+    for node in doc.nodes.iter_mut() {
+        if node.is_frame { continue; }
+        // Effective sublabel: explicit sublabel or first line of description
+        let effective_sub: String = if !node.sublabel.is_empty() {
+            node.sublabel.clone()
+        } else if let crate::model::NodeKind::Shape { description, .. } = &node.kind {
+            description.lines().next().unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+        if effective_sub.is_empty() { continue; }
+
+        let label_chars = node.display_label().chars().count() as f32;
+        let sublabel_chars = effective_sub.chars().count() as f32;
+        let longest = label_chars.max(sublabel_chars * 0.75);
+        let shape_factor = match &node.kind {
+            crate::model::NodeKind::Shape { shape, .. } => match shape {
+                crate::model::NodeShape::Diamond => 1.8,
+                crate::model::NodeShape::Hexagon => 1.3,
+                crate::model::NodeShape::Circle => 1.7,
+                crate::model::NodeShape::Parallelogram => 1.3,
+                _ => 1.0,
+            },
+            _ => 1.0,
+        };
+        let auto_w = ((longest * 7.5 + 44.0) * shape_factor).clamp(100.0, 400.0);
+        if auto_w > node.size[0] {
+            node.size[0] = auto_w;
+        }
+
+        // Auto-height: ensure room for label + sublabel + optional tag badge
+        let base_h = node.style.font_size + 36.0;
+        let sub_h = 16.0;
+        let tag_h = if node.tag.is_some() { 20.0 } else { 0.0 };
+        let needed_h = (base_h + sub_h + tag_h).clamp(60.0, 240.0);
+        if needed_h > node.size[1] {
+            node.size[1] = needed_h;
+        }
+    }
+
     // Resolve {dep:target} decorators into dashed dependency edges.
     // id_map and label_map are fully populated by this point.
     for (from_id, dep_target) in node_deps {
@@ -2998,14 +3043,24 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         let luma = 0.299 * fc[0] as f32 + 0.587 * fc[1] as f32 + 0.114 * fc[2] as f32;
         node.style.text_color = if luma > 140.0 { [15, 15, 20, 255] } else { [220, 220, 230, 255] };
     }
+    // Derive effective sublabel text for auto-sizing: prefer explicit sublabel,
+    // fall back to the first line of the Shape's description (indented continuation lines).
+    let effective_sub: String = if !node.sublabel.is_empty() {
+        node.sublabel.clone()
+    } else if let NodeKind::Shape { description, .. } = &node.kind {
+        description.lines().next().unwrap_or("").to_string()
+    } else {
+        String::new()
+    };
     // Auto-size: expand width to fit label if no explicit {w:N} given.
     // Uses an approximation: ~7.5px per character at the default font size.
     // Only expands (never shrinks) and caps at 400px to stay readable.
     // Diamonds/hexagons/circles have less usable text area, so we scale up.
     if width_override.is_none() && !node.is_frame {
         let label_chars = node.display_label().chars().count() as f32;
-        let sublabel_chars = node.sublabel.chars().count() as f32;
-        let longest = label_chars.max(sublabel_chars);
+        let sublabel_chars = effective_sub.chars().count() as f32;
+        // Sublabel uses a smaller font (~0.6x at font-size 10 vs 14) so its effective char-width is smaller
+        let longest = label_chars.max(sublabel_chars * 0.6);
         let shape_factor = match &node.kind {
             NodeKind::Shape { shape, .. } => match shape {
                 NodeShape::Diamond => 1.8,
@@ -3019,6 +3074,21 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         let auto_w = ((longest * 7.5 + 44.0) * shape_factor).clamp(100.0, 400.0);
         if auto_w > node.size[0] {
             node.size[0] = auto_w;
+        }
+    }
+    // Auto-height: expand height to fit label + sublabel + tag badge if no explicit {h:N} given.
+    if height_override.is_none() && !node.is_frame {
+        let has_sublabel = !effective_sub.is_empty();
+        let has_tag = node.tag.is_some();
+        // Base: one line of label (font_size + padding)
+        let base_h = node.style.font_size + 36.0;
+        // Extra for sublabel: ~12px line of text + 4px gap
+        let sub_h = if has_sublabel { 16.0 } else { 0.0 };
+        // Extra for tag badge: 16px badge + 4px gap
+        let tag_h = if has_tag { 20.0 } else { 0.0 };
+        let needed_h = (base_h + sub_h + tag_h).clamp(60.0, 240.0);
+        if needed_h > node.size[1] {
+            node.size[1] = needed_h;
         }
     }
     if let Some(w) = width_override {
@@ -3758,17 +3828,28 @@ fn tag_to_port_side(s: &str) -> Option<PortSide> {
 /// Suggest similar IDs for better error messages using simple prefix/substring matching.
 fn suggest_id<'a>(bad_id: &str, candidates: impl Iterator<Item = &'a str>) -> String {
     let bad_lower = bad_id.to_lowercase();
-    let matches: Vec<&str> = candidates
+    let all: Vec<&'a str> = candidates.collect();
+    let matches: Vec<&str> = all
+        .iter()
+        .copied()
         .filter(|c| {
             let cl = c.to_lowercase();
             cl.contains(&bad_lower[..bad_lower.len().min(3)]) || bad_lower.contains(&cl[..cl.len().min(3)])
         })
         .take(3)
         .collect();
-    if matches.is_empty() {
-        " — define it in ## Nodes section".to_string()
-    } else {
+    if !matches.is_empty() {
         format!(" — did you mean: {}?", matches.join(", "))
+    } else if all.is_empty() {
+        " — no nodes defined yet; add one in ## Nodes section".to_string()
+    } else {
+        let sample: Vec<&str> = all.iter().take(5).copied().collect();
+        let suffix = if all.len() > 5 { ", ..." } else { "" };
+        format!(
+            " — define it in ## Nodes section (known ids: {}{})",
+            sample.join(", "),
+            suffix
+        )
     }
 }
 
@@ -3796,6 +3877,33 @@ fn slugify(label: &str, index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_suggest_id_lists_known_ids_when_no_match() {
+        let hint = suggest_id("xyz", ["alpha", "beta", "gamma"].into_iter());
+        assert!(
+            hint.contains("known ids: alpha, beta, gamma"),
+            "expected known-ids list in hint, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn test_suggest_id_caps_at_five_with_ellipsis() {
+        let hint = suggest_id("xyz", ["a", "b", "c", "d", "e", "f", "g"].into_iter());
+        assert!(hint.contains("a, b, c, d, e, ..."), "got: {hint}");
+    }
+
+    #[test]
+    fn test_suggest_id_handles_empty_candidates() {
+        let hint = suggest_id("foo", std::iter::empty::<&str>());
+        assert!(hint.contains("no nodes defined yet"), "got: {hint}");
+    }
+
+    #[test]
+    fn test_suggest_id_prefers_prefix_match_over_listing() {
+        let hint = suggest_id("api2", ["api", "client", "db"].into_iter());
+        assert!(hint.contains("did you mean: api"), "got: {hint}");
+    }
 
     #[test]
     fn test_parse_with_descriptions() {

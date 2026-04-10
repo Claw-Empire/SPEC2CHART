@@ -5,7 +5,7 @@ flow = TB
 ## Nodes
 - [trigger] Alert Page {circle} {fill:#f38ba8} {critical}
   Initial PagerDuty ping.
-- [assess] Assess Severity {diamond} {fill:#f9e2af} {wip}
+- [assess] Assess Severity {diamond} {fill:#f9e2af}
   SEV1 / SEV2 / SEV3?
 - [p1] P1 Critical {rounded} {fill:#f38ba8} {critical}
   Customer-facing outage.
@@ -25,15 +25,15 @@ flow = TB
   Resolved + archived.
 
 ## Flow
-trigger --> assess
+trigger --> assess: page fires
 assess --> p1: SEV1
 assess --> p2: SEV2
 assess --> p3: SEV3
-p1 --> escalate
-p2 --> mitigate
-p3 --> mitigate
+p1 --> escalate: wake EM
+p2 --> mitigate: fix within 1h
+p3 --> mitigate: fix within 24h
 escalate --> mitigate: after brief
-mitigate --> verify
+mitigate --> verify: dashboards
 verify --> postmortem: if P1/P2
 verify --> close: if P3
-postmortem --> close
+postmortem --> close: filed
