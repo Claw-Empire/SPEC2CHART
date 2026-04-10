@@ -1130,4 +1130,89 @@ mod cli_tests {
         assert_eq!(base.nodes.len(), 2 + overlay_node_count);
         assert_eq!(base.edges.len(), 1 + overlay_edge_count);
     }
+
+    #[test]
+    fn test_lint_detects_long_label() {
+        let long = "This label is intentionally very long to exceed the sixty character limit for testing";
+        let spec = format!("## Nodes\n- [a] {}\n- [b] Short\n## Flow\na --> b\n", long);
+        let doc = crate::specgraph::hrf::parse_hrf(&spec).unwrap();
+        let long_count = doc.nodes.iter()
+            .filter(|n| n.display_label().chars().count() > 60)
+            .count();
+        assert_eq!(long_count, 1);
+    }
+
+    #[test]
+    fn test_diamond_unlabeled_branches_detected() {
+        // Diamond with 2 unlabeled outgoing should be flagged
+        let spec = "## Nodes\n- [s] Start {rounded}\n- [d] Decide {diamond}\n- [y] Yes {rounded}\n- [n] No {rounded}\n## Flow\ns --> d\nd --> y\nd --> n\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        use crate::model::{NodeKind, NodeShape};
+        let diamond_ids: std::collections::HashSet<_> = doc.nodes.iter()
+            .filter(|n| matches!(&n.kind, NodeKind::Shape { shape: NodeShape::Diamond, .. }))
+            .map(|n| n.id)
+            .collect();
+        assert_eq!(diamond_ids.len(), 1);
+        let mut out_counts: std::collections::HashMap<_, (usize, usize)> =
+            std::collections::HashMap::new();
+        for edge in &doc.edges {
+            if diamond_ids.contains(&edge.source.node_id) {
+                let e = out_counts.entry(edge.source.node_id).or_insert((0, 0));
+                e.0 += 1;
+                if !edge.label.trim().is_empty() { e.1 += 1; }
+            }
+        }
+        // 2 branches, 0 labeled → should be flagged
+        let flagged: Vec<_> = out_counts.iter()
+            .filter(|(_, (total, labeled))| *total >= 2 && *labeled < *total)
+            .collect();
+        assert_eq!(flagged.len(), 1);
+    }
+
+    #[test]
+    fn test_stats_layout_depth_multi_layer() {
+        // a → b → c → d creates 4 layers (depth 4)
+        let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n- [d] D\n## Flow\na --> b\nb --> c\nc --> d\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let node_idx: std::collections::HashMap<_, _> =
+            doc.nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let n = doc.nodes.len();
+        let mut adj = vec![Vec::new(); n];
+        let mut in_deg = vec![0i32; n];
+        for edge in &doc.edges {
+            if let (Some(&from), Some(&to)) =
+                (node_idx.get(&edge.source.node_id), node_idx.get(&edge.target.node_id))
+            {
+                adj[from].push(to);
+                in_deg[to] += 1;
+            }
+        }
+        let mut layer = vec![0i32; n];
+        let mut rem = in_deg.clone();
+        let mut queue: std::collections::VecDeque<_> = std::collections::VecDeque::new();
+        for (i, &d) in rem.iter().enumerate() {
+            if d == 0 { queue.push_back(i); }
+        }
+        while let Some(u) = queue.pop_front() {
+            for &v in &adj[u] {
+                let cand = layer[u] + 1;
+                if cand > layer[v] { layer[v] = cand; }
+                rem[v] -= 1;
+                if rem[v] == 0 { queue.push_back(v); }
+            }
+        }
+        let depth = *layer.iter().max().unwrap() as usize + 1;
+        assert_eq!(depth, 4);
+    }
+
+    #[test]
+    fn test_diff_detects_modified_label() {
+        let spec_a = "## Nodes\n- [a] Original\n- [b] Beta\n## Flow\na --> b\n";
+        let spec_b = "## Nodes\n- [a] Renamed\n- [b] Beta\n## Flow\na --> b\n";
+        let doc_a = crate::specgraph::hrf::parse_hrf(spec_a).unwrap();
+        let doc_b = crate::specgraph::hrf::parse_hrf(spec_b).unwrap();
+        let node_a = doc_a.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
+        let node_b = doc_b.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
+        assert_ne!(node_a.display_label(), node_b.display_label());
+    }
 }
