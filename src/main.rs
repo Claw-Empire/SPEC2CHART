@@ -1317,6 +1317,33 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 }
                 continue;
             }
+            // Align/valign typo: `{align:rigth}` / `{valign:middel}`. The
+            // parser used to collapse these into the default (`Center` /
+            // `Middle`) via a catch-all `_` arm — wiping user intent with
+            // zero lint signal. Now parse_node_line pushes unrecognized
+            // values to unknown_tags, and `suggest_align_value` points the
+            // user at the canonical spelling.
+            let align_prefix_match = ["align:", "valign:"]
+                .iter()
+                .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
+            if let Some((prefix, rest)) = align_prefix_match {
+                let horizontal = prefix == "align:";
+                let rest_trimmed = rest.trim();
+                if let Some(suggestion) = crate::specgraph::hrf::suggest_align_value(
+                    rest_trimmed, horizontal) {
+                    warnings.push(format!(
+                        "Node {}: unknown alignment {{{}}} — did you mean {{{}{}}}?",
+                        id_str, tag, prefix, suggestion
+                    ));
+                } else {
+                    let canon = if horizontal { "left, right, center" } else { "top, bottom, middle" };
+                    warnings.push(format!(
+                        "Node {}: unknown alignment {{{}}} — expected one of: {}",
+                        id_str, tag, canon
+                    ));
+                }
+                continue;
+            }
             // Unresolved color reference: the parser's `fill:`/`color:`/
             // `border-color:`/`stroke:` arms now push tags whose rest does
             // not resolve via `tag_to_fill_color` (palette expansion already
@@ -4083,6 +4110,163 @@ mod cli_tests {
             s.contains("unknown shape")
         });
         assert!(!has, "exact shape prefix match must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_align_typo_via_cli() {
+        // `{align:rigth}` should warn and suggest `{align:right}`. Previously
+        // the parser's catch-all `_ => Center` arm silently collapsed typos
+        // into the horizontal default, wiping user intent.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {align:rigth}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("align_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("align:rigth")
+                && s.contains("did you mean")
+                && s.contains("align:right")
+        });
+        assert!(has, "expected align typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_valign_typo_via_cli() {
+        // `{valign:middel}` should warn and suggest `{valign:middle}`.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {valign:middel}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("valign_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("valign:middel")
+                && s.contains("did you mean")
+                && s.contains("valign:middle")
+        });
+        assert!(has, "expected valign typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_align_no_suggestion_via_cli() {
+        // `{align:qwerty}` has no close match — fallback warning listing the
+        // canonical vocabulary must still fire so the silent drop is visible.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {align:qwerty}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("align_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("align:qwerty")
+                && s.contains("expected one of: left, right, center")
+        });
+        assert!(has, "expected fallback align warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_align_exact_values_no_warning_via_cli() {
+        // Canonical + accepted-synonym values must NOT warn. Includes
+        // `center` (canonical), `centre` (synonym), `left`, `right`, and
+        // valign counterparts `middle`, `top`, `bottom`. Guards against
+        // regressions where a synonym accidentally gets classified as a typo.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {align:left}\n\
+                    - [b] Beta {align:right}\n\
+                    - [c] Gamma {align:center}\n\
+                    - [d] Delta {align:centre}\n\
+                    - [e] Epsilon {valign:top}\n\
+                    - [f] Foxtrot {valign:bottom}\n\
+                    - [g] Golf {valign:middle}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n\
+                    e --> f\n\
+                    f --> g\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("align_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown alignment")
+        });
+        assert!(!has, "canonical alignment values must not warn, got: {stdout}");
     }
 
     #[test]

@@ -2824,9 +2824,15 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 if pos_x.is_some() && pos_y.is_some() { pinned = true; }
             }
         } else if let Some(rest) = tag.strip_prefix("w:") {
-            width_override = rest.trim().parse::<f32>().ok();
+            match rest.trim().parse::<f32>() {
+                Ok(v) => width_override = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if let Some(rest) = tag.strip_prefix("h:") {
-            height_override = rest.trim().parse::<f32>().ok();
+            match rest.trim().parse::<f32>() {
+                Ok(v) => height_override = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if tag == "tiny" || tag == "xs" {
             // Size shorthands — set both width and height
             width_override  = Some(70.0);
@@ -2975,23 +2981,40 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag == "frame" || tag == "group" || tag == "container" {
             is_frame = true;
         } else if let Some(rest) = tag.strip_prefix("x:") {
-            pos_x = rest.trim().parse::<f32>().ok();
+            match rest.trim().parse::<f32>() {
+                Ok(v) => pos_x = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if let Some(rest) = tag.strip_prefix("y:") {
-            pos_y = rest.trim().parse::<f32>().ok();
+            match rest.trim().parse::<f32>() {
+                Ok(v) => pos_y = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if let Some(rest) = tag.strip_prefix("border:") {
-            border_width = rest.trim().parse::<f32>().ok();
+            match rest.trim().parse::<f32>() {
+                Ok(v) => border_width = Some(v),
+                Err(_) => unknown_tags.push(tag.to_string()),
+            }
         } else if let Some(rest) = tag.strip_prefix("align:") {
-            text_align = match rest.trim() {
-                "left" => Some(crate::model::TextAlign::Left),
-                "right" => Some(crate::model::TextAlign::Right),
-                _ => Some(crate::model::TextAlign::Center),
-            };
+            // Accept canonical center explicitly so typos don't collapse into
+            // the default silently. Unknown values (e.g. `{align:rigth}`)
+            // land in unknown_tags for cli_lint's did-you-mean walk.
+            match rest.trim().to_ascii_lowercase().as_str() {
+                "left" | "l" | "start" => text_align = Some(crate::model::TextAlign::Left),
+                "right" | "r" | "end" => text_align = Some(crate::model::TextAlign::Right),
+                "center" | "centre" | "c" | "middle" | "mid" =>
+                    text_align = Some(crate::model::TextAlign::Center),
+                _ => unknown_tags.push(tag.to_string()),
+            }
         } else if let Some(rest) = tag.strip_prefix("valign:") {
-            text_valign = match rest.trim() {
-                "top" => Some(crate::model::TextVAlign::Top),
-                "bottom" => Some(crate::model::TextVAlign::Bottom),
-                _ => Some(crate::model::TextVAlign::Middle),
-            };
+            match rest.trim().to_ascii_lowercase().as_str() {
+                "top" | "t" | "up" => text_valign = Some(crate::model::TextVAlign::Top),
+                "bottom" | "b" | "bot" | "down" =>
+                    text_valign = Some(crate::model::TextVAlign::Bottom),
+                "middle" | "mid" | "m" | "center" | "centre" | "c" =>
+                    text_valign = Some(crate::model::TextVAlign::Middle),
+                _ => unknown_tags.push(tag.to_string()),
+            }
         } else if tag.starts_with("font-size:") || tag.starts_with("fs:") || tag.starts_with("fontsize:") || tag.starts_with("text-size:") || tag.starts_with("textsize:") {
             let colon = tag.find(':').unwrap();
             font_size_override = tag[colon+1..].trim().parse::<f32>().ok();
@@ -3989,6 +4012,57 @@ pub fn suggest_fill_color_name(raw: &str) -> Option<&'static str> {
         // so a uniform distance-2 cutoff catches the common transposition
         // cases (`bleu` → `blue`, `gren` → `green`) without producing
         // false-positive pairs like `red` → `teal`.
+        if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical align/valign value. `horizontal=true` returns
+/// `left|right|center`; `horizontal=false` returns `top|bottom|middle`. Uses
+/// the same Levenshtein-2 cutoff pattern as the color / shape suggestors.
+/// Returns None on exact match, empty input, or no close candidate.
+///
+/// The parser already accepts several synonyms (`start`/`end`, `c`, etc.)
+/// — the suggestion always points back to the single *canonical* spelling
+/// so user-facing messages stay consistent.
+pub fn suggest_align_value(raw: &str, horizontal: bool) -> Option<&'static str> {
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+    let candidates: &[&str] = if horizontal {
+        &["left", "right", "center"]
+    } else {
+        &["top", "bottom", "middle"]
+    };
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in candidates {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // exact match = already valid
         if d <= 2 {
             match best {
                 Some((best_d, _)) if d >= best_d => {}
