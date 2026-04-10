@@ -4645,6 +4645,135 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_status_typo_via_cli() {
+        // `{status:doen}` should suggest `{status:done}`. Previously the
+        // parser's status: arm fell through to tag_to_node_tag, which
+        // returned None and silently dropped the tag. Now the parser
+        // preserves unknown values and cli_lint suggests the closest
+        // canonical spelling (`done`).
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:doen}\n\
+                    - [b] Beta {status:blokced}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_done = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("status:doen")
+                && s.contains("did you mean")
+                && s.contains("status:done")
+        });
+        assert!(has_done, "expected status:doen → status:done warning, got: {stdout}");
+        let has_blocked = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("status:blokced")
+                && s.contains("did you mean")
+                && s.contains("status:blocked")
+        });
+        assert!(has_blocked, "expected status:blokced → status:blocked warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_status_no_suggestion_via_cli() {
+        // `{status:qwertyuiop}` has no close match — fallback warning
+        // still fires so the silent drop is visible.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:qwertyuiop}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("status:qwertyuiop")
+                && s.contains("not a recognized status value")
+        });
+        assert!(has, "expected fallback status warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_status_exact_values_no_warning_via_cli() {
+        // Canonical + accepted-synonym status values must NOT warn.
+        // Guards against a regression where a valid spelling accidentally
+        // gets classified as a typo.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {status:done}\n\
+                    - [b] Beta {status:wip}\n\
+                    - [c] Gamma {status:blocked}\n\
+                    - [d] Delta {status:review}\n\
+                    - [e] Epsilon {status:todo}\n\
+                    - [f] Foxtrot {status:completed}\n\
+                    - [g] Golf {status:in-progress}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n\
+                    e --> f\n\
+                    f --> g\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("status_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown status")
+        });
+        assert!(!has, "canonical status values must not warn, got: {stdout}");
+    }
+
+    #[test]
     fn test_lint_near_duplicate_hrf_ids_flagged() {
         // Two HRF IDs that differ by a single character (and aren't
         // numbered siblings or inflectional variants) should surface as
