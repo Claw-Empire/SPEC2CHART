@@ -4742,6 +4742,132 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_layer_name_typo_via_cli() {
+        // `{layer:databse}` used to silently fall through `_ => z_offset`.
+        // Parser now pushes to unknown_tags and suggest_layer_name points
+        // at the closest canonical spelling across all 5 tier buckets.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {layer:databse}\n\
+                    - [b] Beta {tier:kubernets}\n\
+                    - [c] Gamma {level:servr}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for (needle, expected) in [
+            ("layer:databse", "layer:database"),
+            ("tier:kubernets", "tier:kubernetes"),
+            ("level:servr", "level:server"),
+        ] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(needle) && s.contains("did you mean") && s.contains(expected)
+            });
+            assert!(has, "expected `{needle}` → `{expected}`, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_layer_name_no_suggestion_via_cli() {
+        // Unknown layer with no close match falls back to the explanatory
+        // warning listing the 5 canonical tier groups.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {layer:qwerty}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("layer:qwerty") && s.contains("not a number or recognized tier name")
+        });
+        assert!(has, "expected fallback layer warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_layer_exact_values_no_warning_via_cli() {
+        // Canonical layer names across all 5 tier buckets + numeric
+        // value + alternate prefixes must NOT warn. Regression guard.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {layer:db}\n\
+                    - [b] Beta {layer:api}\n\
+                    - [c] Gamma {tier:frontend}\n\
+                    - [d] Delta {level:edge}\n\
+                    - [e] Epsilon {layer:infra}\n\
+                    - [f] Foxtrot {layer:2}\n\
+                    - [g] Golf {layer:database}\n\
+                    - [h] Hotel {tier:kubernetes}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n\
+                    e --> f\n\
+                    f --> g\n\
+                    g --> h\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown layer")
+        });
+        assert!(!bad, "canonical layer values must not warn, got: {stdout}");
+    }
+
+    #[test]
     fn test_lint_status_typo_via_cli() {
         // `{status:doen}` should warn and suggest `{status:done}`. Previously
         // the parser's `status:` arm fell through to `tag_to_node_tag` which
