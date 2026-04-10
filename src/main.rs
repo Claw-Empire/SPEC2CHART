@@ -1041,8 +1041,12 @@ fn cli_stats(input: PathBuf, json: bool) {
         0.0
     };
 
-    // Layout depth (longest path via BFS layering, same as layout engine)
-    let layout_depth = {
+    // Layout depth (longest path via BFS layering, same as layout engine).
+    // Also reports whether the directed graph has a cycle: Kahn's topo
+    // sort leaves `rem[v] > 0` for any node trapped in a cycle since its
+    // in-degree never reaches zero. Self-loops are excluded (matching
+    // layout) so they don't false-positive the cycle flag.
+    let (layout_depth, has_cycle, cycle_node_count) = {
         let node_idx: HashMap<crate::model::NodeId, usize> =
             doc.nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
         let n = doc.nodes.len();
@@ -1064,7 +1068,9 @@ fn cli_stats(input: PathBuf, json: bool) {
         for (i, &d) in rem.iter().enumerate() {
             if d == 0 { queue.push_back(i); }
         }
+        let mut processed = 0usize;
         while let Some(u) = queue.pop_front() {
+            processed += 1;
             for &v in &adj[u] {
                 let cand = layer[u] + 1;
                 if cand > layer[v] { layer[v] = cand; }
@@ -1072,7 +1078,18 @@ fn cli_stats(input: PathBuf, json: bool) {
                 if rem[v] == 0 { queue.push_back(v); }
             }
         }
-        layer.into_iter().max().unwrap_or(0) as usize + 1
+        // Nodes still holding in-degree > 0 are trapped in a cycle.
+        let cycle_nodes = n.saturating_sub(processed);
+        let depth = layer.into_iter().max().unwrap_or(0) as usize + 1;
+        (depth, cycle_nodes > 0, cycle_nodes)
+    };
+
+    // Average degree across non-frame nodes. Each edge contributes +1 to
+    // source out-degree and +1 to target in-degree → +2 total degrees.
+    let avg_degree: f32 = if non_frame_count > 0 {
+        (2.0 * edge_count as f32) / non_frame_count as f32
+    } else {
+        0.0
     };
 
     if json {
@@ -1105,6 +1122,9 @@ fn cli_stats(input: PathBuf, json: bool) {
             "max_in_degree": max_in,
             "max_out_degree": max_out,
             "layout_depth": layout_depth,
+            "has_cycle": has_cycle,
+            "cycle_node_count": cycle_node_count,
+            "avg_degree": ((avg_degree as f64 * 1000.0).round() / 1000.0),
             "connected_components": component_count,
             "edge_density": ((edge_density as f64 * 1000.0).round() / 1000.0),
             "tags": tags_obj,
@@ -1127,12 +1147,22 @@ fn cli_stats(input: PathBuf, json: bool) {
         println!("  Max in-degree:     {}", max_in);
         println!("  Max out-degree:    {}", max_out);
         println!("  Layout depth:      {} layer{}", layout_depth, if layout_depth == 1 { "" } else { "s" });
+        println!("  Avg degree:        {:.2}", avg_degree);
         println!(
             "  Components:        {} subgraph{}",
             component_count,
             if component_count == 1 { "" } else { "s" }
         );
         println!("  Edge density:      {:.1}%", edge_density * 100.0);
+        if has_cycle {
+            println!(
+                "  Cycle:             YES ({} node{} trapped)",
+                cycle_node_count,
+                if cycle_node_count == 1 { "" } else { "s" }
+            );
+        } else {
+            println!("  Cycle:             no (DAG)");
+        }
         if !tags.is_empty() {
             println!();
             println!("  Tag distribution:");
@@ -1237,18 +1267,55 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
 
     // Shape-tag typo detection: inspect each node's `unknown_tags` (preserved
     // by the HRF parser for tags that no handler claimed) and suggest the
-    // closest known shape alias when the distance is small enough.
+    // closest known shape alias when the distance is small enough. If no
+    // shape alias matches but the document defines `## Style` templates,
+    // fall back to suggesting the closest style name — a common silent
+    // failure is `{primry}` typo'd from a defined `{primary}` style, where
+    // `expand_styles` leaves the tag unresolved and it ends up in
+    // `unknown_tags` with no signal to the user.
+    //
+    // Guards on the style-name fallback:
+    //   - Only run when at least one style definition exists.
+    //   - Require style-name length >= 3 (shorter names are too ambiguous).
+    //   - Skip exact matches (defensive — shouldn't reach unknown_tags).
+    //   - Distance <= 2 (length-scaled: <= 1 for <= 4 char names).
     for node in &doc.nodes {
         for tag in &node.unknown_tags {
+            let id_str = if node.hrf_id.is_empty() {
+                node.display_label().to_string()
+            } else {
+                format!("[{}]", node.hrf_id)
+            };
             if let Some(suggestion) = crate::specgraph::hrf::suggest_shape_alias(tag) {
-                let id_str = if node.hrf_id.is_empty() {
-                    node.display_label().to_string()
-                } else {
-                    format!("[{}]", node.hrf_id)
-                };
                 warnings.push(format!(
                     "Node {}: unknown tag {{{}}} — did you mean {{{}}}?",
                     id_str, tag, suggestion
+                ));
+                continue;
+            }
+            // Style-template fallback: match against `## Style` definitions.
+            if doc.import_hints.style_definition_usage.is_empty() {
+                continue;
+            }
+            let tag_lower = tag.to_ascii_lowercase();
+            let mut best: Option<(String, usize)> = None;
+            for (style_name, _count) in &doc.import_hints.style_definition_usage {
+                if style_name.len() < 3 { continue; }
+                let sn_lower = style_name.to_ascii_lowercase();
+                if sn_lower == tag_lower { continue; } // defensive
+                let max_d: usize = if style_name.len() <= 4 { 1 } else { 2 };
+                let d = levenshtein_distance(&tag_lower, &sn_lower);
+                if d == 0 || d > max_d { continue; }
+                match &best {
+                    None => best = Some((style_name.clone(), d)),
+                    Some((_, bd)) if d < *bd => best = Some((style_name.clone(), d)),
+                    _ => {}
+                }
+            }
+            if let Some((style_name, _)) = best {
+                warnings.push(format!(
+                    "Node {}: unknown tag {{{}}} — did you mean {{{}}}? (defined in ## Style)",
+                    id_str, tag, style_name
                 ));
             }
         }
@@ -3148,6 +3215,90 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_stats_detects_simple_cycle() {
+        // 3-node ring: a → b → c → a. Kahn's topo sort can never strip
+        // any of the three (each has in-degree 1 from a cycle participant),
+        // so `has_cycle` must be true and `cycle_node_count` == 3.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n## Flow\na --> b\nb --> c\nc --> a\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("cycle_stats_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["stats", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("stats --json not valid JSON: {stdout}"));
+        assert_eq!(v["has_cycle"].as_bool(), Some(true), "expected has_cycle=true, got: {stdout}");
+        assert_eq!(v["cycle_node_count"].as_u64(), Some(3), "expected 3 cycle nodes, got: {stdout}");
+    }
+
+    #[test]
+    fn test_stats_reports_dag_without_cycle() {
+        // Linear chain: a → b → c. No cycle, `has_cycle` must be false.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n## Flow\na --> b\nb --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dag_stats_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["stats", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("stats --json not valid JSON: {stdout}"));
+        assert_eq!(v["has_cycle"].as_bool(), Some(false), "DAG must report has_cycle=false, got: {stdout}");
+        assert_eq!(v["cycle_node_count"].as_u64(), Some(0), "DAG must report 0 cycle nodes, got: {stdout}");
+    }
+
+    #[test]
+    fn test_stats_avg_degree_computed() {
+        // Linear chain: a → b → c. Two edges, three non-frame nodes.
+        // avg_degree = 2*2/3 = 1.333...
+        let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n## Flow\na --> b\nb --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("avg_deg_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["stats", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("stats --json not valid JSON: {stdout}"));
+        let avg = v["avg_degree"].as_f64().expect("avg_degree number");
+        assert!(
+            (avg - 1.333).abs() < 0.01,
+            "expected avg_degree ≈ 1.333, got {}: {stdout}", avg
+        );
+    }
+
+    #[test]
     fn test_lint_multiple_self_loops_aggregated() {
         // Two self-loops on the same node collapse into a single
         // "multiple self-loops" warning with the count — instead of two
@@ -3191,6 +3342,161 @@ mod cli_tests {
             s.starts_with("Self-loop on node") && s.contains("\"A\"")
         });
         assert!(!has_single_a, "A's loops should not produce a single-loop warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_style_template_typo_flagged_via_cli() {
+        // A defined `## Style primary` and a node tag `{primry}` (one char
+        // off) should fire the style-template suggestion fallback — the
+        // shape-alias walk returns None for `primry`, so without this
+        // fallback the user gets zero signal that the style expansion
+        // silently no-op'd.
+        let spec = "## Style\n\
+                    primary = {fill:#0000ff}\n\
+                    danger = {fill:#ff0000}\n\
+                    \n\
+                    ## Nodes\n\
+                    - [a] Alpha {primry}\n\
+                    - [b] Beta {primary}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("style_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("primry")
+                && s.contains("did you mean")
+                && s.contains("primary")
+                && s.contains("## Style")
+        });
+        assert!(has, "expected style-template typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_no_style_section_no_fallback_via_cli() {
+        // When no `## Style` section exists, the style-template fallback
+        // must stay silent — an unknown tag with no shape suggestion is
+        // simply dropped (there's nothing to suggest from).
+        let spec = "## Nodes\n- [a] Alpha {weirdstyle}\n- [b] Beta\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("no_style_fallback_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("weirdstyle") && s.contains("## Style")
+        });
+        assert!(!has, "unknown tag without style section must not trigger fallback, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_style_exact_match_no_fallback_via_cli() {
+        // When a node uses the correct style name, `expand_styles` consumes
+        // the tag before it reaches `unknown_tags` — so the fallback walks
+        // an empty list and emits nothing. This guards that exact matches
+        // never produce a noisy "did you mean X" against themselves.
+        let spec = "## Style\n\
+                    primary = {fill:#0000ff}\n\
+                    \n\
+                    ## Nodes\n\
+                    - [a] Alpha {primary}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("style_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("## Style") && s.contains("did you mean")
+        });
+        assert!(!has, "exact style match must not fire fallback, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_very_short_style_name_not_flagged_via_cli() {
+        // Style names shorter than 3 chars are skipped by the fallback.
+        // Here `fx` is a 2-char style and `fy` on a node is d=1 away, but
+        // the length guard prevents a noisy match (too many single-char
+        // pairs would fire false positives).
+        let spec = "## Style\n\
+                    fx = {fill:#0000ff}\n\
+                    \n\
+                    ## Nodes\n\
+                    - [a] Alpha {fy}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("short_style_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("fy") && s.contains("## Style") && s.contains("did you mean")
+        });
+        assert!(!has, "short style name must not trigger fallback, got: {stdout}");
     }
 
     #[test]
