@@ -103,6 +103,9 @@ enum Commands {
         /// Treat warnings as errors (exit 1 on any finding)
         #[arg(long)]
         strict: bool,
+        /// Output as JSON instead of human-readable text (for CI/IDE integration)
+        #[arg(long)]
+        json: bool,
     },
     /// Merge two diagrams into one
     Merge {
@@ -176,8 +179,8 @@ fn main() -> eframe::Result<()> {
             cli_stats(input, json);
             return Ok(());
         }
-        Some(Commands::Lint { input, strict }) => {
-            cli_lint(input, strict);
+        Some(Commands::Lint { input, strict, json }) => {
+            cli_lint(input, strict, json);
             return Ok(());
         }
         Some(Commands::Merge { base, overlay, out }) => {
@@ -375,21 +378,91 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     let id_to_key_b: std::collections::HashMap<crate::model::NodeId, String> =
         doc_b.nodes.iter().map(|n| (n.id, node_key(n))).collect();
 
-    let edges_a: std::collections::HashSet<String> = doc_a.edges.iter()
-        .map(|e| format!("{} → {}",
-            id_to_key_a.get(&e.source.node_id).map(String::as_str).unwrap_or("?"),
-            id_to_key_a.get(&e.target.node_id).map(String::as_str).unwrap_or("?")))
-        .collect();
-    let edges_b: std::collections::HashSet<String> = doc_b.edges.iter()
-        .map(|e| format!("{} → {}",
-            id_to_key_b.get(&e.source.node_id).map(String::as_str).unwrap_or("?"),
-            id_to_key_b.get(&e.target.node_id).map(String::as_str).unwrap_or("?")))
-        .collect();
+    // Edges are keyed by (source, target) so we can detect MODIFIED edges
+    // (same endpoints but changed label or style) separately from pure
+    // add/remove. A label change used to show as a paired `- edge:` and
+    // `+ edge:` with no indication they were related.
+    type EdgeKey = (String, String);
+    let edge_key_a = |e: &crate::model::Edge| -> EdgeKey {
+        (
+            id_to_key_a.get(&e.source.node_id).cloned().unwrap_or_else(|| "?".into()),
+            id_to_key_a.get(&e.target.node_id).cloned().unwrap_or_else(|| "?".into()),
+        )
+    };
+    let edge_key_b = |e: &crate::model::Edge| -> EdgeKey {
+        (
+            id_to_key_b.get(&e.source.node_id).cloned().unwrap_or_else(|| "?".into()),
+            id_to_key_b.get(&e.target.node_id).cloned().unwrap_or_else(|| "?".into()),
+        )
+    };
 
-    let mut added_edges: Vec<&String> = edges_b.difference(&edges_a).collect();
-    let mut removed_edges: Vec<&String> = edges_a.difference(&edges_b).collect();
-    added_edges.sort();
-    removed_edges.sort();
+    // Summarize edge visual style in a human-readable form for diff output.
+    let edge_style_summary = |e: &crate::model::Edge| -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if e.style.dashed { parts.push("dashed".into()); }
+        if e.style.glow { parts.push("glow".into()); }
+        if e.style.animated { parts.push("animated".into()); }
+        if e.style.width > 4.0 { parts.push("thick".into()); }
+        if e.style.orthogonal { parts.push("ortho".into()); }
+        parts.join(",")
+    };
+
+    // Build lookup maps. When the same (src,tgt) appears multiple times
+    // (parallel edges), keep the first — unusual but not fatal.
+    let mut edges_a_map: std::collections::HashMap<EdgeKey, &crate::model::Edge> =
+        std::collections::HashMap::new();
+    for e in &doc_a.edges {
+        edges_a_map.entry(edge_key_a(e)).or_insert(e);
+    }
+    let mut edges_b_map: std::collections::HashMap<EdgeKey, &crate::model::Edge> =
+        std::collections::HashMap::new();
+    for e in &doc_b.edges {
+        edges_b_map.entry(edge_key_b(e)).or_insert(e);
+    }
+
+    let mut added_edges: Vec<(EdgeKey, String)> = Vec::new();
+    let mut removed_edges: Vec<(EdgeKey, String)> = Vec::new();
+    let mut modified_edges: Vec<(EdgeKey, Vec<String>)> = Vec::new();
+
+    for (key, edge_b) in &edges_b_map {
+        match edges_a_map.get(key) {
+            None => {
+                let label = if edge_b.label.is_empty() { String::new() } else { format!(" [{}]", edge_b.label) };
+                added_edges.push((key.clone(), label));
+            }
+            Some(edge_a) => {
+                let mut changes: Vec<String> = Vec::new();
+                if edge_a.label != edge_b.label {
+                    changes.push(format!("label: {:?} → {:?}", edge_a.label, edge_b.label));
+                }
+                let style_a = edge_style_summary(edge_a);
+                let style_b = edge_style_summary(edge_b);
+                if style_a != style_b {
+                    let fmt = |s: &str| if s.is_empty() { "plain".into() } else { s.to_string() };
+                    changes.push(format!("style: {} → {}", fmt(&style_a), fmt(&style_b)));
+                }
+                if edge_a.style.color != edge_b.style.color {
+                    changes.push(format!(
+                        "color: #{:02x}{:02x}{:02x} → #{:02x}{:02x}{:02x}",
+                        edge_a.style.color[0], edge_a.style.color[1], edge_a.style.color[2],
+                        edge_b.style.color[0], edge_b.style.color[1], edge_b.style.color[2],
+                    ));
+                }
+                if !changes.is_empty() {
+                    modified_edges.push((key.clone(), changes));
+                }
+            }
+        }
+    }
+    for (key, edge_a) in &edges_a_map {
+        if !edges_b_map.contains_key(key) {
+            let label = if edge_a.label.is_empty() { String::new() } else { format!(" [{}]", edge_a.label) };
+            removed_edges.push((key.clone(), label));
+        }
+    }
+    added_edges.sort_by(|a, b| a.0.cmp(&b.0));
+    removed_edges.sort_by(|a, b| a.0.cmp(&b.0));
+    modified_edges.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Output in sorted order
     for id in &added_nodes {
@@ -401,22 +474,27 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     for (key, changes) in &modified_nodes {
         println!("~ node: {} ({})", key, changes.join(", "));
     }
-    for e in &added_edges {
-        println!("+ edge: {}", e);
+    for ((s, t), label) in &added_edges {
+        println!("+ edge: {} → {}{}", s, t, label);
     }
-    for e in &removed_edges {
-        println!("- edge: {}", e);
+    for ((s, t), label) in &removed_edges {
+        println!("- edge: {} → {}{}", s, t, label);
+    }
+    for ((s, t), changes) in &modified_edges {
+        println!("~ edge: {} → {} ({})", s, t, changes.join(", "));
     }
 
     let total_changes = added_nodes.len() + removed_nodes.len() + modified_nodes.len()
-        + added_edges.len() + removed_edges.len();
+        + added_edges.len() + removed_edges.len() + modified_edges.len();
     if total_changes == 0 {
         println!("✓ No differences");
     } else {
         println!();
-        println!("Summary: +{} nodes, -{} nodes, ~{} modified, +{} edges, -{} edges",
+        println!(
+            "Summary: +{} nodes, -{} nodes, ~{} modified nodes, +{} edges, -{} edges, ~{} modified edges",
             added_nodes.len(), removed_nodes.len(), modified_nodes.len(),
-            added_edges.len(), removed_edges.len());
+            added_edges.len(), removed_edges.len(), modified_edges.len()
+        );
     }
 }
 
@@ -900,7 +978,7 @@ fn cli_stats(input: PathBuf, json: bool) {
     }
 }
 
-fn cli_lint(input: PathBuf, strict: bool) {
+fn cli_lint(input: PathBuf, strict: bool, json: bool) {
     let doc = load_doc(&input);
     let mut warnings: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
@@ -1166,6 +1244,28 @@ fn cli_lint(input: PathBuf, strict: bool) {
     }
 
     // Output
+    if json {
+        // Structured output for CI/IDE integration. Shape is intentionally
+        // flat so `jq`/downstream tools can filter easily:
+        // `jq '.errors[]' findings.json` or
+        // `jq -r '.warnings[] | "\(.)"' findings.json`.
+        let payload = serde_json::json!({
+            "file": input.display().to_string(),
+            "node_count": doc.nodes.len(),
+            "edge_count": doc.edges.len(),
+            "errors": errors,
+            "warnings": warnings,
+            "error_count": errors.len(),
+            "warning_count": warnings.len(),
+            "clean": errors.is_empty() && warnings.is_empty(),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        if !errors.is_empty() || (strict && !warnings.is_empty()) {
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let total = warnings.len() + errors.len();
     if total == 0 {
         println!("✓ No issues found in {:?} ({} nodes, {} edges)", input, doc.nodes.len(), doc.edges.len());
@@ -1547,5 +1647,70 @@ mod cli_tests {
         let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
         assert_eq!(doc.edges.len(), 1);
         assert_eq!(doc.edges[0].unknown_tags, vec!["dahsed".to_string()]);
+    }
+
+    #[test]
+    fn test_diff_detects_edge_label_changes() {
+        // Same endpoints, different label → should appear as a MODIFIED edge
+        // rather than a paired add/remove pair.
+        let before = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b: old label\n";
+        let after  = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b: new label\n";
+        let doc_a = crate::specgraph::hrf::parse_hrf(before).unwrap();
+        let doc_b = crate::specgraph::hrf::parse_hrf(after).unwrap();
+        assert_eq!(doc_a.edges.len(), 1);
+        assert_eq!(doc_b.edges.len(), 1);
+        assert_ne!(doc_a.edges[0].label, doc_b.edges[0].label);
+        assert_eq!(doc_a.edges[0].label, "old label");
+        assert_eq!(doc_b.edges[0].label, "new label");
+    }
+
+    #[test]
+    fn test_diff_detects_edge_style_changes() {
+        // Same endpoints + label, but style flipped dashed → solid.
+        let before = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {dashed}\n";
+        let after  = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {thick}\n";
+        let doc_a = crate::specgraph::hrf::parse_hrf(before).unwrap();
+        let doc_b = crate::specgraph::hrf::parse_hrf(after).unwrap();
+        assert!(doc_a.edges[0].style.dashed);
+        assert!(!doc_b.edges[0].style.dashed);
+        assert!(doc_b.edges[0].style.width > 4.0);
+    }
+
+    #[test]
+    fn test_lint_json_output_is_valid_json() {
+        // Use the CLI binary to render JSON output and verify it parses +
+        // has the expected top-level keys.
+        use std::process::Command;
+        let spec = "## Nodes\n- [a] A {daimond}\n- [b] B\n\n## Flow\na --> b\n";
+        let tmp = std::env::temp_dir().join(format!("lint_json_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        // Walk up from .../deps/main-<hash> to the target/release binary
+        let target_dir = exe.parent().unwrap().parent().unwrap();
+        let bin = target_dir.join("open-draftly");
+        if !bin.exists() {
+            // Debug build won't have release binary — skip quietly
+            eprintln!("skipping test_lint_json_output_is_valid_json: release binary not found at {:?}", bin);
+            return;
+        }
+        let out = Command::new(&bin)
+            .arg("lint")
+            .arg(&tmp)
+            .arg("--json")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|e| panic!("lint --json did not emit valid JSON: {}\n---\n{}", e, stdout));
+        assert!(parsed.get("errors").is_some(), "missing errors key");
+        assert!(parsed.get("warnings").is_some(), "missing warnings key");
+        assert!(parsed.get("error_count").is_some());
+        assert!(parsed.get("warning_count").is_some());
+        assert!(parsed.get("clean").is_some());
+        // daimond is a shape typo — must show up as a warning
+        let warnings = parsed.get("warnings").unwrap().as_array().unwrap();
+        assert!(warnings.iter().any(|w| w.as_str().unwrap_or("").contains("daimond")));
+        std::fs::remove_file(&tmp).ok();
     }
 }
