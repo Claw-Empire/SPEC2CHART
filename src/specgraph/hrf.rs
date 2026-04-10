@@ -2925,7 +2925,17 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             // {shape:circle} / {type:diamond} / {kind:hexagon} — explicit property-style shape
             let colon = tag.find(':').unwrap();
             let val = tag[colon+1..].trim();
-            shape = tag_to_shape(val);
+            match tag_to_shape_opt(val) {
+                Some(s) => shape = s,
+                None => {
+                    // Unresolved explicit shape tag (e.g. `{shape:diamon}` — typo
+                    // of `diamond`). Previously `tag_to_shape` silently defaulted
+                    // to RoundedRect, wiping any user intent. Preserve the raw
+                    // tag so `cli_lint` can emit a "did you mean" suggestion via
+                    // `suggest_shape_alias` on the stripped value.
+                    unknown_tags.push(tag.to_string());
+                }
+            }
         } else if let Some(rest) = tag.strip_prefix("status:") {
             // {status:done} / {status:wip} / {status:blocked} etc — property-style status
             let val = rest.trim();

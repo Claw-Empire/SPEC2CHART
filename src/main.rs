@@ -1293,13 +1293,39 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 ));
                 continue;
             }
+            // Property-style shape typo: `{shape:diamon}` / `{type:circel}` /
+            // `{kind:hexgon}`. The parser used to silently default these to
+            // `RoundedRect` via `tag_to_shape`, wiping user intent. Now the
+            // parser pushes these to `unknown_tags` verbatim; strip the
+            // prefix and re-dispatch through `suggest_shape_alias` to emit
+            // a useful hint that preserves the user's chosen prefix.
+            let shape_prefix_match = ["shape:", "type:", "kind:"]
+                .iter()
+                .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
+            if let Some((prefix, rest)) = shape_prefix_match {
+                let rest_trimmed = rest.trim();
+                if let Some(suggestion) = crate::specgraph::hrf::suggest_shape_alias(rest_trimmed) {
+                    warnings.push(format!(
+                        "Node {}: unknown shape {{{}}} — did you mean {{{}{}}}?",
+                        id_str, tag, prefix, suggestion
+                    ));
+                } else {
+                    warnings.push(format!(
+                        "Node {}: unknown shape {{{}}} — not a recognized shape alias",
+                        id_str, tag
+                    ));
+                }
+                continue;
+            }
             // Unresolved color reference: the parser's `fill:`/`color:`/
             // `border-color:`/`stroke:` arms now push tags whose rest does
             // not resolve via `tag_to_fill_color` (palette expansion already
             // passed, built-in color lookup failed, hex parse failed).
             // Suggest the closest palette entry first, then fall back to
             // the built-in color vocabulary.
-            let color_prefix_match = ["fill:", "color:", "border-color:", "stroke:"]
+            // Order matters: longer prefixes must come before shorter ones
+            // (`text-color:` before `color:`, `border-color:` before `color:`).
+            let color_prefix_match = ["border-color:", "text-color:", "fill:", "stroke:", "color:"]
                 .iter()
                 .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
             if let Some((prefix, rest)) = color_prefix_match {
@@ -2698,6 +2724,34 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_shape_prefix_typo_stored_in_unknown_tags() {
+        // `{shape:diamon}` / `{type:circel}` / `{kind:hexgon}` — the parser
+        // must preserve the full prefixed tag so lint can strip the prefix
+        // and suggest the closest shape alias. Previously `tag_to_shape`
+        // silently defaulted to RoundedRect.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {shape:diamon}\n\
+                    - [b] Beta {type:circel}\n\
+                    - [c] Gamma {kind:hexgon}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let a = doc.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
+        assert!(
+            a.unknown_tags.iter().any(|t| t == "shape:diamon"),
+            "expected `shape:diamon` in unknown_tags, got {:?}", a.unknown_tags
+        );
+        let b = doc.nodes.iter().find(|n| n.hrf_id == "b").unwrap();
+        assert!(
+            b.unknown_tags.iter().any(|t| t == "type:circel"),
+            "expected `type:circel` in unknown_tags, got {:?}", b.unknown_tags
+        );
+        let c = doc.nodes.iter().find(|n| n.hrf_id == "c").unwrap();
+        assert!(
+            c.unknown_tags.iter().any(|t| t == "kind:hexgon"),
+            "expected `kind:hexgon` in unknown_tags, got {:?}", c.unknown_tags
+        );
+    }
+
+    #[test]
     fn test_edge_typo_suggests_dashed() {
         use crate::specgraph::hrf::suggest_edge_style_alias;
         assert_eq!(suggest_edge_style_alias("dahsed"), Some("dashed"));
@@ -3845,6 +3899,230 @@ mod cli_tests {
             s.contains("unresolved color")
         });
         assert!(!has, "exact edge color must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_shape_prefix_typo_via_cli() {
+        // `{shape:diamon}` should warn and suggest `{shape:diamond}`.
+        // Previously `tag_to_shape` silently defaulted unknown shape values
+        // to RoundedRect, wiping user intent with no lint signal.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {shape:diamon}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("shape_prefix_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("shape:diamon")
+                && s.contains("did you mean")
+                && s.contains("shape:diamond")
+        });
+        assert!(has, "expected shape prefix typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_type_prefix_typo_via_cli() {
+        // `{type:circel}` should warn and suggest `{type:circle}`. The prefix
+        // should be preserved so the user can copy/paste the suggestion back.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {type:circel}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("type_prefix_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("type:circel")
+                && s.contains("did you mean")
+                && s.contains("type:circle")
+        });
+        assert!(has, "expected type prefix typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_kind_prefix_typo_via_cli() {
+        // `{kind:hexgon}` should warn and suggest `{kind:hexagon}`.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {kind:hexgon}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("kind_prefix_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("kind:hexgon")
+                && s.contains("did you mean")
+                && s.contains("kind:hexagon")
+        });
+        assert!(has, "expected kind prefix typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_shape_prefix_no_suggestion_via_cli() {
+        // `{shape:qwerty}` has no close shape alias — fallback warning must
+        // still fire so the silent drop is visible to the user.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {shape:qwerty}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("shape_prefix_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("shape:qwerty") && s.contains("not a recognized shape alias")
+        });
+        assert!(has, "expected fallback shape warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_shape_prefix_exact_no_warning_via_cli() {
+        // Exact `{shape:diamond}` / `{type:circle}` / `{kind:hexagon}` must
+        // NOT emit unknown-shape warnings — the parser should resolve them
+        // cleanly through `tag_to_shape_opt`.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {shape:diamond}\n\
+                    - [b] Beta {type:circle}\n\
+                    - [c] Gamma {kind:hexagon}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("shape_prefix_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown shape")
+        });
+        assert!(!has, "exact shape prefix match must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_text_color_typo_via_cli() {
+        // `{text-color:blu}` should suggest `{text-color:blue}`. Previously
+        // the color lint walk only checked `fill:`/`color:`/`border-color:`/
+        // `stroke:` — `text-color:` fell through unmatched and silently
+        // dropped at parse time. The prefix list now includes `text-color:`
+        // (with `color:` listed last so the longer prefix wins).
+        let spec = "## Nodes\n\
+                    - [a] Alpha {text-color:blu}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("text_color_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("text-color:blu")
+                && s.contains("did you mean")
+                && s.contains("text-color:blue")
+        });
+        assert!(has, "expected text-color typo warning, got: {stdout}");
     }
 
     #[test]
