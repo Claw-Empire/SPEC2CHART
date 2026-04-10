@@ -1551,13 +1551,37 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
-    // Check for self-loops
-    for edge in &doc.edges {
-        if edge.source.node_id == edge.target.node_id {
-            warnings.push(format!("Self-loop on node {}",
-                doc.nodes.iter().find(|n| n.id == edge.source.node_id)
-                    .map(|n| n.display_label().to_string())
-                    .unwrap_or_else(|| "?".into())));
+    // Check for self-loops. A single self-loop is often intentional
+    // (state retention, event handler loopback). Two or more on the same
+    // node is almost always a copy-paste typo — aggregate them into one
+    // "multiple" warning to make the count obvious.
+    {
+        use std::collections::HashMap;
+        let mut self_counts: HashMap<crate::model::NodeId, usize> = HashMap::new();
+        for edge in &doc.edges {
+            if edge.source.node_id == edge.target.node_id {
+                *self_counts.entry(edge.source.node_id).or_insert(0) += 1;
+            }
+        }
+        // Sort by node's insertion order for deterministic output.
+        let mut ordered: Vec<(crate::model::NodeId, usize)> = Vec::new();
+        for node in &doc.nodes {
+            if let Some(&count) = self_counts.get(&node.id) {
+                ordered.push((node.id, count));
+            }
+        }
+        for (nid, count) in ordered {
+            let label = doc.nodes.iter().find(|n| n.id == nid)
+                .map(|n| n.display_label().to_string())
+                .unwrap_or_else(|| "?".into());
+            if count == 1 {
+                warnings.push(format!("Self-loop on node {:?}", label));
+            } else {
+                warnings.push(format!(
+                    "Node {:?} has {} self-loops — almost always a copy-paste typo (a single loop covers most retention/loopback semantics)",
+                    label, count
+                ));
+            }
         }
     }
 
@@ -2991,6 +3015,182 @@ mod cli_tests {
             w.as_str().unwrap_or("").contains("Invalid") && w.as_str().unwrap_or("").contains("port side")
         });
         assert!(!has_port, "valid port side must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_single_self_loop_still_warns_once_via_cli() {
+        // Regression guard: a single self-loop is often intentional
+        // (state retention, event handler loopback) but still deserves a
+        // single notice-level warning. The aggregation refactor must not
+        // suppress it. Exactly one "Self-loop on node" warning should
+        // appear, and NO "multiple self-loops" warning.
+        let spec = "## Nodes\n- [a] Retry\n- [b] Done\n## Flow\na --> a\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("single_self_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let single_count = warnings
+            .iter()
+            .filter(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.starts_with("Self-loop on node") && s.contains("\"Retry\"")
+            })
+            .count();
+        assert_eq!(single_count, 1, "expected exactly one single-loop warning, got: {stdout}");
+        let has_multi = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("self-loops") && s.contains("copy-paste")
+        });
+        assert!(!has_multi, "one self-loop must not fire multi-loop warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_self_loops_distinct_nodes_warn_individually_via_cli() {
+        // Three separate nodes each with ONE self-loop should produce
+        // three independent single-loop warnings — the aggregation is
+        // per-node, not per-document.
+        let spec = "## Nodes\n\
+                    - [a] A\n\
+                    - [b] B\n\
+                    - [c] C\n\
+                    ## Flow\n\
+                    a --> a\n\
+                    b --> b\n\
+                    c --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("distinct_self_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for label in ["\"A\"", "\"B\"", "\"C\""] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.starts_with("Self-loop on node") && s.contains(label)
+            });
+            assert!(has, "expected single-loop warning for {label}, got: {stdout}");
+        }
+        let has_multi = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("self-loops") && s.contains("copy-paste")
+        });
+        assert!(!has_multi, "distinct single loops must not fire multi warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_three_self_loops_reports_count_via_cli() {
+        // Three self-loops on ONE node must be aggregated into a single
+        // "has 3 self-loops" warning with the exact count — not three
+        // separate single-loop warnings, and not a generic "multiple"
+        // without a number.
+        let spec = "## Nodes\n- [node] Processor\n## Flow\nnode --> node\nnode --> node\nnode --> node\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("triple_self_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_three = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("has 3 self-loops") && s.contains("\"Processor\"")
+        });
+        assert!(has_three, "expected 'has 3 self-loops' warning, got: {stdout}");
+        // Must not also emit the single-loop variant.
+        let single_count = warnings
+            .iter()
+            .filter(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.starts_with("Self-loop on node") && s.contains("\"Processor\"")
+            })
+            .count();
+        assert_eq!(single_count, 0, "triple loop must subsume single variant, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_multiple_self_loops_aggregated() {
+        // Two self-loops on the same node collapse into a single
+        // "multiple self-loops" warning with the count — instead of two
+        // identical "Self-loop on node X" warnings the single-loop case
+        // would emit.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n## Flow\na --> a\na --> a\nb --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("multi_self_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // "A" has 2 self-loops → "multiple" variant
+        let has_multi = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("has 2 self-loops") && s.contains("\"A\"")
+        });
+        assert!(has_multi, "expected multiple self-loop warning for A, got: {stdout}");
+        // "B" has 1 self-loop → single variant
+        let has_single = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Self-loop on node") && s.contains("\"B\"")
+        });
+        assert!(has_single, "expected single self-loop warning for B, got: {stdout}");
+        // The single-loop warning for A must NOT also appear (it's subsumed).
+        let has_single_a = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.starts_with("Self-loop on node") && s.contains("\"A\"")
+        });
+        assert!(!has_single_a, "A's loops should not produce a single-loop warning, got: {stdout}");
     }
 
     #[test]
