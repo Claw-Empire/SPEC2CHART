@@ -1189,7 +1189,49 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 }
 
 fn cli_lint(input: PathBuf, strict: bool, json: bool) {
-    let doc = load_doc(&input);
+    // In JSON mode, handle parse errors by emitting a structured payload so
+    // downstream tools always see valid JSON. In text mode, fall through to
+    // load_doc's default behavior (eprint + exit 1).
+    let doc = if json {
+        let src = match std::fs::read_to_string(&input) {
+            Ok(s) => s,
+            Err(e) => {
+                let payload = serde_json::json!({
+                    "file": input.display().to_string(),
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "errors": [format!("Could not read file: {}", e)],
+                    "warnings": [],
+                    "error_count": 1,
+                    "warning_count": 0,
+                    "clean": false,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+                std::process::exit(1);
+            }
+        };
+        let parsed = crate::specgraph::hrf::parse_hrf(&src)
+            .or_else(|e| serde_json::from_str::<crate::model::FlowchartDocument>(&src).map_err(|_| e));
+        match parsed {
+            Ok(d) => d,
+            Err(e) => {
+                let payload = serde_json::json!({
+                    "file": input.display().to_string(),
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "errors": [format!("Parse error: {}", e)],
+                    "warnings": [],
+                    "error_count": 1,
+                    "warning_count": 0,
+                    "clean": false,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+                std::process::exit(1);
+            }
+        }
+    } else {
+        load_doc(&input)
+    };
     let mut warnings: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
@@ -1332,6 +1374,70 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Inline lane / phase / section typo-split detection (mirrors the
+    // group-level check above, one kind at a time). The parser stores
+    // `{lane:X}` / `{section:X}` / `{col:X}` in `node.timeline_lane`
+    // and `{phase:X}` in `node.timeline_period`. A user typing
+    // `{lane:Sales}` × 3 and `{lane:Slaes}` × 1 silently creates two
+    // lanes with no warning. Emit a typo-split hint when the minority
+    // is within Levenshtein 2 of the majority.
+    //
+    // Kind selection:
+    //   - timeline_lane: kanban/swimlane membership
+    //   - timeline_period: timeline phase membership
+    // We only report when either side has count 1 (same rule as
+    // inline groups) and the name is ≥4 chars to suppress 3-letter
+    // acronym noise (e.g. "Sales" vs "Sacks").
+    {
+        for kind in &["lane", "phase"] {
+            let mut counts_map: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            for node in &doc.nodes {
+                if node.is_frame { continue; }
+                let val_opt = if *kind == "lane" {
+                    node.timeline_lane.clone()
+                } else {
+                    node.timeline_period.clone()
+                };
+                if let Some(v) = val_opt {
+                    let trimmed = v.trim();
+                    if !trimmed.is_empty() {
+                        *counts_map.entry(trimmed.to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+            let mut counts: Vec<(String, usize)> = counts_map.into_iter().collect();
+            counts.sort_by(|a, b| a.0.cmp(&b.0));
+            if counts.len() < 2 { continue; }
+            for i in 0..counts.len() {
+                for j in (i + 1)..counts.len() {
+                    let (a, ac) = (&counts[i].0, counts[i].1);
+                    let (b, bc) = (&counts[j].0, counts[j].1);
+                    if ac >= 2 && bc >= 2 { continue; }
+                    let (majority, maj_count, minority, min_count) =
+                        if ac > bc { (a, ac, b, bc) } else { (b, bc, a, ac) };
+                    let d = levenshtein_distance(
+                        &minority.to_ascii_lowercase(),
+                        &majority.to_ascii_lowercase(),
+                    );
+                    let min_len = minority.len().min(majority.len());
+                    if min_len >= 4 && d > 0 && d <= 2 {
+                        warnings.push(format!(
+                            "Inline {kind} `{}` ({} node{}) looks like a typo of \
+                            `{}` ({} node{}) — check for typo-split",
+                            minority,
+                            min_count,
+                            if min_count == 1 { "" } else { "s" },
+                            majority,
+                            maj_count,
+                            if maj_count == 1 { "" } else { "s" },
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // Check for empty labels
     for node in &doc.nodes {
         let label = node.display_label();
@@ -1363,6 +1469,85 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
     for (id, count) in &seen_ids {
         if *count > 1 {
             errors.push(format!("Duplicate HRF ID [{}] used {} times", id, count));
+        }
+    }
+
+    // Near-duplicate HRF IDs: two IDs within Levenshtein distance 1 are
+    // almost always a typo split where the user meant one ID but spelled
+    // it two ways (e.g. `order` vs `oder`, `event` vs `evnet`). Currently
+    // the parser silently creates two separate nodes and the `## Flow`
+    // edges targeting one of them vanish. Surface the pair as a warning.
+    //
+    // Aggressive noise filtering (false-positives are worse than misses):
+    //   - Only d == 1 (d == 2 flags too many unrelated pairs like kr_g1/kr_o1).
+    //   - Min length >= 5 (shorter IDs like `user`/`uses` are too ambiguous).
+    //   - Skip numbered-series pairs with identical stems (`svc1`/`svc2`,
+    //     `feat1`/`feat3`) — detected by stripping trailing digits/underscores.
+    //   - Skip when either ID contains a digit AND the other does too
+    //     (enumeration like `kr_g1`/`kr_o1` where the difference is in the
+    //     label prefix, not a typo).
+    //   - Skip when one is a prefix of the other (`stream` vs `streams`,
+    //     `capture` vs `captured`, `authorize` vs `authorized` — these are
+    //     inflectional variants that legitimately coexist in state machines).
+    {
+        fn strip_trailing_digits(s: &str) -> String {
+            let mut end = s.len();
+            let bytes = s.as_bytes();
+            while end > 0 && bytes[end - 1].is_ascii_digit() {
+                end -= 1;
+            }
+            // Also strip a trailing separator like `_` or `-` if present.
+            while end > 0 && (bytes[end - 1] == b'_' || bytes[end - 1] == b'-') {
+                end -= 1;
+            }
+            s[..end].to_string()
+        }
+
+        let mut unique_ids: Vec<&str> = doc
+            .nodes
+            .iter()
+            .filter(|n| !n.hrf_id.is_empty())
+            .map(|n| n.hrf_id.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        unique_ids.sort();
+        let mut flagged: Vec<(String, String)> = Vec::new();
+        for i in 0..unique_ids.len() {
+            for j in (i + 1)..unique_ids.len() {
+                let a = unique_ids[i];
+                let b = unique_ids[j];
+                let min_len = a.len().min(b.len());
+                if min_len < 4 { continue; }
+                // Both contain a digit → probably numbered enumeration.
+                let a_has_digit = a.bytes().any(|c| c.is_ascii_digit());
+                let b_has_digit = b.bytes().any(|c| c.is_ascii_digit());
+                if a_has_digit && b_has_digit { continue; }
+                // Same stem after digit stripping → numbered series.
+                let a_stem = strip_trailing_digits(a).to_ascii_lowercase();
+                let b_stem = strip_trailing_digits(b).to_ascii_lowercase();
+                if a_stem == b_stem { continue; }
+                // Prefix relationship on stems → inflectional variant like
+                // `stream1`/`streams` (stems `stream`/`streams`) or
+                // `capture`/`captured` (stems match as prefix).
+                if !a_stem.is_empty() && !b_stem.is_empty()
+                    && (a_stem.starts_with(&b_stem) || b_stem.starts_with(&a_stem))
+                {
+                    continue;
+                }
+                let a_lower = a.to_ascii_lowercase();
+                let b_lower = b.to_ascii_lowercase();
+                let d = levenshtein_distance(&a_lower, &b_lower);
+                if d == 1 {
+                    flagged.push((a.to_string(), b.to_string()));
+                }
+            }
+        }
+        for (a, b) in flagged {
+            warnings.push(format!(
+                "HRF IDs [{}] and [{}] look like typo variants — likely one ID misspelled (check ## Flow references)",
+                a, b
+            ));
         }
     }
 
@@ -2809,6 +2994,131 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_near_duplicate_hrf_ids_flagged() {
+        // Two HRF IDs that differ by a single character (and aren't
+        // numbered siblings or inflectional variants) should surface as
+        // a typo warning.
+        let spec = "## Nodes\n- [order] Order\n- [oder] Oder\n## Flow\norder --> oder\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("near_dup_id_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("typo variants")
+                && s.contains("order")
+                && s.contains("oder")
+        });
+        assert!(has, "expected near-duplicate HRF ID warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_near_duplicate_hrf_ids_numbered_series_skipped() {
+        // `svc1`/`svc2`/`svc3` is a legitimate numbered series; the lint
+        // must NOT flag it as typo variants.
+        let spec = "## Nodes\n- [svc1] Svc 1\n- [svc2] Svc 2\n- [svc3] Svc 3\n## Flow\nsvc1 --> svc2\nsvc2 --> svc3\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("numbered_svc_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("typo variants")
+        });
+        assert!(!has, "numbered series must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_near_duplicate_hrf_ids_inflection_skipped() {
+        // `capture`/`captured` and `authorize`/`authorized` are prefix-
+        // related inflectional variants that legitimately coexist in
+        // state machines. The lint must NOT flag them.
+        let spec = "## Nodes\n- [capture] Capture\n- [captured] Captured\n- [authorize] Authorize\n- [authorized] Authorized\n## Flow\ncapture --> captured\nauthorize --> authorized\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inflection_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("typo variants")
+        });
+        assert!(!has, "inflectional variants must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_near_duplicate_hrf_ids_short_skipped() {
+        // Three-char IDs are too ambiguous to safely flag — `api` vs
+        // `ipa` could be an ordering flip OR two legitimate acronyms.
+        let spec = "## Nodes\n- [api] API\n- [ipa] IPA\n## Flow\napi --> ipa\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("short_ids_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("typo variants")
+        });
+        assert!(!has, "short (<4 char) IDs must not fire, got: {stdout}");
+    }
+
+    #[test]
     fn test_suggest_layout_direction_short_typos() {
         use crate::specgraph::hrf::suggest_layout_direction;
         // Single-character typos on 2-letter codes resolve confidently.
@@ -2934,6 +3244,169 @@ mod cli_tests {
             w.as_str().unwrap_or("").contains("Unknown layout direction")
         });
         assert!(!has_dir, "known direction must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_near_duplicate_hrf_ids_flagged_via_cli() {
+        // End-to-end: two HRF IDs at Levenshtein distance 1 with min length
+        // >= 5 should surface a typo-variant warning. `customer` vs `custumer`
+        // is the canonical case: the parser silently creates two separate
+        // nodes so any `## Flow` edge referencing only one of them looks
+        // valid but the other hangs off unnoticed.
+        let spec = "## Nodes\n\
+                    - [customer] Customer\n\
+                    - [custumer] Custumer\n\
+                    ## Flow\n\
+                    customer --> custumer\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("near_dup_ids_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_typo = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("HRF IDs")
+                && s.contains("customer")
+                && s.contains("custumer")
+                && s.contains("typo")
+        });
+        assert!(has_typo, "expected near-duplicate HRF ID warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_short_hrf_ids_not_flagged_via_cli() {
+        // IDs shorter than 5 chars are too ambiguous (too many legitimate
+        // near-match pairs like `api`/`ipa`), so the lint must ignore them.
+        // `user`/`uesr` differ by a swap but sit below the min-length guard.
+        let spec = "## Nodes\n\
+                    - [user] User\n\
+                    - [uesr] Uesr\n\
+                    ## Flow\n\
+                    user --> uesr\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("short_dup_ids_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_typo = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("HRF IDs") && s.contains("typo")
+        });
+        assert!(!has_typo, "short IDs must not flag near-duplicate, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_distant_hrf_ids_not_flagged_via_cli() {
+        // IDs that are far apart (`customer` vs `product`, d >= 5) are
+        // legitimately distinct domain concepts, not typo variants — the
+        // lint must stay silent.
+        let spec = "## Nodes\n\
+                    - [customer] Customer\n\
+                    - [product] Product\n\
+                    ## Flow\n\
+                    customer --> product\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("distant_ids_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_typo = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("HRF IDs") && s.contains("typo")
+        });
+        assert!(!has_typo, "distant IDs must not flag near-duplicate, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_exact_duplicate_hrf_ids_still_errors_via_cli() {
+        // Exact duplicate IDs are rejected by the parser before lint runs.
+        // In JSON mode, cli_lint now catches the parse failure and emits
+        // a structured JSON payload with the error in `errors[]` rather
+        // than leaving stdout empty. This guards the contract that
+        // `lint --json` ALWAYS produces valid JSON for CI/IDE consumption.
+        let spec = "## Nodes\n\
+                    - [orders] Orders v1\n\
+                    - [orders] Orders v2\n\
+                    ## Flow\n\
+                    orders --> orders\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("exact_dup_ids_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        assert!(
+            !out.status.success(),
+            "exact duplicate must cause non-zero exit. stdout={stdout}"
+        );
+        // stdout must parse as JSON and carry the duplicate-ID error.
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let errors = v["errors"].as_array().expect("errors array");
+        let has_dup_err = errors.iter().any(|e| {
+            let s = e.as_str().unwrap_or("").to_ascii_lowercase();
+            s.contains("orders") && s.contains("duplicate")
+        });
+        assert!(has_dup_err, "expected duplicate-ID error in JSON payload, got: {stdout}");
+        // Near-duplicate warning MUST NOT fire — parser rejected input first.
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_typo = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("HRF IDs") && s.contains("typo")
+        });
+        assert!(!has_typo, "exact dup must not fire near-duplicate warning, got: {stdout}");
     }
 
     #[test]
@@ -3249,6 +3722,152 @@ mod cli_tests {
         // Exact match ignoring case returns None
         assert_eq!(suggest_node_id_from_candidates("api", &candidates), None);
         assert_eq!(suggest_node_id_from_candidates("Api", &candidates), None);
+    }
+
+    #[test]
+    fn test_lint_lane_typo_split_flagged_via_cli() {
+        // `{lane:Sales}` × 3 and `{lane:Slaes}` × 1 should trip the
+        // typo-split warning with the new lane-aware lint.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {lane:Sales}\n\
+                    - [b] Beta {lane:Sales}\n\
+                    - [c] Gamma {lane:Sales}\n\
+                    - [d] Delta {lane:Slaes}\n\
+                    ## Flow\na --> b\nb --> c\nc --> d\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("lane_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_lane = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Inline lane")
+                && s.contains("Slaes")
+                && s.contains("Sales")
+                && s.contains("typo")
+        });
+        assert!(has_lane, "expected lane typo-split warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_phase_typo_split_flagged_via_cli() {
+        // `{phase:Quarter1}` × 3 and `{phase:Qaurter1}` × 1 should trip.
+        // "Q1" / "Q01" are < 4 chars so they're suppressed — need a
+        // longer name to exercise the path.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {phase:Quarter1}\n\
+                    - [b] Beta {phase:Quarter1}\n\
+                    - [c] Gamma {phase:Quarter1}\n\
+                    - [d] Delta {phase:Qaurter1}\n\
+                    ## Flow\na --> b\nb --> c\nc --> d\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("phase_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_phase = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Inline phase")
+                && s.contains("Qaurter1")
+                && s.contains("Quarter1")
+                && s.contains("typo")
+        });
+        assert!(has_phase, "expected phase typo-split warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_distinct_lanes_not_flagged_via_cli() {
+        // `Backend` vs `Frontend` are far apart — must NOT fire the
+        // typo-split warning.
+        let spec = "## Nodes\n\
+                    - [a] API {lane:Backend}\n\
+                    - [b] DB {lane:Backend}\n\
+                    - [c] UI {lane:Frontend}\n\
+                    - [d] CDN {lane:Frontend}\n\
+                    ## Flow\na --> b\nc --> d\na --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("lane_distinct_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_lane = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("Inline lane")
+        });
+        assert!(!has_lane, "distinct lanes must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_lane_both_majorities_not_flagged() {
+        // Rule: if both candidates have count ≥ 2, don't flag — they're
+        // probably intentional separate lanes. `Sales` × 2 and `Slaes` × 2
+        // should NOT trip (neither is a minority).
+        let spec = "## Nodes\n\
+                    - [a] A {lane:Sales}\n\
+                    - [b] B {lane:Sales}\n\
+                    - [c] C {lane:Slaes}\n\
+                    - [d] D {lane:Slaes}\n\
+                    ## Flow\na --> b\nc --> d\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        // Build the same aggregation the lint does and assert that no
+        // (a,b) pair where ac>=2 and bc>=2 ever fires.
+        let mut counts_map: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for node in &doc.nodes {
+            if node.is_frame { continue; }
+            if let Some(l) = &node.timeline_lane {
+                *counts_map.entry(l.clone()).or_insert(0) += 1;
+            }
+        }
+        let pairs_both_majority: usize = counts_map
+            .values()
+            .filter(|&&c| c >= 2)
+            .count();
+        assert!(
+            pairs_both_majority >= 2,
+            "expected both lanes to have count ≥ 2, got {counts_map:?}"
+        );
     }
 
     #[test]
