@@ -1994,6 +1994,75 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_decision_branch_labels_e2e_flags_partial() {
+        // End-to-end: a diamond with 2 branches where only 1 is labeled
+        // should surface the "X branches but only Y are labeled" warning
+        // through the CLI's lint --json pipeline.
+        let spec = "## Nodes\n- [a] Start {rounded}\n- [d] Decide {diamond}\n\
+                    - [y] Yes {rounded}\n- [n] No {rounded}\n\
+                    ## Flow\na --> d\nd --> y: yes\nd --> n\n";
+        let tmp = std::env::temp_dir().join(format!("decision_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_decision = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Decide") && s.contains("branches") && s.contains("labeled")
+        });
+        assert!(has_decision, "expected decision-branch warning, got: {}", stdout);
+    }
+
+    #[test]
+    fn test_lint_decision_branch_labels_e2e_allows_fully_labeled() {
+        // A diamond whose outgoing branches are ALL labeled must NOT trip the
+        // decision-branch warning.
+        let spec = "## Nodes\n- [a] Start {rounded}\n- [d] Decide {diamond}\n\
+                    - [y] Yes {rounded}\n- [n] No {rounded}\n\
+                    ## Flow\na --> d\nd --> y: yes\nd --> n: no\n";
+        let tmp = std::env::temp_dir().join(format!("decision_ok_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let any_decision = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Decide") && s.contains("branches") && s.contains("labeled")
+        });
+        assert!(
+            !any_decision,
+            "fully-labeled decision branches must not be flagged, got: {}",
+            stdout
+        );
+    }
+
+    #[test]
     fn test_lint_detects_disconnected_subgraphs() {
         // Two disconnected subgraphs: {a→b} and {c→d}
         let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n- [d] D\n## Flow\na --> b\nc --> d\n";
