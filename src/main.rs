@@ -128,13 +128,20 @@ enum Commands {
 #[derive(Subcommand)]
 enum TemplatesCmd {
     /// List all built-in templates grouped by category
-    List,
+    List {
+        /// Output as JSON array (for scripting / IDE integration)
+        #[arg(long)]
+        json: bool,
+    },
     /// Print a template's HRF content (use --out to write to a file)
     Get {
         /// Template name (case-insensitive, e.g. "Architecture")
         name: String,
         #[arg(short, long)]
         out: Option<PathBuf>,
+        /// Output metadata + content as JSON instead of raw HRF
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -168,8 +175,10 @@ fn main() -> eframe::Result<()> {
         }
         Some(Commands::Templates { subcommand }) => {
             match subcommand {
-                TemplatesCmd::List => cli_templates_list(),
-                TemplatesCmd::Get { name, out } => cli_templates_get(&name, out.as_deref()),
+                TemplatesCmd::List { json } => cli_templates_list(json),
+                TemplatesCmd::Get { name, out, json } => {
+                    cli_templates_get(&name, out.as_deref(), json)
+                }
             }
             return Ok(());
         }
@@ -719,8 +728,25 @@ fn regenerate_watch(dir: &std::path::Path, out: &std::path::Path, _template: &st
     }
 }
 
-fn cli_templates_list() {
+fn cli_templates_list(json: bool) {
     use crate::templates::TEMPLATES;
+    if json {
+        // Deterministic ordering (category, name) so CI snapshots are stable.
+        let mut sorted: Vec<&crate::templates::Template> = TEMPLATES.iter().collect();
+        sorted.sort_by(|a, b| a.category.cmp(b.category).then_with(|| a.name.cmp(b.name)));
+        let arr: Vec<serde_json::Value> = sorted
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "category": t.category,
+                    "description": t.description,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&arr).unwrap());
+        return;
+    }
     // Group by category so each category header prints exactly once,
     // regardless of registration order in TEMPLATES.
     let mut by_category: std::collections::BTreeMap<&str, Vec<&crate::templates::Template>> =
@@ -739,14 +765,45 @@ fn cli_templates_list() {
     println!();
 }
 
-fn cli_templates_get(name: &str, out: Option<&std::path::Path>) {
+fn cli_templates_get(name: &str, out: Option<&std::path::Path>, json: bool) {
     use crate::templates::TEMPLATES;
     let name_lower = name.to_lowercase();
     let template = TEMPLATES.iter().find(|t| t.name.to_lowercase() == name_lower)
         .unwrap_or_else(|| {
-            eprintln!("Template {:?} not found. Run `templates list` to see available templates.", name);
+            if json {
+                // Emit a structured not-found so IDE consumers don't have to
+                // parse stderr to distinguish "bad name" from "actual error".
+                let payload = serde_json::json!({
+                    "error": format!("Template {:?} not found", name),
+                    "available": TEMPLATES.iter().map(|t| t.name).collect::<Vec<_>>(),
+                });
+                println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+            } else {
+                eprintln!("Template {:?} not found. Run `templates list` to see available templates.", name);
+            }
             std::process::exit(1);
         });
+    if json {
+        // JSON path: always emit metadata + content, regardless of --out.
+        // If --out is also set, we still write the raw HRF to the file so
+        // a single call can both populate a file and feed metadata to a script.
+        if let Some(path) = out {
+            std::fs::write(path, template.content).unwrap_or_else(|e| {
+                let err = serde_json::json!({ "error": format!("write error: {}", e) });
+                println!("{}", serde_json::to_string_pretty(&err).unwrap());
+                std::process::exit(1);
+            });
+        }
+        let payload = serde_json::json!({
+            "name": template.name,
+            "category": template.category,
+            "description": template.description,
+            "content": template.content,
+            "written_to": out.map(|p| p.display().to_string()),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+        return;
+    }
     match out {
         Some(path) => {
             std::fs::write(path, template.content)
@@ -1461,6 +1518,20 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
             warnings.push(format!(
                 "Graph has {} disconnected subgraphs — consider linking related components",
                 component_count
+            ));
+        }
+    }
+
+    // Unused `## Style` definitions: the parser's pre-scan tracks every
+    // style-template definition and counts how many times it's expanded
+    // (`{primary}` → body). A definition with 0 expansions is dead code —
+    // either a typo in the node-side reference, or a leftover from refactoring.
+    // Silent failure mode: the style block still parses, just does nothing.
+    for (name, count) in &doc.import_hints.style_definition_usage {
+        if *count == 0 {
+            warnings.push(format!(
+                "Style `{}` is defined in ## Style but never referenced — dead code",
+                name
             ));
         }
     }
@@ -2829,6 +2900,148 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_templates_list_json_is_valid_array() {
+        // `templates list --json` should be a stable JSON array of
+        // {name, category, description} so scripts and IDE integrations
+        // can enumerate templates without text-parsing.
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { return; }
+        let out = std::process::Command::new(&bin)
+            .args(["templates", "list", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "templates list --json should succeed");
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("templates list --json not valid JSON: {}", stdout));
+        let arr = v.as_array().expect("top level is an array");
+        assert!(!arr.is_empty(), "template list must be non-empty");
+        for item in arr {
+            assert!(item.get("name").and_then(|x| x.as_str()).is_some());
+            assert!(item.get("category").and_then(|x| x.as_str()).is_some());
+            assert!(item.get("description").and_then(|x| x.as_str()).is_some());
+        }
+        // At least one known template should be present.
+        let names: Vec<&str> = arr
+            .iter()
+            .filter_map(|i| i.get("name").and_then(|x| x.as_str()))
+            .collect();
+        assert!(names.contains(&"Architecture"), "Architecture template missing: {:?}", names);
+    }
+
+    #[test]
+    fn test_templates_list_json_sorted_by_category_then_name() {
+        // Stable ordering lets CI compare snapshots across runs.
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { return; }
+        let out = std::process::Command::new(&bin)
+            .args(["templates", "list", "--json"])
+            .output()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("valid JSON");
+        let arr = v.as_array().unwrap();
+        let keys: Vec<(String, String)> = arr
+            .iter()
+            .map(|i| (
+                i["category"].as_str().unwrap().to_string(),
+                i["name"].as_str().unwrap().to_string(),
+            ))
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, sorted, "templates list --json must be sorted by (category, name)");
+    }
+
+    #[test]
+    fn test_templates_get_json_returns_metadata_and_content() {
+        // `templates get <name> --json` should inline the HRF content along
+        // with metadata, so an IDE can show a preview without a second call.
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { return; }
+        let out = std::process::Command::new(&bin)
+            .args(["templates", "get", "Architecture", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("valid JSON");
+        assert_eq!(v["name"].as_str(), Some("Architecture"));
+        assert_eq!(v["category"].as_str(), Some("Engineering"));
+        let content = v["content"].as_str().expect("content is string");
+        assert!(content.contains("## Nodes"), "content must include ## Nodes section");
+        assert_eq!(v["written_to"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_templates_get_json_not_found_lists_available() {
+        // A bad template name must exit non-zero but still emit valid JSON
+        // containing the set of available names so the user can recover.
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { return; }
+        let out = std::process::Command::new(&bin)
+            .args(["templates", "get", "TotallyBogus", "--json"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "missing template must exit non-zero");
+        let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("valid JSON");
+        let err = v["error"].as_str().expect("error is string");
+        assert!(err.contains("not found"), "expected 'not found' error, got {:?}", err);
+        let available = v["available"].as_array().expect("available is array");
+        assert!(!available.is_empty(), "available list must be non-empty");
+    }
+
+    #[test]
+    fn test_templates_get_json_with_out_writes_file() {
+        // Combining --out and --json should both write the HRF to the file
+        // AND emit metadata to stdout, with `written_to` set.
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { return; }
+        let tmp = std::env::temp_dir().join(format!("tmpl_out_{}.spec", uuid::Uuid::new_v4()));
+        let out = std::process::Command::new(&bin)
+            .args([
+                "templates", "get", "Architecture", "--json",
+                "--out", tmp.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("valid JSON");
+        assert_eq!(v["written_to"].as_str(), Some(tmp.display().to_string().as_str()));
+        let file_content = std::fs::read_to_string(&tmp).expect("file should exist");
+        let json_content = v["content"].as_str().unwrap();
+        assert_eq!(file_content, json_content, "file must match JSON content");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
     fn test_config_layer_keys_not_captured_as_unknown() {
         // `layer0 = Data Tier` is handled by the `_ if key.starts_with("layer")`
         // arm, so it must not leak into unknown_config_keys.
@@ -2837,6 +3050,91 @@ mod cli_tests {
         assert!(doc.import_hints.unknown_config_keys.is_empty(),
             "layer keys must not appear in unknown_config_keys, got {:?}",
             doc.import_hints.unknown_config_keys);
+    }
+
+    #[test]
+    fn test_unused_style_definition_captured_in_usage() {
+        // A style defined but never referenced should land in
+        // style_definition_usage with count 0.
+        let spec = "## Style\nprimary = {fill:#0000ff}\nunused = {fill:#00ff00}\n\n\
+                    ## Nodes\n- [a] A {primary}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let usage = &doc.import_hints.style_definition_usage;
+        assert_eq!(usage.len(), 2, "should track both style definitions");
+        let primary_count = usage
+            .iter()
+            .find(|(n, _)| n == "primary")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        let unused_count = usage
+            .iter()
+            .find(|(n, _)| n == "unused")
+            .map(|(_, c)| *c)
+            .unwrap_or(usize::MAX);
+        assert_eq!(primary_count, 1, "primary referenced once");
+        assert_eq!(unused_count, 0, "unused never referenced");
+    }
+
+    #[test]
+    fn test_style_used_multiple_times_counted_correctly() {
+        // A style referenced on 3 different nodes should land with count 3.
+        let spec = "## Style\nblue = {fill:#0000ff}\n\n## Nodes\n\
+                    - [a] A {blue}\n- [b] B {blue}\n- [c] C {blue}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let count = doc
+            .import_hints
+            .style_definition_usage
+            .iter()
+            .find(|(n, _)| n == "blue")
+            .map(|(_, c)| *c)
+            .unwrap_or(0);
+        assert_eq!(count, 3, "blue referenced 3 times");
+    }
+
+    #[test]
+    fn test_style_usage_empty_when_no_style_section() {
+        // Documents without `## Style` should produce an empty usage vec.
+        let spec = "## Nodes\n- [a] A\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert!(
+            doc.import_hints.style_definition_usage.is_empty(),
+            "no style section should produce empty usage, got {:?}",
+            doc.import_hints.style_definition_usage
+        );
+    }
+
+    #[test]
+    fn test_unused_style_lint_flag_via_cli() {
+        // End-to-end: a spec with an unused style should produce a lint
+        // warning that mentions the style name and "dead code".
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("unused_style_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &tmp,
+            "## Style\nghost = {fill:#888888}\n\n## Nodes\n- [a] A\n",
+        )
+        .unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dead = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("ghost") && s.contains("dead code")
+        });
+        assert!(has_dead, "expected dead-code warning for ghost, got: {}", stdout);
     }
 
     #[test]
