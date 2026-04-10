@@ -2787,7 +2787,17 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 };
             }
         } else if let Some(rest) = tag.strip_prefix("fill:") {
-            fill_color = tag_to_fill_color(rest.trim());
+            let parsed = tag_to_fill_color(rest.trim());
+            if parsed.is_some() {
+                fill_color = parsed;
+            } else {
+                // Unresolved fill reference (e.g. `{fill:primry}` — palette
+                // typo, misspelled built-in, or bad hex). `expand_palette`
+                // already passed over this without matching, so it's a
+                // silent drop today. Preserve the raw tag so `cli_lint`
+                // can emit a "did you mean" suggestion.
+                unknown_tags.push(tag.to_string());
+            }
         } else if let Some(rest) = tag.strip_prefix("size:") {
             // {size:200x80} shorthand for {w:200} {h:80}
             let dims = rest.trim();
@@ -3072,9 +3082,21 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
                 else { 8 }; // comment:
             node_note_text = Some(tag[prefix..].trim().to_string());
         } else if let Some(v) = tag.strip_prefix("border-color:").or_else(|| tag.strip_prefix("stroke:")) {
-            border_color = tag_to_fill_color(v.trim());
+            let parsed = tag_to_fill_color(v.trim());
+            if parsed.is_some() {
+                border_color = parsed;
+            } else {
+                // Unresolved border/stroke color — mirrors the fill arm
+                // above so lint can surface typos like `{border-color:primry}`.
+                unknown_tags.push(tag.to_string());
+            }
         } else if let Some(v) = tag.strip_prefix("text-color:").or_else(|| tag.strip_prefix("color:")) {
-            text_color = tag_to_fill_color(v.trim());
+            let parsed = tag_to_fill_color(v.trim());
+            if parsed.is_some() {
+                text_color = parsed;
+            } else {
+                unknown_tags.push(tag.to_string());
+            }
         } else if tag == "shadow" || tag == "drop-shadow" {
             shadow = true;
         } else if tag == "highlight" || tag == "pulse" || tag == "starred" || tag == "important" || tag == "star" {
@@ -3890,6 +3912,63 @@ pub fn suggest_shape_alias(tag: &str) -> Option<&'static str> {
     for &cand in KNOWN_SHAPE_ALIASES {
         let d = distance(&tag_lower, cand);
         if d == 0 { return None; } // exact match = known tag, no suggestion
+        if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest built-in fill-color name (blue, green, red, ...) for
+/// a possibly-misspelled color reference. Returns None on exact match, empty
+/// input, or distance > 2. Used by `cli_lint` when a `{fill:xxx}` reference
+/// doesn't resolve to a palette entry, a built-in color, or a hex value.
+///
+/// Deliberately restricted to the same vocabulary as `tag_to_fill_color`'s
+/// match arm so suggestions are always actionable — suggesting a color that
+/// the parser would still reject is worse than no suggestion.
+pub fn suggest_fill_color_name(raw: &str) -> Option<&'static str> {
+    const KNOWN_COLORS: &[&str] = &[
+        "blue", "green", "red", "yellow", "purple", "mauve", "pink", "teal",
+        "white", "black", "orange", "peach", "sky", "lavender", "gray", "grey",
+        "surface", "default", "none", "transparent", "clear",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+    // Hex values start with `#` — never suggest a color name for them.
+    if raw_lower.starts_with('#') { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_COLORS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // exact match = already valid
+        // The built-in vocabulary is tiny (~20 entries) and hand-curated,
+        // so a uniform distance-2 cutoff catches the common transposition
+        // cases (`bleu` → `blue`, `gren` → `green`) without producing
+        // false-positive pairs like `red` → `teal`.
         if d <= 2 {
             match best {
                 Some((best_d, _)) if d >= best_d => {}

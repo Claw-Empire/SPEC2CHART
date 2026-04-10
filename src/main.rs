@@ -1293,6 +1293,61 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 ));
                 continue;
             }
+            // Unresolved color reference: the parser's `fill:`/`color:`/
+            // `border-color:`/`stroke:` arms now push tags whose rest does
+            // not resolve via `tag_to_fill_color` (palette expansion already
+            // passed, built-in color lookup failed, hex parse failed).
+            // Suggest the closest palette entry first, then fall back to
+            // the built-in color vocabulary.
+            let color_prefix_match = ["fill:", "color:", "border-color:", "stroke:"]
+                .iter()
+                .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
+            if let Some((prefix, rest)) = color_prefix_match {
+                let rest_trimmed = rest.trim();
+                let rest_lower = rest_trimmed.to_ascii_lowercase();
+                // First: try palette entries (if any were defined in ## Palette).
+                let mut palette_suggestion: Option<String> = None;
+                if !doc.import_hints.palette_definition_usage.is_empty() {
+                    let mut best: Option<(String, usize)> = None;
+                    for (pal_name, _count) in &doc.import_hints.palette_definition_usage {
+                        if pal_name.len() < 3 { continue; }
+                        let pn_lower = pal_name.to_ascii_lowercase();
+                        if pn_lower == rest_lower { continue; } // defensive
+                        let max_d: usize = if pal_name.len() <= 4 { 1 } else { 2 };
+                        let d = levenshtein_distance(&rest_lower, &pn_lower);
+                        if d == 0 || d > max_d { continue; }
+                        match &best {
+                            None => best = Some((pal_name.clone(), d)),
+                            Some((_, bd)) if d < *bd => best = Some((pal_name.clone(), d)),
+                            _ => {}
+                        }
+                    }
+                    palette_suggestion = best.map(|(n, _)| n);
+                }
+                if let Some(pal_name) = palette_suggestion {
+                    warnings.push(format!(
+                        "Node {}: unresolved color {{{}}} — did you mean {{{}{}}}? (defined in ## Palette)",
+                        id_str, tag, prefix, pal_name
+                    ));
+                    continue;
+                }
+                // Fallback: suggest a built-in color name.
+                if let Some(color_name) = crate::specgraph::hrf::suggest_fill_color_name(rest_trimmed) {
+                    warnings.push(format!(
+                        "Node {}: unresolved color {{{}}} — did you mean {{{}{}}}?",
+                        id_str, tag, prefix, color_name
+                    ));
+                    continue;
+                }
+                // No suggestion — still surface as a generic notice so the
+                // user sees that the reference dropped. Without this the
+                // silent drop is invisible.
+                warnings.push(format!(
+                    "Node {}: unresolved color {{{}}} — not a built-in color, hex value, or ## Palette entry",
+                    id_str, tag
+                ));
+                continue;
+            }
             // Style-template fallback: match against `## Style` definitions.
             if doc.import_hints.style_definition_usage.is_empty() {
                 continue;
@@ -3497,6 +3552,159 @@ mod cli_tests {
             s.contains("fy") && s.contains("## Style") && s.contains("did you mean")
         });
         assert!(!has, "short style name must not trigger fallback, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_fill_palette_typo_via_cli() {
+        // Palette typo case: `{fill:primry}` where `## Palette` defines
+        // `primary = #hex`. Should suggest the palette entry.
+        let spec = "## Palette\n\
+                    primary = #ff0000\n\
+                    accent = #00ff00\n\
+                    \n\
+                    ## Nodes\n\
+                    - [a] Alpha {fill:primry}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("fill_pal_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("primry")
+                && s.contains("did you mean")
+                && s.contains("primary")
+                && s.contains("## Palette")
+        });
+        assert!(has, "expected palette-typo fill warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_fill_builtin_color_typo_via_cli() {
+        // No-palette case: `{fill:blu}` should suggest `blue` (built-in).
+        let spec = "## Nodes\n\
+                    - [a] Alpha {fill:blu}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("fill_builtin_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("fill:blu")
+                && s.contains("did you mean")
+                && s.contains("fill:blue")
+        });
+        assert!(has, "expected built-in color typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_fill_exact_palette_no_warning_via_cli() {
+        // Exact palette match: `{fill:primary}` should NOT emit an unresolved
+        // color warning because the palette expansion succeeds.
+        let spec = "## Palette\n\
+                    primary = #ff0000\n\
+                    \n\
+                    ## Nodes\n\
+                    - [a] Alpha {fill:primary}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("fill_pal_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unresolved color")
+        });
+        assert!(!has, "exact palette match must not emit unresolved color warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unresolved_fill_exact_builtin_color_no_warning_via_cli() {
+        // Exact built-in color: `{fill:blue}` should NOT emit any unresolved
+        // color warning since `tag_to_fill_color` resolves it.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {fill:blue}\n\
+                    - [b] Beta {fill:green}\n\
+                    - [c] Gamma {fill:red}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("fill_builtin_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unresolved color")
+        });
+        assert!(!has, "exact built-in color must not emit unresolved color warning, got: {stdout}");
     }
 
     #[test]
