@@ -886,47 +886,42 @@ fn cli_stats(input: PathBuf, json: bool) {
     };
 
     if json {
-        let mut shape_list: Vec<_> = shapes.iter().collect();
-        shape_list.sort_by(|a, b| b.1.cmp(a.1));
-        let mut section_list: Vec<_> = sections.iter().collect();
-        section_list.sort_by(|a, b| b.1.cmp(a.1));
-        println!("{{");
-        println!("  \"file\": {:?},", input.display().to_string());
-        println!("  \"nodes\": {},", node_count);
-        println!("  \"edges\": {},", edge_count);
-        println!("  \"frames\": {},", frames);
-        println!("  \"disconnected_nodes\": {},", disconnected);
-        println!("  \"locked_nodes\": {},", locked);
-        println!("  \"nodes_with_comments\": {},", with_comment);
-        println!("  \"nodes_with_urls\": {},", with_url);
-        println!("  \"nodes_with_owners\": {},", with_owner);
-        println!("  \"labeled_edges\": {},", labeled_edges);
-        println!("  \"max_in_degree\": {},", max_in);
-        println!("  \"max_out_degree\": {},", max_out);
-        println!("  \"layout_depth\": {},", layout_depth);
-        println!("  \"connected_components\": {},", component_count);
-        println!("  \"edge_density\": {:.3},", edge_density);
-        let mut tag_list: Vec<_> = tags.iter().collect();
-        tag_list.sort_by(|a, b| b.1.cmp(a.1));
-        println!("  \"tags\": {{");
-        for (i, (name, count)) in tag_list.iter().enumerate() {
-            let comma = if i + 1 < tag_list.len() { "," } else { "" };
-            println!("    \"{}\": {}{}", name, count, comma);
-        }
-        println!("  }},");
-        println!("  \"shapes\": {{");
-        for (i, (name, count)) in shape_list.iter().enumerate() {
-            let comma = if i + 1 < shape_list.len() { "," } else { "" };
-            println!("    \"{}\": {}{}", name, count, comma);
-        }
-        println!("  }},");
-        println!("  \"sections\": {{");
-        for (i, (name, count)) in section_list.iter().enumerate() {
-            let comma = if i + 1 < section_list.len() { "," } else { "" };
-            println!("    \"{}\": {}{}", name, count, comma);
-        }
-        println!("  }}");
-        println!("}}");
+        // Use serde_json::json! for robust escaping — hand-built JSON broke
+        // on tag/shape names containing quotes or backslashes, and had
+        // non-deterministic HashMap ordering.
+        let tags_obj: serde_json::Map<String, serde_json::Value> = tags
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(*v)))
+            .collect();
+        let shapes_obj: serde_json::Map<String, serde_json::Value> = shapes
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(*v)))
+            .collect();
+        let sections_obj: serde_json::Map<String, serde_json::Value> = sections
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(*v)))
+            .collect();
+        let payload = serde_json::json!({
+            "file": input.display().to_string(),
+            "nodes": node_count,
+            "edges": edge_count,
+            "frames": frames,
+            "disconnected_nodes": disconnected,
+            "locked_nodes": locked,
+            "nodes_with_comments": with_comment,
+            "nodes_with_urls": with_url,
+            "nodes_with_owners": with_owner,
+            "labeled_edges": labeled_edges,
+            "max_in_degree": max_in,
+            "max_out_degree": max_out,
+            "layout_depth": layout_depth,
+            "connected_components": component_count,
+            "edge_density": ((edge_density as f64 * 1000.0).round() / 1000.0),
+            "tags": tags_obj,
+            "shapes": shapes_obj,
+            "sections": sections_obj,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload).unwrap());
     } else {
         println!("Diagram Statistics: {:?}", input);
         println!("─────────────────────────────────────");
@@ -1024,6 +1019,24 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                     label, tag, suggestion
                 ));
             }
+        }
+    }
+
+    // Config directive typo detection: walk keys the parser couldn't place into
+    // any known arm (`tilte = "My Doc"`, `flwo = LR`, ...) and suggest the
+    // closest canonical key. Unrecognized keys are dropped silently by the
+    // parser — this lint is the user's only signal that a directive no-op'd.
+    for key in &doc.import_hints.unknown_config_keys {
+        if let Some(suggestion) = crate::specgraph::hrf::suggest_config_key(key) {
+            warnings.push(format!(
+                "Config: unknown key `{}` — did you mean `{}`?",
+                key, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "Config: unknown key `{}` — directive ignored",
+                key
+            ));
         }
     }
 
@@ -1354,6 +1367,88 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_svg_export_all_templates_wellformed() {
+        // Regression guard: every bundled template must export to SVG without
+        // panicking and the resulting output must contain basic SVG structure.
+        for template in crate::templates::TEMPLATES {
+            let mut doc = crate::specgraph::hrf::parse_hrf(template.content)
+                .unwrap_or_else(|e| panic!("template '{}' failed to parse: {}", template.name, e));
+            crate::specgraph::layout::auto_layout(&mut doc);
+            let tmp = std::env::temp_dir().join(format!(
+                "test_svg_export_{}_{}.svg",
+                template.name.replace(' ', "_"),
+                uuid::Uuid::new_v4()
+            ));
+            crate::export::export_svg(&doc, &tmp)
+                .unwrap_or_else(|e| panic!("template '{}' svg export failed: {}", template.name, e));
+            let content = std::fs::read_to_string(&tmp)
+                .unwrap_or_else(|e| panic!("template '{}' svg file unreadable: {}", template.name, e));
+            let _ = std::fs::remove_file(&tmp);
+
+            // Every SVG must declare an svg element and close it.
+            assert!(
+                content.contains("<svg"),
+                "template '{}' svg missing <svg tag",
+                template.name
+            );
+            assert!(
+                content.contains("</svg>"),
+                "template '{}' svg missing </svg> closing tag",
+                template.name
+            );
+            // xmlns is essential for the output to render in a browser.
+            assert!(
+                content.contains("xmlns"),
+                "template '{}' svg missing xmlns — won't render in browsers",
+                template.name
+            );
+            // The SVG should be non-trivial in size (>500 bytes means it
+            // contains at least shapes + text, not just an empty root).
+            assert!(
+                content.len() > 500,
+                "template '{}' svg suspiciously small ({} bytes)",
+                template.name,
+                content.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_stats_json_is_valid() {
+        // Run the binary and parse its stats --json output. Catches any
+        // regression where a tag/shape name contains quotes and breaks
+        // hand-built JSON.
+        use std::process::Command;
+        let spec = "## Nodes\n- [a] Alpha\n- [b] Beta {diamond}\n- [c] Gamma\n\n## Flow\na --> b\nb --> c\n";
+        let tmp = std::env::temp_dir().join(format!("stats_json_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        let target_dir = exe.parent().unwrap().parent().unwrap();
+        let bin = target_dir.join("open-draftly");
+        if !bin.exists() {
+            eprintln!("skipping test_stats_json_is_valid: release binary not found at {:?}", bin);
+            return;
+        }
+        let out = Command::new(&bin)
+            .arg("stats")
+            .arg(&tmp)
+            .arg("--json")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|e| panic!("stats --json did not emit valid JSON: {}\n---\n{}", e, stdout));
+        assert_eq!(parsed.get("nodes").and_then(|v| v.as_u64()), Some(3));
+        assert_eq!(parsed.get("edges").and_then(|v| v.as_u64()), Some(2));
+        assert!(parsed.get("shapes").is_some());
+        assert!(parsed.get("tags").is_some());
+        assert!(parsed.get("layout_depth").is_some());
+        assert!(parsed.get("connected_components").is_some());
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
     fn test_stats_counts() {
         let spec = "## Nodes\n- [a] Alpha\n- [b] Beta\n- [c] Gamma\n## Flow\na --> b\nb --> c\n";
         let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
@@ -1647,6 +1742,83 @@ mod cli_tests {
         let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
         assert_eq!(doc.edges.len(), 1);
         assert_eq!(doc.edges[0].unknown_tags, vec!["dahsed".to_string()]);
+    }
+
+    #[test]
+    fn test_config_typo_suggests_title() {
+        use crate::specgraph::hrf::suggest_config_key;
+        assert_eq!(suggest_config_key("tilte"), Some("title"));
+        assert_eq!(suggest_config_key("titel"), Some("title"));
+    }
+
+    #[test]
+    fn test_config_typo_suggests_flow_and_zoom() {
+        use crate::specgraph::hrf::suggest_config_key;
+        assert_eq!(suggest_config_key("flwo"), Some("flow"));
+        assert_eq!(suggest_config_key("zooom"), Some("zoom"));
+    }
+
+    #[test]
+    fn test_config_typo_suggests_timeline() {
+        use crate::specgraph::hrf::suggest_config_key;
+        assert_eq!(suggest_config_key("timline"), Some("timeline"));
+    }
+
+    #[test]
+    fn test_config_typo_ignores_exact_matches() {
+        use crate::specgraph::hrf::suggest_config_key;
+        for known in ["title", "flow", "zoom", "bg", "timeline", "camera", "sla-p1", "gap-main"] {
+            assert_eq!(
+                suggest_config_key(known),
+                None,
+                "exact-match config key '{known}' should not get a suggestion"
+            );
+        }
+    }
+
+    #[test]
+    fn test_config_typo_ignores_layer_keys() {
+        use crate::specgraph::hrf::suggest_config_key;
+        // layerN keys are handled by a dedicated arm before reaching the
+        // fallthrough — never flag them as typos.
+        assert_eq!(suggest_config_key("layer0"), None);
+        assert_eq!(suggest_config_key("layer12"), None);
+    }
+
+    #[test]
+    fn test_config_typo_ignores_unrelated() {
+        use crate::specgraph::hrf::suggest_config_key;
+        assert_eq!(suggest_config_key("totally-unrelated-thing"), None);
+        assert_eq!(suggest_config_key("xyzzy"), None);
+    }
+
+    #[test]
+    fn test_config_unknown_key_captured_on_doc() {
+        // End-to-end: an unknown config key lands in unknown_config_keys so
+        // cli_lint can surface it as a warning.
+        let spec = "## Config\ntilte = My Flowchart\nflwo = LR\ntitle = Real Title\n\n## Nodes\n- [a] A\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        // Known keys applied normally
+        assert_eq!(doc.title, "Real Title");
+        // flwo=LR is a typo — layout_dir must NOT have been set to "LR".
+        // (The real `flow` key was not present, so layout_dir stays at its
+        // struct default empty string.)
+        assert_ne!(doc.layout_dir, "LR", "flwo typo must not affect layout_dir");
+        // Both typos captured
+        assert!(doc.import_hints.unknown_config_keys.contains(&"tilte".to_string()));
+        assert!(doc.import_hints.unknown_config_keys.contains(&"flwo".to_string()));
+        assert!(!doc.import_hints.unknown_config_keys.contains(&"title".to_string()));
+    }
+
+    #[test]
+    fn test_config_layer_keys_not_captured_as_unknown() {
+        // `layer0 = Data Tier` is handled by the `_ if key.starts_with("layer")`
+        // arm, so it must not leak into unknown_config_keys.
+        let spec = "## Config\nlayer0 = Data Tier\nlayer 1 = Backend\n\n## Nodes\n- [a] A\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert!(doc.import_hints.unknown_config_keys.is_empty(),
+            "layer keys must not appear in unknown_config_keys, got {:?}",
+            doc.import_hints.unknown_config_keys);
     }
 
     #[test]

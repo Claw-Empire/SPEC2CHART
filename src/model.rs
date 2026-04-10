@@ -822,6 +822,10 @@ pub struct ImportHints {
     /// Automatically tint node fill colors based on their z-tier after import.
     /// Nodes with the default fill color get a tier-specific tint.
     pub auto_tier_color: bool,
+    /// Unrecognized `## Config` keys seen during parse. Used by `lint` to emit
+    /// "did you mean" hints for typos like `tilte` → `title`. Never serialized
+    /// — only populated at parse time and consumed immediately.
+    pub unknown_config_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

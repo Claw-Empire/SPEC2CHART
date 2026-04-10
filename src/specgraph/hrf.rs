@@ -1364,7 +1364,15 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             "sla-p4" | "sla_p4" => {
                 if let Ok(v) = val.parse::<u32>() { doc.sla_days[3] = v; }
             }
-            _ => {}
+            _ => {
+                // Preserve the unknown key so `lint` can emit a
+                // "did you mean" hint for typos like `tilte` → `title`.
+                // `layerN` keys are handled by the preceding arm; skip
+                // anything that looks like a layer alias.
+                if !key.starts_with("layer") {
+                    doc.import_hints.unknown_config_keys.push(key.clone());
+                }
+            }
         }
     }
 
@@ -3671,6 +3679,80 @@ pub fn suggest_edge_style_alias(tag: &str) -> Option<&'static str> {
         let d = distance(&tag_lower, cand);
         if d == 0 { return None; } // exact match, no suggestion
         if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest known `## Config` directive key for a possibly-misspelled
+/// key. Mirrors `suggest_shape_alias`/`suggest_edge_style_alias` but targets the
+/// config vocabulary (title, flow, zoom, bg, timeline, sla-p1, etc.). Returns
+/// None on exact match or when nothing is close enough. `layerN` style keys are
+/// never flagged — they're handled by a dedicated arm before reaching here.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_config_key(key: &str) -> Option<&'static str> {
+    const KNOWN_CONFIG_KEYS: &[&str] = &[
+        "title", "description", "desc",
+        "bg", "bg-pattern",
+        "snap", "snap-to-grid",
+        "grid-size", "grid",
+        "zoom", "initial-zoom", "scale",
+        "camera_yaw", "camera-yaw", "yaw",
+        "camera_pitch", "camera-pitch", "pitch",
+        "view", "view-mode", "mode",
+        "camera", "camera-preset", "cam",
+        "timeline", "timeline-dir",
+        "flow", "layout", "direction", "layout-dir",
+        "auto-z", "z-auto", "auto-layers", "3d-auto",
+        "auto-tier-color", "tier-color", "auto-color", "tier-tint",
+        "bg-color", "background-color", "background", "canvas-bg", "canvas-color",
+        "project-title", "watermark",
+        "spacing", "gap", "node-spacing",
+        "gap-main", "layer-spacing", "main-gap",
+        "gap-cross", "cross-gap", "node-gap",
+        "sla-p1", "sla-p2", "sla-p3", "sla-p4",
+    ];
+    let key_lower = key.to_ascii_lowercase();
+    let n = key_lower.len();
+    if !(2..=24).contains(&n) { return None; }
+    // Never flag layer aliases — the parser has a dedicated `layerN` arm.
+    if key_lower.starts_with("layer") { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_CONFIG_KEYS {
+        let d = distance(&key_lower, cand);
+        if d == 0 { return None; } // exact match, don't flag
+        // Keep the tolerance proportional to key length so tiny keys like
+        // "bg" don't attract every 2-letter typo. 2-char keys: only exact
+        // or 1-edit; 3-char keys: at most 1; 4+ char keys: 2 edits allowed
+        // (covers common transposes like `flwo` → `flow`).
+        let max_d = if n <= 3 { 1 } else { 2 };
+        if d <= max_d {
             match best {
                 Some((best_d, _)) if d >= best_d => {}
                 _ => best = Some((d, cand)),

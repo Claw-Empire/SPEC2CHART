@@ -431,6 +431,7 @@ impl FlowchartApp {
                     target_cardinality: crate::model::Cardinality::None,
                     style: crate::model::EdgeStyle::default(),
                     comment: String::new(),
+                    unknown_tags: Vec::new(),
                 };
                 self.document.edges.push(edge);
                 self.selection.select_node(new_id);
