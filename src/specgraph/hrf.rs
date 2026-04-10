@@ -1331,9 +1331,19 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 }
             }
             "view" | "view-mode" | "mode" => {
-                match val.to_lowercase().as_str() {
+                let trimmed = val.trim();
+                match trimmed.to_lowercase().as_str() {
                     "3d" | "three-d" | "threed" => { doc.import_hints.view_3d = Some(true); }
                     "2d" | "flat" => { doc.import_hints.view_3d = Some(false); }
+                    // Silent fallthrough was losing typos like `view = threedd`
+                    // or `view = 3-d`. Preserve for cli_lint; the view
+                    // vocabulary (2d/3d) is a superset of the boolean
+                    // vocabulary so we reuse the same pair storage.
+                    _ if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_bool_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
                     _ => {}
                 }
             }
@@ -1363,8 +1373,17 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 }
             }
             "timeline" => {
-                match val.to_lowercase().as_str() {
+                let trimmed = val.trim();
+                match trimmed.to_lowercase().as_str() {
                     "true" | "yes" | "on" | "1" => { doc.timeline_mode = true; }
+                    "false" | "no" | "off" | "0" => { /* explicit off */ }
+                    _ if !trimmed.is_empty() => {
+                        // Preserve typos like `timeline = tru` so cli_lint
+                        // can suggest a canonical boolean value.
+                        doc.import_hints
+                            .unknown_bool_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
                     _ => {}
                 }
             }
@@ -1401,14 +1420,28 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             // auto-z: automatically assign z offsets from topological layer ordering
             "auto-z" | "auto_z" | "z-auto" | "auto-layers" | "3d-auto" => {
-                match val.to_lowercase().as_str() {
+                let trimmed = val.trim();
+                match trimmed.to_lowercase().as_str() {
                     "true" | "yes" | "on" | "1" => { doc.import_hints.auto_z = true; }
+                    "false" | "no" | "off" | "0" => { /* explicit off */ }
+                    _ if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_bool_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
                     _ => {}
                 }
             }
             "auto-tier-color" | "tier-color" | "auto-color" | "tier-tint" => {
-                match val.to_lowercase().as_str() {
+                let trimmed = val.trim();
+                match trimmed.to_lowercase().as_str() {
                     "true" | "yes" | "on" | "1" => { doc.import_hints.auto_tier_color = true; }
+                    "false" | "no" | "off" | "0" => { /* explicit off */ }
+                    _ if !trimmed.is_empty() => {
+                        doc.import_hints
+                            .unknown_bool_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
                     _ => {}
                 }
             }
@@ -3108,9 +3141,16 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag.starts_with("gradient-angle:") || tag.starts_with("grad-angle:") || tag.starts_with("gradient:") && tag.len() > 9 && tag[9..].trim().parse::<u8>().is_ok() {
             // {gradient-angle:45} or {gradient:45} — gradient direction in degrees
             let colon = tag.find(':').unwrap();
-            if let Ok(a) = tag[colon+1..].trim().parse::<u8>() {
-                gradient = true; // gradient-angle implies gradient
-                gradient_angle = Some(a);
+            match tag[colon+1..].trim().parse::<u8>() {
+                Ok(a) => {
+                    gradient = true; // gradient-angle implies gradient
+                    gradient_angle = Some(a);
+                }
+                // Non-numeric angle (e.g. `{gradient-angle:half}`,
+                // `{grad-angle:90deg}`) — preserve for cli_lint. Previously
+                // silent-dropped so the diagram ignored the directive
+                // without any user feedback.
+                Err(_) => unknown_tags.push(tag.to_string()),
             }
         } else if tag.starts_with("frame-color:") || tag.starts_with("frame-fill:") || tag.starts_with("bg-color:") {
             // {frame-color:#rrggbb} — override group frame background color.
@@ -4317,6 +4357,103 @@ pub fn suggest_layer_name(raw: &str) -> Option<&'static str> {
     for &cand in KNOWN_LAYERS {
         let d = distance(&raw_lower, cand);
         if d == 0 { return None; } // exact match = already valid
+        let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical boolean value for a possibly-misspelled
+/// `key = X` config directive where `key` accepts boolean truthy values
+/// (timeline, auto-z, auto-tier-color). Vocabulary mirrors what the parser
+/// accepts: true/false/yes/no/on/off/1/0. Returns the canonical spelling
+/// within Levenshtein distance 2, or None on exact match / empty / far.
+pub fn suggest_bool_value(raw: &str) -> Option<&'static str> {
+    const KNOWN_BOOLS: &[&str] = &[
+        "true", "false", "yes", "no", "on", "off",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+    // Numeric-ish typos like `2`/`01` are rare; not worth matching.
+    if raw_lower == "1" || raw_lower == "0" { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    // Short 2-char names (`on`/`no`) need d<=1 to avoid matching noise.
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_BOOLS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; }
+        let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical view mode (`2d` or `3d`) for a
+/// possibly-misspelled `view = X` config directive. Accepts the
+/// same synonym vocabulary as the parser (`three-d`, `threed`,
+/// `flat`). Returns None on exact match / empty / far.
+pub fn suggest_view_mode(raw: &str) -> Option<&'static str> {
+    const KNOWN_VIEW: &[&str] = &[
+        "3d", "three-d", "threed",
+        "2d", "flat",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_VIEW {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; }
         let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };
         if d <= max_d {
             match best {

@@ -872,6 +872,14 @@ pub struct ImportHints {
     /// to emit did-you-mean hints from the canonical preset vocabulary
     /// (iso/top/front/side + synonyms). Never serialized.
     pub unknown_camera_preset: Vec<String>,
+    /// Unrecognized values supplied to boolean-valued config keys like
+    /// `timeline`, `auto-z`, `auto-tier-color`, and `view`. The parser
+    /// used `_ => {}` fallthroughs so typos like `timeline = tru`,
+    /// `auto-z = ye`, or `view = threed` silently left the flag off.
+    /// Pair is (key_name, raw_value). Used by `lint` to emit did-you-mean
+    /// hints from the canonical boolean vocabulary (true/false/yes/no/
+    /// on/off/1/0) or, for `view`, the 2d/3d vocabulary. Never serialized.
+    pub unknown_bool_config: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

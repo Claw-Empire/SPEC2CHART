@@ -1386,6 +1386,9 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 ("progress:",  "0–100 number, 0.0–1.0 float, or percent (optional trailing %)"),
                 ("percent:",   "0–100 number, 0.0–1.0 float, or percent (optional trailing %)"),
                 ("pct:",       "0–100 number, 0.0–1.0 float, or percent (optional trailing %)"),
+                // Gradient direction — integer 0–255 (u8) angle in degrees.
+                ("gradient-angle:", "integer 0–255 (gradient direction in degrees)"),
+                ("grad-angle:",     "integer 0–255 (gradient direction in degrees)"),
             ]
                 .iter()
                 .find_map(|(p, desc)| tag.strip_prefix(p).map(|_| (*p, *desc)));
@@ -2179,6 +2182,36 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
             warnings.push(format!(
                 "Config: unknown camera preset `{}` — expected iso, top, front, or side",
                 raw
+            ));
+        }
+    }
+
+    // Unknown boolean / view-mode config values: `timeline = tru`,
+    // `auto-z = ye`, `view = threedd` all used to silently fall through
+    // `_ => {}` arms leaving the flag off. The parser now records the
+    // key + raw value; pick the right suggestor based on the key name
+    // (view → 2d/3d vocabulary; everything else → boolean vocabulary).
+    for (key, raw) in &doc.import_hints.unknown_bool_config {
+        let is_view = matches!(key.as_str(), "view" | "view-mode" | "mode");
+        let suggestion = if is_view {
+            crate::specgraph::hrf::suggest_view_mode(raw)
+        } else {
+            crate::specgraph::hrf::suggest_bool_value(raw)
+        };
+        if let Some(s) = suggestion {
+            warnings.push(format!(
+                "Config: `{} = {}` not recognized — did you mean `{} = {}`?",
+                key, raw, key, s
+            ));
+        } else if is_view {
+            warnings.push(format!(
+                "Config: `{} = {}` not recognized — expected 2d or 3d",
+                key, raw
+            ));
+        } else {
+            warnings.push(format!(
+                "Config: `{} = {}` not recognized — expected true/false, yes/no, on/off, or 1/0",
+                key, raw
             ));
         }
     }
@@ -5864,6 +5897,160 @@ mod cli_tests {
             });
             assert!(!bad, "canonical preset spec #{i} must not warn, got: {stdout}");
         }
+    }
+
+    #[test]
+    fn test_lint_bool_config_typo_via_cli() {
+        // `timeline = tru`, `auto-z = ye`, `auto-tier-color = onn` all
+        // used to silently fall through the `_ => {}` arm leaving the
+        // flag off. Parser now records the raw value and cli_lint
+        // surfaces did-you-mean suggestions from the canonical boolean
+        // vocabulary (true/false/yes/no/on/off).
+        let spec = "## Config\n\
+                    timeline = tru\n\
+                    auto-z = ye\n\
+                    auto-tier-color = onn\n\
+                    ## Nodes\n\
+                    - [a] A\n\
+                    - [b] B\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bool_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for (key, bad, good) in [
+            ("timeline", "tru", "true"),
+            ("auto-z", "ye", "yes"),
+            ("auto-tier-color", "onn", "on"),
+        ] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(&format!("{} = {}", key, bad))
+                    && s.contains("did you mean")
+                    && s.contains(&format!("{} = {}", key, good))
+            });
+            assert!(has, "expected `{key} = {bad}` → `{good}`, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_view_config_typo_via_cli() {
+        // `view = threedd` is within Levenshtein distance 2 of `threed`
+        // and should suggest that canonical spelling. `view = 3-d` is
+        // similarly within 2 of `3d`.
+        let spec = "## Config\nview = threedd\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("view_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("view = threedd")
+                && s.contains("did you mean")
+                && s.contains("view = threed")
+        });
+        assert!(has, "expected view typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_bool_config_no_suggestion_via_cli() {
+        // Far-off boolean value should fall back to the explanatory
+        // warning listing the canonical tokens.
+        let spec = "## Config\ntimeline = xyzzy\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bool_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("timeline = xyzzy")
+                && s.contains("expected true/false, yes/no, on/off, or 1/0")
+        });
+        assert!(has, "expected bool fallback warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_bool_config_valid_values_not_flagged_via_cli() {
+        // Canonical boolean spellings across all 4 keys must NOT fire.
+        let spec = "## Config\n\
+                    timeline = true\n\
+                    auto-z = yes\n\
+                    auto-tier-color = on\n\
+                    view = 3d\n\
+                    ## Nodes\n\
+                    - [a] A\n\
+                    - [b] B\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bool_ok_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("not recognized")
+        });
+        assert!(!bad, "canonical bool/view values must not warn, got: {stdout}");
     }
 
     #[test]
