@@ -301,15 +301,73 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
     let node_key = |n: &crate::model::Node| -> String {
         if n.hrf_id.is_empty() { n.display_label().to_string() } else { n.hrf_id.clone() }
     };
-    let ids_a: std::collections::HashSet<String> = doc_a.nodes.iter().map(&node_key).collect();
-    let ids_b: std::collections::HashSet<String> = doc_b.nodes.iter().map(&node_key).collect();
 
-    for id in ids_b.difference(&ids_a) {
-        println!("+ node: {}", id);
+    // Build maps for comparison
+    let nodes_a: std::collections::HashMap<String, &crate::model::Node> =
+        doc_a.nodes.iter().map(|n| (node_key(n), n)).collect();
+    let nodes_b: std::collections::HashMap<String, &crate::model::Node> =
+        doc_b.nodes.iter().map(|n| (node_key(n), n)).collect();
+
+    let mut added_nodes: Vec<&String> = nodes_b.keys().filter(|k| !nodes_a.contains_key(k.as_str())).collect();
+    let mut removed_nodes: Vec<&String> = nodes_a.keys().filter(|k| !nodes_b.contains_key(k.as_str())).collect();
+    added_nodes.sort();
+    removed_nodes.sort();
+
+    // Detect modified nodes — same key but changed label, shape, or fill color
+    let shape_name = |n: &crate::model::Node| -> &'static str {
+        match &n.kind {
+            crate::model::NodeKind::Shape { shape, .. } => match shape {
+                crate::model::NodeShape::Rectangle => "rect",
+                crate::model::NodeShape::RoundedRect => "rounded",
+                crate::model::NodeShape::Diamond => "diamond",
+                crate::model::NodeShape::Circle => "circle",
+                crate::model::NodeShape::Parallelogram => "parallelogram",
+                crate::model::NodeShape::Hexagon => "hexagon",
+                crate::model::NodeShape::Triangle => "triangle",
+                crate::model::NodeShape::Callout => "callout",
+                crate::model::NodeShape::Person => "person",
+                crate::model::NodeShape::Screen => "screen",
+                crate::model::NodeShape::Cylinder => "cylinder",
+                crate::model::NodeShape::Cloud => "cloud",
+                crate::model::NodeShape::Document => "document",
+                crate::model::NodeShape::Channel => "channel",
+                crate::model::NodeShape::Segment => "segment",
+                crate::model::NodeShape::Connector => "connector",
+            },
+            crate::model::NodeKind::StickyNote { .. } => "sticky",
+            crate::model::NodeKind::Entity { .. } => "entity",
+            crate::model::NodeKind::Text { .. } => "text",
+        }
+    };
+
+    let mut modified_nodes: Vec<(String, Vec<String>)> = Vec::new();
+    for (key, node_a) in &nodes_a {
+        if let Some(node_b) = nodes_b.get(key) {
+            let mut changes: Vec<String> = Vec::new();
+            if node_a.display_label() != node_b.display_label() {
+                changes.push(format!("label: {:?} → {:?}", node_a.display_label(), node_b.display_label()));
+            }
+            if shape_name(node_a) != shape_name(node_b) {
+                changes.push(format!("shape: {} → {}", shape_name(node_a), shape_name(node_b)));
+            }
+            if node_a.style.fill_color != node_b.style.fill_color {
+                changes.push(format!(
+                    "fill: #{:02x}{:02x}{:02x} → #{:02x}{:02x}{:02x}",
+                    node_a.style.fill_color[0], node_a.style.fill_color[1], node_a.style.fill_color[2],
+                    node_b.style.fill_color[0], node_b.style.fill_color[1], node_b.style.fill_color[2],
+                ));
+            }
+            if node_a.tag != node_b.tag {
+                let a = node_a.tag.as_ref().map(|t| t.label()).unwrap_or("none");
+                let b = node_b.tag.as_ref().map(|t| t.label()).unwrap_or("none");
+                changes.push(format!("tag: {} → {}", a, b));
+            }
+            if !changes.is_empty() {
+                modified_nodes.push((key.clone(), changes));
+            }
+        }
     }
-    for id in ids_a.difference(&ids_b) {
-        println!("- node: {}", id);
-    }
+    modified_nodes.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Build NodeId → human-readable key maps so edge diffs show names, not UUIDs.
     let id_to_key_a: std::collections::HashMap<crate::model::NodeId, String> =
@@ -328,11 +386,37 @@ fn cli_diff(before: PathBuf, after: PathBuf) {
             id_to_key_b.get(&e.target.node_id).map(String::as_str).unwrap_or("?")))
         .collect();
 
-    for e in edges_b.difference(&edges_a) {
+    let mut added_edges: Vec<&String> = edges_b.difference(&edges_a).collect();
+    let mut removed_edges: Vec<&String> = edges_a.difference(&edges_b).collect();
+    added_edges.sort();
+    removed_edges.sort();
+
+    // Output in sorted order
+    for id in &added_nodes {
+        println!("+ node: {}", id);
+    }
+    for id in &removed_nodes {
+        println!("- node: {}", id);
+    }
+    for (key, changes) in &modified_nodes {
+        println!("~ node: {} ({})", key, changes.join(", "));
+    }
+    for e in &added_edges {
         println!("+ edge: {}", e);
     }
-    for e in edges_a.difference(&edges_b) {
+    for e in &removed_edges {
         println!("- edge: {}", e);
+    }
+
+    let total_changes = added_nodes.len() + removed_nodes.len() + modified_nodes.len()
+        + added_edges.len() + removed_edges.len();
+    if total_changes == 0 {
+        println!("✓ No differences");
+    } else {
+        println!();
+        println!("Summary: +{} nodes, -{} nodes, ~{} modified, +{} edges, -{} edges",
+            added_nodes.len(), removed_nodes.len(), modified_nodes.len(),
+            added_edges.len(), removed_edges.len());
     }
 }
 

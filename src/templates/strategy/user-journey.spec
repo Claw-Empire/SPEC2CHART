@@ -1,6 +1,6 @@
 ## Config
 title: User Journey
-flow = LR
+flow = TB
 
 ## Nodes
 - [discover] Discover {circle} {fill:#a6e3a1} {done}
