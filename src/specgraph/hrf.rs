@@ -2619,9 +2619,25 @@ fn parse_flow_line_chain(
             } else if let Some(rest) = etag.strip_prefix("to:") {
                 edge.target_label = rest.trim().to_string();
             } else if let Some(rest) = etag.strip_prefix("c-src:") {
-                edge.source_cardinality = parse_cardinality(rest.trim());
+                // parse_cardinality returns `Cardinality::None` for anything
+                // it doesn't recognize, silently collapsing typos like
+                // `1..Z` into no cardinality at all. Preserve unresolved
+                // values so cli_lint can emit a did-you-mean warning.
+                let trimmed = rest.trim();
+                let parsed = parse_cardinality(trimmed);
+                if matches!(parsed, Cardinality::None) && !trimmed.is_empty() {
+                    edge.unknown_tags.push(etag.clone());
+                } else {
+                    edge.source_cardinality = parsed;
+                }
             } else if let Some(rest) = etag.strip_prefix("c-tgt:") {
-                edge.target_cardinality = parse_cardinality(rest.trim());
+                let trimmed = rest.trim();
+                let parsed = parse_cardinality(trimmed);
+                if matches!(parsed, Cardinality::None) && !trimmed.is_empty() {
+                    edge.unknown_tags.push(etag.clone());
+                } else {
+                    edge.target_cardinality = parsed;
+                }
             } else if let Some(val) = etag.strip_prefix("note:")
                 .or_else(|| etag.strip_prefix("comment:"))
                 .or_else(|| etag.strip_prefix("annotation:")) {
@@ -2758,14 +2774,16 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     let mut unknown_tags: Vec<String> = Vec::new();
     for tag in &tags {
         if let Some(rest) = tag.strip_prefix("z:") {
-            if let Ok(z) = rest.trim().parse::<f32>() {
-                z_offset = z;
+            match rest.trim().parse::<f32>() {
+                Ok(z) => z_offset = z,
+                Err(_) => unknown_tags.push(tag.to_string()),
             }
         } else if tag.starts_with("3d-depth:") || (tag.starts_with("depth:") && !tag.starts_with("depth-scale:")) {
             // {3d-depth:N} — custom extrusion depth in 3D view (world units)
             let colon = tag.find(':').unwrap();
-            if let Ok(d) = tag[colon+1..].trim().parse::<f32>() {
-                depth_3d = d.clamp(0.0, 400.0);
+            match tag[colon+1..].trim().parse::<f32>() {
+                Ok(d) => depth_3d = d.clamp(0.0, 400.0),
+                Err(_) => unknown_tags.push(tag.to_string()),
             }
         } else if tag == "back" || tag == "background" || tag == "ground" {
             // Depth shortcuts — snap to standard 3D tiers without knowing numbers
@@ -2786,19 +2804,26 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             if let Ok(v) = val.parse::<f32>() {
                 z_offset = v * 120.0;
             } else {
-                z_offset = match val.to_lowercase().as_str() {
+                let named_z = match val.to_ascii_lowercase().as_str() {
                     "db" | "data" | "database" | "storage" | "store"
-                    | "cache" | "queue" | "mq" | "persistence" => 0.0,
+                    | "cache" | "queue" | "mq" | "persistence" => Some(0.0),
                     "app" | "api" | "service" | "server" | "backend"
-                    | "biz" | "logic" | "worker" | "handler" | "core" => 120.0,
+                    | "biz" | "logic" | "worker" | "handler" | "core" => Some(120.0),
                     "ui" | "frontend" | "client" | "web" | "browser"
-                    | "view" | "spa" | "mobile" | "app-ui" => 240.0,
+                    | "view" | "spa" | "mobile" | "app-ui" => Some(240.0),
                     "edge" | "gateway" | "lb" | "proxy" | "cdn"
-                    | "ingress" | "router" | "balancer" => 360.0,
+                    | "ingress" | "router" | "balancer" => Some(360.0),
                     "infra" | "platform" | "ops" | "host"
-                    | "k8s" | "kubernetes" | "cloud" | "network" => 480.0,
-                    _ => z_offset, // unknown name — leave z unchanged
+                    | "k8s" | "kubernetes" | "cloud" | "network" => Some(480.0),
+                    _ => None,
                 };
+                match named_z {
+                    Some(z) => z_offset = z,
+                    // Unknown layer/tier name — preserve raw tag for
+                    // cli_lint did-you-mean. Previously `_ => z_offset`
+                    // silently dropped typos like `{layer:databse}`.
+                    None => unknown_tags.push(tag.to_string()),
+                }
             }
         } else if let Some(rest) = tag.strip_prefix("fill:") {
             let parsed = tag_to_fill_color(rest.trim());
@@ -4124,6 +4149,54 @@ pub fn suggest_status_value(raw: &str) -> Option<&'static str> {
     best.map(|(_, name)| name)
 }
 
+/// Suggest the closest canonical cardinality value (e.g. `1..N`) for a
+/// possibly-misspelled `{c-src:foo}` or `{c-tgt:foo}` tag. Returns None
+/// on exact match (defensive — the parser should have consumed it),
+/// empty input, or no close candidate within distance 2.
+///
+/// Vocabulary mirrors `parse_cardinality`'s accepted spellings plus
+/// their canonical forms: `1`, `0..1`, `1..N`, `0..N`.
+pub fn suggest_cardinality_value(raw: &str) -> Option<&'static str> {
+    const KNOWN: &[&str] = &["1", "0..1", "1..N", "0..N", "1..*", "0..*"];
+    let raw_trim = raw.trim();
+    if raw_trim.is_empty() { return None; }
+    let raw_lower = raw_trim.to_ascii_lowercase();
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN {
+        let cand_lower = cand.to_ascii_lowercase();
+        let d = distance(&raw_lower, &cand_lower);
+        if d == 0 { return None; } // exact match
+        if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
 /// Suggest the closest canonical align/valign value. `horizontal=true` returns
 /// `left|right|center`; `horizontal=false` returns `top|bottom|middle`. Uses
 /// the same Levenshtein-2 cutoff pattern as the color / shape suggestors.
@@ -4166,6 +4239,74 @@ pub fn suggest_align_value(raw: &str, horizontal: bool) -> Option<&'static str> 
         let d = distance(&raw_lower, cand);
         if d == 0 { return None; } // exact match = already valid
         if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical layer/tier name for a possibly-misspelled
+/// `{layer:X}`, `{level:X}`, or `{tier:X}` tag. Vocabulary is the canonical
+/// spelling from each semantic tier bucket in `parse_node_line`'s named
+/// fallback (db/api/frontend/edge/infra). Returns None on exact match,
+/// empty input, or no candidate within distance 2.
+///
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_layer_name(raw: &str) -> Option<&'static str> {
+    const KNOWN_LAYERS: &[&str] = &[
+        // db tier (z=0)
+        "db", "data", "database", "storage", "store",
+        "cache", "queue", "mq", "persistence",
+        // api tier (z=120)
+        "app", "api", "service", "server", "backend",
+        "biz", "logic", "worker", "handler", "core",
+        // frontend tier (z=240)
+        "ui", "frontend", "client", "web", "browser",
+        "view", "spa", "mobile", "app-ui",
+        // edge tier (z=360)
+        "edge", "gateway", "lb", "proxy", "cdn",
+        "ingress", "router", "balancer",
+        // infra tier (z=480)
+        "infra", "platform", "ops", "host",
+        "k8s", "kubernetes", "cloud", "network",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    // Length-scaled cutoff: 2-char names like `db`/`lb` need d<=1 to avoid
+    // cross-bucket collisions (`lb` → `db`, `ui` → `db`). Longer names
+    // can tolerate d<=2. Tests: `databse`→`database`, `frnt`→`frontend`,
+    // `kubernets`→`kubernetes`.
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_LAYERS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // exact match = already valid
+        let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };
+        if d <= max_d {
             match best {
                 Some((best_d, _)) if d >= best_d => {}
                 _ => best = Some((d, cand)),

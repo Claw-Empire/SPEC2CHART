@@ -1372,6 +1372,15 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 ("h:",         "number (height)"),
                 ("x:",         "number (x coordinate)"),
                 ("y:",         "number (y coordinate)"),
+                // 3D/depth numeric prefixes. `3d-depth:` listed before
+                // `depth:` so the longer prefix wins. Note that
+                // `depth-scale:` is a separate config key handled elsewhere
+                // — the parser's `depth:` arm already excludes it and so
+                // does this lint arm because `depth-scale:` never lands in
+                // unknown_tags as a raw `depth:` prefix match.
+                ("z:",         "number (z offset for 3D layering)"),
+                ("3d-depth:",  "number (3D extrusion depth, 0–400)"),
+                ("depth:",     "number (3D extrusion depth, 0–400)"),
             ]
                 .iter()
                 .find_map(|(p, desc)| tag.strip_prefix(p).map(|_| (*p, *desc)));
@@ -1380,6 +1389,32 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                     "Node {}: unresolved {{{}}} — expected {} after `{}`",
                     id_str, tag, desc, prefix
                 ));
+                continue;
+            }
+            // Layer/level/tier named typo: `{layer:databse}` → `{layer:database}`.
+            // The parser accepts numeric (`{layer:2}`) OR named semantic tier
+            // (`db`/`api`/`frontend`/`edge`/`infra` with synonyms). When the
+            // named fallback hit `_ => z_offset`, typos silently left z
+            // unchanged. Parser now pushes unresolved to unknown_tags and
+            // `suggest_layer_name` points at the closest canonical spelling.
+            let layer_prefix_match = ["layer:", "level:", "tier:"]
+                .iter()
+                .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
+            if let Some((prefix, rest)) = layer_prefix_match {
+                let rest_trimmed = rest.trim();
+                if let Some(suggestion) =
+                    crate::specgraph::hrf::suggest_layer_name(rest_trimmed)
+                {
+                    warnings.push(format!(
+                        "Node {}: unknown layer {{{}}} — did you mean {{{}{}}}?",
+                        id_str, tag, prefix, suggestion
+                    ));
+                } else {
+                    warnings.push(format!(
+                        "Node {}: unknown layer {{{}}} — not a number or recognized tier name (db/api/frontend/edge/infra)",
+                        id_str, tag
+                    ));
+                }
                 continue;
             }
             // Status typo: `{status:doen}` → `{status:done}`. The parser's
@@ -1580,6 +1615,32 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                     "Edge {}: unresolved {{{}}} — expected {} after `{}`",
                     edge_label, tag, desc, prefix
                 ));
+                continue;
+            }
+            // Cardinality typo detection: `{c-src:1..Z}` and `{c-tgt:foo}`
+            // previously parsed via `parse_cardinality` which silently
+            // collapsed unknown spellings to `Cardinality::None`. The
+            // parser now preserves unresolved values in unknown_tags;
+            // surface them with a did-you-mean suggestion from the
+            // canonical vocabulary (`1`, `0..1`, `1..N`, `0..N`).
+            let cardinality_prefix_match = ["c-src:", "c-tgt:"]
+                .iter()
+                .find_map(|p| tag.strip_prefix(p).map(|rest| (*p, rest)));
+            if let Some((prefix, rest)) = cardinality_prefix_match {
+                let trimmed = rest.trim();
+                if let Some(suggestion) =
+                    crate::specgraph::hrf::suggest_cardinality_value(trimmed)
+                {
+                    warnings.push(format!(
+                        "Edge {}: unknown cardinality {{{}}} — did you mean {{{}{}}}?",
+                        edge_label, tag, prefix, suggestion
+                    ));
+                } else {
+                    warnings.push(format!(
+                        "Edge {}: unknown cardinality {{{}}} — expected 1, 0..1, 1..N, or 0..N",
+                        edge_label, tag
+                    ));
+                }
                 continue;
             }
             let suggestion = crate::specgraph::hrf::suggest_edge_style_alias(tag)
@@ -4564,6 +4625,123 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_z_non_numeric_via_cli() {
+        // `{z:top}` previously parsed with `if let Ok` and silently dropped.
+        // Parser now pushes to unknown_tags; cli_lint's numeric_prefix_match
+        // (extended with `z:`, `3d-depth:`, `depth:`) emits the warning.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {z:top}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("z_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("z:top") && s.contains("z offset")
+        });
+        assert!(has, "expected z:top numeric warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_3d_depth_non_numeric_via_cli() {
+        // Both `{3d-depth:big}` and `{depth:thick}` silently dropped
+        // pre-fix. Warnings should fire for each.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {3d-depth:big}\n\
+                    - [b] Beta {depth:thick}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("depth_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_3d = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("3d-depth:big") && s.contains("extrusion depth")
+        });
+        let has_depth = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("depth:thick") && s.contains("extrusion depth")
+        });
+        assert!(has_3d, "expected 3d-depth:big warning, got: {stdout}");
+        assert!(has_depth, "expected depth:thick warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_z_depth_valid_values_no_warning_via_cli() {
+        // Valid numeric z/depth values must NOT trigger the unresolved
+        // warning. Regression guard for the new numeric_prefix_match rows.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {z:120}\n\
+                    - [b] Beta {z:-50}\n\
+                    - [c] Gamma {3d-depth:50}\n\
+                    - [d] Delta {depth:100}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("z_depth_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["z:120", "z:-50", "3d-depth:50", "depth:100"] {
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("unresolved") && s.contains(needle)
+            });
+            assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_status_typo_via_cli() {
         // `{status:doen}` should warn and suggest `{status:done}`. Previously
         // the parser's `status:` arm fell through to `tag_to_node_tag` which
@@ -4840,6 +5018,104 @@ mod cli_tests {
                 && s.contains("unresolved")
         });
         assert!(!bad, "valid numeric edge values must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_edge_cardinality_typo_via_cli() {
+        // `{c-src:1..Z}` and `{c-tgt:zero}` should both fire the
+        // unknown-cardinality warning. `1..Z` is within Levenshtein-2
+        // of canonical `1..N`, so the first should suggest it; `zero`
+        // is too far from any canonical form, so the second should
+        // fall through to the "expected 1, 0..1, ..." message.
+        // Pre-fix, parse_cardinality silently collapsed both to
+        // Cardinality::None, dropping the user's intent.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n\
+                    ## Flow\n\
+                    a --> b {c-src:1..Z}\n\
+                    b --> c {c-tgt:zero}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("cardinality_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // Parser lowercases tags before storing them, so the raw tag
+        // in the warning is `c-src:1..z`. The suggestion preserves
+        // canonical casing (`1..N`).
+        let has_suggest = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("c-src:1..z")
+                && s.contains("did you mean")
+                && s.contains("c-src:1..N")
+        });
+        let has_unknown = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("c-tgt:zero") && s.contains("unknown cardinality")
+        });
+        assert!(has_suggest, "expected c-src:1..z suggestion, got: {stdout}");
+        assert!(has_unknown, "expected c-tgt:zero unknown warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_edge_cardinality_valid_values_no_warning_via_cli() {
+        // Canonical cardinality values must NOT trigger the unknown
+        // warning. Regression guard for `1`, `0..1`, `1..N`, `0..N`,
+        // `1..*`, and `0..*` across both c-src: and c-tgt:.
+        let spec = "## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n\
+                    - [d] Delta\n\
+                    - [e] Epsilon\n\
+                    - [f] Phi\n\
+                    - [g] Gamma2\n\
+                    ## Flow\n\
+                    a --> b {c-src:1} {c-tgt:0..1}\n\
+                    b --> c {c-src:1..N} {c-tgt:0..N}\n\
+                    c --> d {c-src:1..*} {c-tgt:0..*}\n\
+                    d --> e\n\
+                    e --> f\n\
+                    f --> g\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("cardinality_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown cardinality")
+        });
+        assert!(!bad, "valid cardinality values must not warn, got: {stdout}");
     }
 
     #[test]
