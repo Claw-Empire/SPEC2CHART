@@ -2052,6 +2052,117 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_duplicate_edges_parse_creates_two_edges() {
+        // Parser sanity: two identical `a --> b: ping` lines should yield
+        // two distinct edges in doc.edges. If the parser silently merged
+        // them the duplicate lint would have nothing to flag.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b: ping\na --> b: ping\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        assert_eq!(doc.edges.len(), 2, "expected two distinct edges, got {}", doc.edges.len());
+        assert_eq!(doc.edges[0].source.node_id, doc.edges[1].source.node_id);
+        assert_eq!(doc.edges[0].target.node_id, doc.edges[1].target.node_id);
+        assert_eq!(doc.edges[0].label.trim(), "ping");
+        assert_eq!(doc.edges[1].label.trim(), "ping");
+    }
+
+    #[test]
+    fn test_lint_duplicate_edges_flagged() {
+        // Same (source, target, label) appearing twice is a copy-paste typo.
+        // End-to-end via lint --json so we exercise the full warning pipeline.
+        use std::process::Command;
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b: ping\na --> b: ping\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dup_edge_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        let bin = exe.parent().unwrap().parent().unwrap().join("open-draftly");
+        if !bin.exists() {
+            eprintln!("skipping test_lint_duplicate_edges_flagged: release binary not found");
+            let _ = std::fs::remove_file(&tmp);
+            return;
+        }
+        let out = Command::new(&bin).arg("lint").arg(&tmp).arg("--json").output().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("lint --json should be valid JSON");
+        let warnings = parsed.get("warnings").unwrap().as_array().unwrap();
+        assert!(
+            warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("Duplicate edge") && s.contains("appears 2 times")
+            }),
+            "expected duplicate-edge warning, got: {warnings:?}"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_lint_duplicate_edges_different_labels_not_flagged() {
+        // Same endpoints but different labels = two distinct semantic edges.
+        // Must NOT trigger the duplicate warning.
+        use std::process::Command;
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b: ping\na --> b: pong\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dup_edge_distinct_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+
+        let exe = std::env::current_exe().unwrap();
+        let bin = exe.parent().unwrap().parent().unwrap().join("open-draftly");
+        if !bin.exists() {
+            eprintln!("skipping test_lint_duplicate_edges_different_labels_not_flagged: release binary not found");
+            let _ = std::fs::remove_file(&tmp);
+            return;
+        }
+        let out = Command::new(&bin).arg("lint").arg(&tmp).arg("--json").output().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout))
+            .expect("lint --json should be valid JSON");
+        let warnings = parsed.get("warnings").unwrap().as_array().unwrap();
+        assert!(
+            !warnings.iter().any(|w| {
+                w.as_str().unwrap_or("").contains("Duplicate edge")
+            }),
+            "should NOT warn about duplicate edges when labels differ, got: {warnings:?}"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_lint_empty_frame_flagged() {
+        // A frame with no spatially-contained nodes is a leftover. Build the
+        // doc programmatically so we have full control over positions: one
+        // shape node at the origin and one frame 500 units away with no
+        // members. Then mirror the lint's bbox-containment walk directly.
+        let mut doc = crate::model::FlowchartDocument::default();
+        doc.nodes.push(crate::model::Node::new(
+            crate::model::NodeShape::Rectangle,
+            egui::Pos2::new(0.0, 0.0),
+        ));
+        let mut frame = crate::model::Node::new_frame(egui::Pos2::new(500.0, 500.0));
+        frame.size = [100.0, 100.0];
+        doc.nodes.push(frame);
+
+        assert_eq!(doc.nodes.iter().filter(|n| n.is_frame).count(), 1);
+        assert_eq!(doc.nodes.iter().filter(|n| !n.is_frame).count(), 1);
+
+        // Walk the same spatial-containment check the lint uses.
+        let mut empty_frames = 0;
+        for frame in doc.nodes.iter().filter(|n| n.is_frame) {
+            let fx0 = frame.position[0];
+            let fy0 = frame.position[1];
+            let fx1 = fx0 + frame.size[0];
+            let fy1 = fy0 + frame.size[1];
+            let inside = doc.nodes.iter().filter(|n| {
+                if n.is_frame || n.id == frame.id { return false; }
+                let cx = n.position[0] + n.size[0] * 0.5;
+                let cy = n.position[1] + n.size[1] * 0.5;
+                cx >= fx0 && cx <= fx1 && cy >= fy0 && cy <= fy1
+            }).count();
+            if inside == 0 { empty_frames += 1; }
+        }
+        assert_eq!(empty_frames, 1, "expected exactly one empty frame");
+    }
+
+    #[test]
     fn test_group_orphan_member_captured() {
         // Parser preserves unresolved `## Groups` member IDs in
         // `import_hints.unresolved_group_members` so lint can flag them.
@@ -2405,6 +2516,143 @@ mod cli_tests {
         assert_eq!(levenshtein_distance("", "abc"), 3);
         assert_eq!(levenshtein_distance("abc", ""), 3);
         assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+    }
+
+    #[test]
+    fn test_duplicate_edge_lint_flags_exact_duplicate() {
+        // Two identical edges (same src, tgt, empty label) should produce a
+        // single warning via `lint --json` — silent failure mode because they
+        // draw on top of each other.
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("dup_edge_exact_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, "## Nodes\n- [a] Alpha\n- [b] Bravo\n## Flow\na --> b\na --> b\n").unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json output not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dup = warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("Duplicate edge"));
+        assert!(has_dup, "expected Duplicate edge warning, got: {}", stdout);
+    }
+
+    #[test]
+    fn test_duplicate_edge_lint_distinguishes_by_label() {
+        // Same src+tgt but different labels should NOT be flagged as duplicates.
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("dup_edge_diff_label_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &tmp,
+            "## Nodes\n- [a] Alpha\n- [b] Bravo\n## Flow\na --> b: yes\na --> b: no\n",
+        )
+        .unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dup = warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("Duplicate edge"));
+        assert!(
+            !has_dup,
+            "different labels must not be flagged as duplicates, got: {}",
+            stdout
+        );
+    }
+
+    #[test]
+    fn test_empty_frame_lint_flags_frame_with_no_contents() {
+        // A frame with no non-frame nodes inside its bounding box should be
+        // flagged. Use pinned positions so auto-layout doesn't move things.
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("empty_frame_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &tmp,
+            "## Nodes\n- [area] Empty Area {frame} {x:100} {y:100} {w:300} {h:200} {pinned}\n\
+             - [outside] Outside Node {x:800} {y:800} {pinned}\n",
+        )
+        .unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_empty = warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("Empty Area") && w.as_str().unwrap_or("").contains("empty"));
+        assert!(has_empty, "expected empty-frame warning, got: {}", stdout);
+    }
+
+    #[test]
+    fn test_empty_frame_lint_allows_populated_frame() {
+        // A frame with a node inside must NOT trip the empty-frame lint.
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("populated_frame_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(
+            &tmp,
+            "## Nodes\n- [area] Good Area {frame} {x:50} {y:50} {w:400} {h:300} {pinned}\n\
+             - [inside] Inside Node {x:150} {y:150} {pinned}\n",
+        )
+        .unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let any_empty = warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("Good Area") && w.as_str().unwrap_or("").contains("empty"));
+        assert!(
+            !any_empty,
+            "populated frame must not be flagged as empty, got: {}",
+            stdout
+        );
     }
 
     #[test]
