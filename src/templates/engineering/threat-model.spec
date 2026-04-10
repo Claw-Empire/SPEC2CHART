@@ -11,6 +11,8 @@ flow = TB
   Client-side runtime.
 - [waf] WAF {diamond} {fill:#f9e2af} {wip}
   Rate limit + filter rules.
+- [drop] Dropped {rounded} {fill:#f38ba8} {critical}
+  Blocked by policy.
 - [app] Application {rounded} {fill:#a6e3a1}
   Business logic API.
 - [secrets] Secrets Vault {cylinder} {fill:#b4befe} {ok}
@@ -25,7 +27,9 @@ user --> browser: interacts
 attacker --> browser: XSS attempt
 attacker --> waf: scan probes
 browser --> waf: HTTPS
-waf --> app: filtered
+waf --> app: allowed
+waf --> drop: blocked
+drop --> audit: flag alert
 app --> secrets: fetch creds
 app --> db: queries
 app --> audit: logs events

@@ -980,6 +980,64 @@ fn cli_lint(input: PathBuf, strict: bool) {
         }
     }
 
+    // Check for diamonds with fewer than 2 branches — a decision with only
+    // one outgoing edge isn't really a decision. Likely should be a RoundedRect.
+    {
+        use crate::model::{NodeKind, NodeShape};
+        let mut out_counts: std::collections::HashMap<crate::model::NodeId, usize> =
+            std::collections::HashMap::new();
+        for edge in &doc.edges {
+            *out_counts.entry(edge.source.node_id).or_default() += 1;
+        }
+        for node in &doc.nodes {
+            if matches!(&node.kind, NodeKind::Shape { shape: NodeShape::Diamond, .. }) {
+                let out = out_counts.get(&node.id).copied().unwrap_or(0);
+                if out < 2 {
+                    warnings.push(format!(
+                        "Diamond node {:?} has only {} outgoing edge(s) — decisions should have 2+ branches (use rounded rect for simple steps)",
+                        node.display_label(), out
+                    ));
+                }
+            }
+        }
+    }
+
+    // Check for weakly-connected components. If a diagram has multiple
+    // disconnected subgraphs, it's usually a sign of missing edges.
+    {
+        use crate::model::NodeId;
+        let mut adj: std::collections::HashMap<NodeId, Vec<NodeId>> =
+            std::collections::HashMap::new();
+        for node in &doc.nodes {
+            if !node.is_frame {
+                adj.entry(node.id).or_default();
+            }
+        }
+        for edge in &doc.edges {
+            adj.entry(edge.source.node_id).or_default().push(edge.target.node_id);
+            adj.entry(edge.target.node_id).or_default().push(edge.source.node_id);
+        }
+        let mut visited: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+        let mut component_count = 0usize;
+        for &start in adj.keys() {
+            if visited.contains(&start) { continue; }
+            component_count += 1;
+            let mut stack = vec![start];
+            while let Some(cur) = stack.pop() {
+                if !visited.insert(cur) { continue; }
+                if let Some(nbrs) = adj.get(&cur) {
+                    for &n in nbrs { stack.push(n); }
+                }
+            }
+        }
+        if component_count > 1 && doc.nodes.iter().filter(|n| !n.is_frame).count() >= 3 {
+            warnings.push(format!(
+                "Graph has {} disconnected subgraphs — consider linking related components",
+                component_count
+            ));
+        }
+    }
+
     // Check for inconsistent edge labeling — when SOME outgoing edges of a node
     // are labeled but others aren't, that's a sign of forgotten labels rather than
     // a pure hierarchy. (A fully unlabeled fan-out is usually OrgTree-style.)
@@ -1214,5 +1272,80 @@ mod cli_tests {
         let node_a = doc_a.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
         let node_b = doc_b.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
         assert_ne!(node_a.display_label(), node_b.display_label());
+    }
+
+    #[test]
+    fn test_lint_diamond_with_one_branch_flagged() {
+        // A diamond with only 1 outgoing edge isn't really a decision.
+        let spec = "## Nodes\n- [a] Start {rounded}\n- [d] Decision {diamond}\n- [e] End {rounded}\n## Flow\na --> d: start\nd --> e: only path\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        use crate::model::{NodeKind, NodeShape};
+        let mut out_counts: std::collections::HashMap<crate::model::NodeId, usize> =
+            std::collections::HashMap::new();
+        for edge in &doc.edges {
+            *out_counts.entry(edge.source.node_id).or_default() += 1;
+        }
+        let flagged: Vec<_> = doc.nodes.iter()
+            .filter(|n| matches!(&n.kind, NodeKind::Shape { shape: NodeShape::Diamond, .. }))
+            .filter(|n| out_counts.get(&n.id).copied().unwrap_or(0) < 2)
+            .collect();
+        assert_eq!(flagged.len(), 1, "diamond with 1 outgoing edge should be flagged");
+    }
+
+    #[test]
+    fn test_lint_detects_disconnected_subgraphs() {
+        // Two disconnected subgraphs: {a→b} and {c→d}
+        let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n- [d] D\n## Flow\na --> b\nc --> d\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        use crate::model::NodeId;
+        let mut adj: std::collections::HashMap<NodeId, Vec<NodeId>> =
+            std::collections::HashMap::new();
+        for node in &doc.nodes {
+            if !node.is_frame {
+                adj.entry(node.id).or_default();
+            }
+        }
+        for edge in &doc.edges {
+            adj.entry(edge.source.node_id).or_default().push(edge.target.node_id);
+            adj.entry(edge.target.node_id).or_default().push(edge.source.node_id);
+        }
+        let mut visited: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+        let mut components = 0usize;
+        for &start in adj.keys() {
+            if visited.contains(&start) { continue; }
+            components += 1;
+            let mut stack = vec![start];
+            while let Some(cur) = stack.pop() {
+                if !visited.insert(cur) { continue; }
+                if let Some(nbrs) = adj.get(&cur) {
+                    for &n in nbrs { stack.push(n); }
+                }
+            }
+        }
+        assert_eq!(components, 2, "should find 2 disconnected components");
+    }
+
+    #[test]
+    fn test_description_parsed_as_sublabel() {
+        // Indented continuation after a node should populate the Shape.description field,
+        // which export.rs renders as a sublabel.
+        let spec = "## Nodes\n- [a] Hello\n  This is a description.\n- [b] World\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let node_a = doc.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
+        if let crate::model::NodeKind::Shape { description, .. } = &node_a.kind {
+            assert_eq!(description, "This is a description.");
+        } else {
+            panic!("expected shape");
+        }
+    }
+
+    #[test]
+    fn test_description_triggers_post_parse_autosize() {
+        // A long description should expand the node's width beyond the label's needs.
+        let spec = "## Nodes\n- [a] Short\n  This is a much longer description that should force auto-sizing.\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let node = doc.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
+        // Default rounded rect is 140px wide; post-parse pass should expand this.
+        assert!(node.size[0] > 140.0, "width should expand for long description, got {}", node.size[0]);
     }
 }
