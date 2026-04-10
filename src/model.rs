@@ -413,6 +413,11 @@ pub struct Node {
     /// Optional owner/assignee identifier. Set via `{owner:...}` HRF tag.
     #[serde(default)]
     pub owner: Option<String>,
+    /// Unrecognized `{...}` tags seen during parse. Populated only by the HRF
+    /// parser — never serialized out — so that lint can emit "did you mean"
+    /// hints for typos like `{daimond}` → `{diamond}`. Cleared on roundtrip.
+    #[serde(default, skip_serializing)]
+    pub unknown_tags: Vec<String>,
 }
 
 impl Node {
@@ -441,7 +446,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size,
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None, unknown_tags: Vec::new(),
             style: NodeStyle::default(),
         }
     }
@@ -455,7 +460,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [150.0, 150.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None, unknown_tags: Vec::new(),
             style: NodeStyle {
                 fill_color: color.fill_rgba(),
                 border_color: [0, 0, 0, 30],
@@ -476,7 +481,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [ENTITY_MIN_WIDTH, ENTITY_HEADER_HEIGHT + 4.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None, unknown_tags: Vec::new(),
             style: NodeStyle {
                 fill_color: [49, 50, 68, 255],
                 border_color: [137, 180, 250, 255],
@@ -496,7 +501,7 @@ impl Node {
             },
             position: [position.x, position.y],
             size: [120.0, 40.0],
-            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
+            z_offset: 0.0, pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(), locked: false, comment: String::new(), is_frame: false, frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None, unknown_tags: Vec::new(),
             style: NodeStyle {
                 fill_color: [0, 0, 0, 0],
                 border_color: [0, 0, 0, 0],
@@ -523,7 +528,7 @@ impl Node {
             is_frame: true,
             locked: false,
             comment: String::new(),
-            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None,
+            frame_color: default_frame_color(), icon: String::new(), sublabel: String::new(), depth_3d: 0.0, highlight: false, progress: 0.0, timeline_period: None, timeline_lane: None, section_name: String::new(), created_date: String::new(), priority: 0, hrf_id: String::new(), metric: None, owner: None, unknown_tags: Vec::new(),
             pinned: false, tag: None, collapsed: false, uncollapsed_size: None, url: String::new(),
             style: NodeStyle {
                 fill_color: [89, 91, 118, 0],  // transparent — frame_color is used
@@ -682,6 +687,11 @@ pub struct Edge {
     /// Optional annotation/note — shown as a hoverable tooltip on the edge
     #[serde(default)]
     pub comment: String,
+    /// Unrecognized `{...}` tags seen on this edge during HRF parse. Never
+    /// serialized out — used by `lint` to emit "did you mean" hints for
+    /// typos like `{dashd}` → `{dashed}`. Cleared on roundtrip.
+    #[serde(default, skip_serializing)]
+    pub unknown_tags: Vec<String>,
 }
 
 impl Edge {
@@ -697,6 +707,7 @@ impl Edge {
             target_cardinality: Cardinality::None,
             style: EdgeStyle::default(),
             comment: String::new(),
+            unknown_tags: Vec::new(),
         }
     }
 }

@@ -484,6 +484,7 @@ impl FlowchartApp {
                 hrf_id: String::new(),
                 metric: None,
                 owner: None,
+                unknown_tags: Vec::new(),
             };
             let id = node.id;
             self.document.nodes.push(node);

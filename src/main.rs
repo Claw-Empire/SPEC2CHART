@@ -905,6 +905,25 @@ fn cli_lint(input: PathBuf, strict: bool) {
     let mut warnings: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
 
+    // Shape-tag typo detection: inspect each node's `unknown_tags` (preserved
+    // by the HRF parser for tags that no handler claimed) and suggest the
+    // closest known shape alias when the distance is small enough.
+    for node in &doc.nodes {
+        for tag in &node.unknown_tags {
+            if let Some(suggestion) = crate::specgraph::hrf::suggest_shape_alias(tag) {
+                let id_str = if node.hrf_id.is_empty() {
+                    node.display_label().to_string()
+                } else {
+                    format!("[{}]", node.hrf_id)
+                };
+                warnings.push(format!(
+                    "Node {}: unknown tag {{{}}} — did you mean {{{}}}?",
+                    id_str, tag, suggestion
+                ));
+            }
+        }
+    }
+
     // Check for empty labels
     for node in &doc.nodes {
         let label = node.display_label();
@@ -1404,5 +1423,49 @@ mod cli_tests {
         let node = doc.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
         // Default rounded rect is 140px wide; post-parse pass should expand this.
         assert!(node.size[0] > 140.0, "width should expand for long description, got {}", node.size[0]);
+    }
+
+    #[test]
+    fn test_shape_typo_suggests_diamond() {
+        use crate::specgraph::hrf::suggest_shape_alias;
+        assert_eq!(suggest_shape_alias("daimond"), Some("diamond"));
+        assert_eq!(suggest_shape_alias("diomond"), Some("diamond"));
+    }
+
+    #[test]
+    fn test_shape_typo_suggests_cylinder() {
+        use crate::specgraph::hrf::suggest_shape_alias;
+        assert_eq!(suggest_shape_alias("cylindar"), Some("cylinder"));
+    }
+
+    #[test]
+    fn test_shape_typo_ignores_exact_matches() {
+        use crate::specgraph::hrf::suggest_shape_alias;
+        for known in ["diamond", "rectangle", "cylinder", "person", "hexagon"] {
+            assert_eq!(
+                suggest_shape_alias(known),
+                None,
+                "exact-match shape '{known}' should not get a suggestion"
+            );
+        }
+    }
+
+    #[test]
+    fn test_shape_typo_ignores_unrelated_words() {
+        use crate::specgraph::hrf::suggest_shape_alias;
+        assert_eq!(suggest_shape_alias("totallyrandom"), None);
+        assert_eq!(suggest_shape_alias("xyzzy"), None);
+    }
+
+    #[test]
+    fn test_shape_typo_unknown_tags_stored_on_node() {
+        // End-to-end: a typo'd shape tag lands in node.unknown_tags and
+        // suggest_shape_alias identifies it.
+        let spec = "## Nodes\n- [a] Decision {daimond}\n- [b] DB {cylinder}\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        let a = doc.nodes.iter().find(|n| n.hrf_id == "a").unwrap();
+        assert_eq!(a.unknown_tags, vec!["daimond".to_string()]);
+        let b = doc.nodes.iter().find(|n| n.hrf_id == "b").unwrap();
+        assert!(b.unknown_tags.is_empty(), "known tag should not leak into unknown_tags");
     }
 }

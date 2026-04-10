@@ -976,6 +976,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     if stripped.contains('[') {
                         let id_start = stripped.find('[').unwrap();
                         let id_end = stripped.find(']').unwrap_or(stripped.len());
+                        if id_end <= id_start {
+                            // Malformed: `]` appears before `[` — skip this group entry gracefully
+                            continue;
+                        }
                         let gid = stripped[id_start+1..id_end].trim().to_string();
                         let rest = stripped[id_end+1..].trim();
                         let (label, tags) = extract_tags(rest);
@@ -1619,6 +1623,30 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             let mut edge = edge;
             edge.style.dashed = true;
             doc.edges.push(edge);
+        }
+    }
+
+    // Catch duplicate HRF IDs — flow edges using a duplicated ID would silently
+    // route to only one of the nodes, which is almost always a bug. Previously
+    // only `lint` caught this; surfacing it in `validate` gives earlier feedback.
+    {
+        let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for node in &doc.nodes {
+            if !node.hrf_id.is_empty() {
+                *seen.entry(node.hrf_id.as_str()).or_default() += 1;
+            }
+        }
+        let dupes: Vec<(&&str, &usize)> = seen.iter().filter(|(_, c)| **c > 1).collect();
+        if !dupes.is_empty() {
+            let mut names: Vec<String> = dupes
+                .iter()
+                .map(|(id, c)| format!("[{}] ({}×)", id, c))
+                .collect();
+            names.sort();
+            return Err(format!(
+                "Duplicate node id(s) in ## Nodes section: {} — each id must be unique so flow edges can reference it unambiguously",
+                names.join(", ")
+            ));
         }
     }
 
@@ -2592,6 +2620,7 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     let mut metric_value: Option<String> = None;
     let mut owner_value: Option<String> = None;
     let mut dep_targets: Vec<String> = Vec::new();
+    let mut unknown_tags: Vec<String> = Vec::new();
     for tag in &tags {
         if let Some(rest) = tag.strip_prefix("z:") {
             if let Ok(z) = rest.trim().parse::<f32>() {
@@ -3005,8 +3034,12 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
             if icon.is_none() {
                 icon = Some(tag.to_string());
             }
+        } else if let Some(s) = tag_to_shape_opt(tag) {
+            shape = s;
         } else {
-            shape = tag_to_shape(tag);
+            // Unrecognized tag — record for lint's did-you-mean suggestions,
+            // but don't override shape (leave whatever was previously set).
+            unknown_tags.push(tag.to_string());
         }
     }
 
@@ -3174,6 +3207,11 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
     }
     if let Some(ov) = owner_value {
         node.owner = Some(ov);
+    }
+    // Preserve any unrecognized tags so `lint` can suggest fixes for typos
+    // like {daimond} → {diamond}. Stored but not serialized out.
+    if !unknown_tags.is_empty() {
+        node.unknown_tags = unknown_tags;
     }
 
     Ok((id, node, dep_targets))
@@ -3483,40 +3521,100 @@ fn is_emoji_only(tag: &str) -> bool {
 }
 
 fn tag_to_shape(tag: &str) -> NodeShape {
+    tag_to_shape_opt(tag).unwrap_or(NodeShape::RoundedRect)
+}
+
+/// Returns the shape for a known alias, or None when the tag is unrecognized.
+/// Used by the parser to distinguish "default rounded" from "unknown tag".
+pub(crate) fn tag_to_shape_opt(tag: &str) -> Option<NodeShape> {
     match tag {
         // Rectangle variants
-        "rectangle" | "rect" | "box" | "square-shape" => NodeShape::Rectangle,
+        "rectangle" | "rect" | "box" | "square-shape" => Some(NodeShape::Rectangle),
+        // RoundedRect explicit
+        "rounded" | "rounded-rect" | "rounded_rect" => Some(NodeShape::RoundedRect),
         // Diamond / decision
-        "diamond" | "decision" | "rhombus" | "lozenge" | "branch" | "if" | "choice" => NodeShape::Diamond,
+        "diamond" | "decision" | "rhombus" | "lozenge" | "branch" | "if" | "choice" => Some(NodeShape::Diamond),
         // Circle / oval
-        "circle" | "oval" | "ellipse" | "dot" | "bubble" | "round" => NodeShape::Circle,
+        "circle" | "oval" | "ellipse" | "dot" | "bubble" | "round" => Some(NodeShape::Circle),
         // Parallelogram / IO
-        "parallelogram" | "parallel" | "io" | "skew" | "input" | "output" | "data" => NodeShape::Parallelogram,
+        "parallelogram" | "parallel" | "io" | "skew" | "input" | "output" | "data" => Some(NodeShape::Parallelogram),
         // Hexagon
-        "hexagon" | "hex" | "process" | "cluster" | "hive" | "cell" => NodeShape::Hexagon,
+        "hexagon" | "hex" | "process" | "cluster" | "hive" | "cell" => Some(NodeShape::Hexagon),
         // Connector / small circle
-        "connector" | "api" | "interface" | "protocol" | "gateway" | "port" | "endpoint" => NodeShape::Connector,
+        "connector" | "api" | "interface" | "protocol" | "gateway" | "port" | "endpoint" => Some(NodeShape::Connector),
         // Triangle / pyramid
-        "triangle" | "pyramid" | "hierarchy" | "peak" | "apex" => NodeShape::Triangle,
+        "triangle" | "pyramid" | "hierarchy" | "peak" | "apex" => Some(NodeShape::Triangle),
         // Callout / speech bubble
-        "callout" | "speech" | "speech-bubble" | "balloon" => NodeShape::Callout,
+        "callout" | "speech" | "speech-bubble" | "balloon" => Some(NodeShape::Callout),
         // Person / actor — human silhouette for user-facing diagrams
-        "person" | "user" | "actor" | "human" | "stick-figure" => NodeShape::Person,
+        "person" | "user" | "actor" | "human" | "stick-figure" => Some(NodeShape::Person),
         // Screen / UI — rounded rect with top chrome bar for mockups
-        "screen" | "ui" | "mockup" | "wireframe" | "page" | "view" => NodeShape::Screen,
+        "screen" | "ui" | "mockup" | "wireframe" | "page" | "view" => Some(NodeShape::Screen),
         // Cylinder / database drum
-        "cylinder" | "db" | "database" | "storage" | "drum" => NodeShape::Cylinder,
+        "cylinder" | "db" | "database" | "storage" | "drum" => Some(NodeShape::Cylinder),
         // Cloud — blob outline for SaaS / cloud infrastructure
-        "cloud" | "saas" | "aws" | "gcp" | "azure" | "infra" => NodeShape::Cloud,
+        "cloud" | "saas" | "aws" | "gcp" | "azure" | "infra" => Some(NodeShape::Cloud),
         // Document — rectangle with folded corner
-        "document" | "doc" | "file" | "report" | "spec" => NodeShape::Document,
+        "document" | "doc" | "file" | "report" | "spec" => Some(NodeShape::Document),
         // Channel / funnel — pipeline or funnel shapes
-        "channel" | "funnel" | "pipeline" | "flow-channel" => NodeShape::Channel,
+        "channel" | "funnel" | "pipeline" | "flow-channel" => Some(NodeShape::Channel),
         // Segment / group — person-group shape for cohorts or teams
-        "segment" | "group" | "audience" | "cohort" | "team" => NodeShape::Segment,
-        // Default
-        _ => NodeShape::RoundedRect,
+        "segment" | "group" | "audience" | "cohort" | "team" => Some(NodeShape::Segment),
+        // Unknown tag
+        _ => None,
     }
+}
+
+/// Suggest the closest known shape alias for a possibly-misspelled tag.
+/// Uses byte-level Levenshtein distance capped at 2. Returns None when
+/// there's no close match or the tag is too short/long to be a typo.
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint), but the
+/// `lib` target doesn't reference it internally.
+#[allow(dead_code)]
+pub fn suggest_shape_alias(tag: &str) -> Option<&'static str> {
+    const KNOWN_SHAPE_ALIASES: &[&str] = &[
+        "rectangle", "rounded", "diamond", "decision", "circle", "oval",
+        "parallelogram", "hexagon", "process", "connector", "gateway",
+        "triangle", "pyramid", "callout", "person", "user", "actor",
+        "screen", "mockup", "cylinder", "database", "cloud", "document",
+        "channel", "funnel", "segment", "cohort",
+    ];
+    let tag_lower = tag.to_ascii_lowercase();
+    let n = tag_lower.len();
+    if !(3..=20).contains(&n) { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_SHAPE_ALIASES {
+        let d = distance(&tag_lower, cand);
+        if d == 0 { return None; } // exact match = known tag, no suggestion
+        if d <= 2 {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
 }
 
 /// Returns a muted tier-specific fill color for a given z-offset.
@@ -3946,6 +4044,42 @@ mod tests {
             err.contains("-->") && err.contains("e.g."),
             "flow error should include an example: {err}"
         );
+    }
+
+    #[test]
+    fn test_groups_section_handles_inverted_brackets_without_panic() {
+        // Regression: `- ]bad[ Group` in ## Groups section used to panic with
+        // `begin > end` slicing error. The malformed entry should be skipped.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Groups\n- ]bad[ Group\n  a, b\n";
+        let doc = parse_hrf(spec).expect("should not panic or error on malformed group");
+        assert_eq!(doc.nodes.len(), 2, "nodes should still parse");
+    }
+
+    #[test]
+    fn test_parse_rejects_duplicate_hrf_ids() {
+        // Duplicate ids silently dropped routing info in edges; now rejected.
+        let spec = "## Nodes\n- [api] First\n- [api] Second\n- [db] DB\n\n## Flow\napi --> db\n";
+        let err = parse_hrf(spec).unwrap_err();
+        assert!(
+            err.contains("Duplicate") && err.contains("[api]"),
+            "expected duplicate-id error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_duplicate_error_reports_count() {
+        // Report count so user can see which ID is most duplicated.
+        let spec = "## Nodes\n- [x] A\n- [x] B\n- [x] C\n";
+        let err = parse_hrf(spec).unwrap_err();
+        assert!(err.contains("3×") || err.contains("[x]"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_allows_unique_ids_only() {
+        // Happy path — no duplicates, parse succeeds.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n- [c] C\n\n## Flow\na --> b\nb --> c\n";
+        let doc = parse_hrf(spec).expect("unique ids should parse");
+        assert_eq!(doc.nodes.len(), 3);
     }
 
     #[test]
