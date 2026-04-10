@@ -34,6 +34,9 @@ enum Commands {
     /// Validate HRF syntax and report errors
     Validate {
         input: PathBuf,
+        /// Output as JSON instead of human-readable text (for CI/IDE integration)
+        #[arg(long)]
+        json: bool,
     },
     /// Export HRF grammar for a template (for LLM context injection)
     Schema {
@@ -143,8 +146,8 @@ fn main() -> eframe::Result<()> {
             cli_render(input, out, &format);
             return Ok(());
         }
-        Some(Commands::Validate { input }) => {
-            cli_validate(input);
+        Some(Commands::Validate { input, json }) => {
+            cli_validate(input, json);
             return Ok(());
         }
         Some(Commands::Schema { template }) => {
@@ -253,9 +256,71 @@ fn cli_render(input: PathBuf, out: PathBuf, format: &str) {
     println!("Rendered {:?} → {:?} ({})", input, out, format);
 }
 
-fn cli_validate(input: PathBuf) {
-    let spec = std::fs::read_to_string(&input)
-        .unwrap_or_else(|e| { eprintln!("Error reading {:?}: {}", input, e); std::process::exit(1); });
+fn cli_validate(input: PathBuf, json: bool) {
+    let read_result = std::fs::read_to_string(&input);
+    if json {
+        // JSON mode: report all outcomes through structured output including
+        // I/O errors, so CI pipelines never have to parse stderr.
+        let spec = match read_result {
+            Ok(s) => s,
+            Err(e) => {
+                let payload = serde_json::json!({
+                    "file": input.display().to_string(),
+                    "valid": false,
+                    "error": format!("read error: {}", e),
+                    "line": serde_json::Value::Null,
+                    "node_count": 0,
+                    "edge_count": 0,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+                std::process::exit(1);
+            }
+        };
+        match crate::specgraph::hrf::parse_hrf(&spec) {
+            Ok(doc) => {
+                let payload = serde_json::json!({
+                    "file": input.display().to_string(),
+                    "valid": true,
+                    "error": serde_json::Value::Null,
+                    "line": serde_json::Value::Null,
+                    "node_count": doc.nodes.len(),
+                    "edge_count": doc.edges.len(),
+                });
+                println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                let line = parse_error_line(&msg);
+                // Strip the "Line N:" prefix from the stored error so callers
+                // don't double-report the location. If no prefix was present,
+                // `line` is null and the full message is kept as-is.
+                let clean = match line {
+                    Some(_) => msg
+                        .split_once(':')
+                        .map(|(_, rest)| rest.trim().to_string())
+                        .unwrap_or_else(|| msg.clone()),
+                    None => msg.clone(),
+                };
+                let payload = serde_json::json!({
+                    "file": input.display().to_string(),
+                    "valid": false,
+                    "error": clean,
+                    "line": line.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+                    "node_count": 0,
+                    "edge_count": 0,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload).unwrap());
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Human-readable mode
+    let spec = read_result.unwrap_or_else(|e| {
+        eprintln!("Error reading {:?}: {}", input, e);
+        std::process::exit(1);
+    });
     match crate::specgraph::hrf::parse_hrf(&spec) {
         Ok(doc) => {
             println!("✓ Valid — {} nodes, {} edges", doc.nodes.len(), doc.edges.len());
@@ -265,6 +330,15 @@ fn cli_validate(input: PathBuf) {
             std::process::exit(1);
         }
     }
+}
+
+/// Extract the leading line number from a parser error message like
+/// `"Line 2: missing closing ]"`. Returns `None` if no `Line N:` prefix is
+/// present — some errors are not line-anchored (e.g. I/O or structural errors).
+fn parse_error_line(msg: &str) -> Option<u32> {
+    let rest = msg.strip_prefix("Line ")?;
+    let (num_str, _) = rest.split_once(':')?;
+    num_str.trim().parse::<u32>().ok()
 }
 
 fn cli_schema(template: &str) {
@@ -2653,6 +2727,105 @@ mod cli_tests {
             "populated frame must not be flagged as empty, got: {}",
             stdout
         );
+    }
+
+    #[test]
+    fn test_parse_error_line_extracts_leading_line_number() {
+        use super::parse_error_line;
+        assert_eq!(parse_error_line("Line 2: missing closing ]"), Some(2));
+        assert_eq!(parse_error_line("Line 42: some error"), Some(42));
+        // Non-line-anchored errors return None.
+        assert_eq!(parse_error_line("random error text"), None);
+        assert_eq!(parse_error_line("Line X: bad number"), None);
+        assert_eq!(parse_error_line(""), None);
+    }
+
+    #[test]
+    fn test_validate_json_valid_file_emits_valid_true() {
+        // valid spec should emit {valid: true, error: null, line: null, ...}
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("validate_json_valid_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, "## Nodes\n- [a] Alpha\n- [b] Bravo\n## Flow\na --> b\n").unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["validate", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        assert!(out.status.success(), "valid file should exit 0, got: {}", stdout);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("validate --json not valid JSON: {}", stdout));
+        assert_eq!(v["valid"], serde_json::Value::Bool(true));
+        assert_eq!(v["error"], serde_json::Value::Null);
+        assert_eq!(v["line"], serde_json::Value::Null);
+        assert_eq!(v["node_count"], serde_json::Value::from(2));
+        assert_eq!(v["edge_count"], serde_json::Value::from(1));
+    }
+
+    #[test]
+    fn test_validate_json_invalid_file_emits_line_and_error() {
+        // invalid spec should emit {valid: false, error: <clean>, line: N, ...}
+        // and exit with a non-zero status so CI pipelines can detect failure.
+        let dir = std::env::temp_dir();
+        let tmp = dir.join(format!("validate_json_invalid_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, "## Nodes\n- [bad Label without closing bracket\n").unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["validate", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        assert!(!out.status.success(), "invalid file should exit non-zero");
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("validate --json not valid JSON: {}", stdout));
+        assert_eq!(v["valid"], serde_json::Value::Bool(false));
+        // Line prefix should be stripped from error and surfaced as a number.
+        assert_eq!(v["line"], serde_json::Value::from(2));
+        let err_str = v["error"].as_str().expect("error is string");
+        assert!(
+            !err_str.starts_with("Line "),
+            "error should have Line prefix stripped, got: {:?}",
+            err_str
+        );
+        assert!(err_str.contains("closing ]"), "error should describe cause, got: {:?}", err_str);
+    }
+
+    #[test]
+    fn test_validate_json_missing_file_emits_read_error() {
+        // Missing files should surface through JSON rather than panic or stderr.
+        let bogus = std::env::temp_dir().join(format!("nope_{}.spec", uuid::Uuid::new_v4()));
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { return; }
+        let out = std::process::Command::new(&bin)
+            .args(["validate", "--json", bogus.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        assert!(!out.status.success(), "missing file should exit non-zero");
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("validate --json not valid JSON: {}", stdout));
+        assert_eq!(v["valid"], serde_json::Value::Bool(false));
+        let err = v["error"].as_str().unwrap_or("");
+        assert!(err.contains("read error"), "expected read error, got: {:?}", err);
     }
 
     #[test]
