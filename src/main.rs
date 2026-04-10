@@ -724,6 +724,48 @@ fn cli_stats(input: PathBuf, json: bool) {
         }
     }
 
+    // Connected components (weakly connected, treating edges as undirected)
+    let component_count: usize = {
+        use crate::model::NodeId;
+        let mut adj: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for node in &doc.nodes {
+            if !node.is_frame {
+                adj.entry(node.id).or_default();
+            }
+        }
+        for edge in &doc.edges {
+            adj.entry(edge.source.node_id).or_default().push(edge.target.node_id);
+            adj.entry(edge.target.node_id).or_default().push(edge.source.node_id);
+        }
+        let mut visited: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+        let mut components = 0usize;
+        for &start in adj.keys() {
+            if visited.contains(&start) { continue; }
+            components += 1;
+            let mut stack = vec![start];
+            while let Some(cur) = stack.pop() {
+                if !visited.insert(cur) { continue; }
+                if let Some(nbrs) = adj.get(&cur) {
+                    for &n in nbrs { stack.push(n); }
+                }
+            }
+        }
+        components
+    };
+
+    // Edge density: E / (N*(N-1)/2). 1.0 = complete graph, close to 0 = sparse.
+    let non_frame_count = doc.nodes.iter().filter(|n| !n.is_frame).count();
+    let max_possible_edges = if non_frame_count >= 2 {
+        (non_frame_count * (non_frame_count - 1)) / 2
+    } else {
+        0
+    };
+    let edge_density: f32 = if max_possible_edges > 0 {
+        edge_count as f32 / max_possible_edges as f32
+    } else {
+        0.0
+    };
+
     // Layout depth (longest path via BFS layering, same as layout engine)
     let layout_depth = {
         let node_idx: HashMap<crate::model::NodeId, usize> =
@@ -777,6 +819,8 @@ fn cli_stats(input: PathBuf, json: bool) {
         println!("  \"max_in_degree\": {},", max_in);
         println!("  \"max_out_degree\": {},", max_out);
         println!("  \"layout_depth\": {},", layout_depth);
+        println!("  \"connected_components\": {},", component_count);
+        println!("  \"edge_density\": {:.3},", edge_density);
         let mut tag_list: Vec<_> = tags.iter().collect();
         tag_list.sort_by(|a, b| b.1.cmp(a.1));
         println!("  \"tags\": {{");
@@ -813,6 +857,12 @@ fn cli_stats(input: PathBuf, json: bool) {
         println!("  Max in-degree:     {}", max_in);
         println!("  Max out-degree:    {}", max_out);
         println!("  Layout depth:      {} layer{}", layout_depth, if layout_depth == 1 { "" } else { "s" });
+        println!(
+            "  Components:        {} subgraph{}",
+            component_count,
+            if component_count == 1 { "" } else { "s" }
+        );
+        println!("  Edge density:      {:.1}%", edge_density * 100.0);
         if !tags.is_empty() {
             println!();
             println!("  Tag distribution:");
