@@ -1340,7 +1340,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             // camera = iso | top | front | side  (named presets)
             "camera" | "camera-preset" | "cam" => {
                 // Match preset names to (yaw, pitch) — same values as toolbar buttons
-                let maybe_preset: Option<(f32, f32)> = match val.to_lowercase().trim() {
+                let trimmed = val.trim();
+                let maybe_preset: Option<(f32, f32)> = match trimmed.to_lowercase().as_str() {
                     "iso" | "isometric" | "default"    => Some((-0.6, 0.5)),
                     "top" | "overhead" | "bird"        => Some((0.0,  1.55)),
                     "front" | "elevation"              => Some((0.0,  0.05)),
@@ -1352,6 +1353,13 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     doc.import_hints.camera_pitch = Some(pitch);
                     // Named camera preset implies 3D view
                     doc.import_hints.view_3d = Some(true);
+                } else if !trimmed.is_empty() {
+                    // Unknown preset name — preserve raw value for cli_lint
+                    // did-you-mean. Previously this silently left camera
+                    // unchanged so typos like `camera = ios` vanished.
+                    doc.import_hints
+                        .unknown_camera_preset
+                        .push(trimmed.to_string());
                 }
             }
             "timeline" => {
@@ -3216,9 +3224,13 @@ fn parse_node_line(line: &str, line_num: usize) -> Result<(String, Node, Vec<Str
         } else if tag.starts_with("progress:") || tag.starts_with("pct:") || tag.starts_with("percent:") {
             let prefix = if tag.starts_with("progress:") { 9 } else if tag.starts_with("pct:") { 4 } else { 8 };
             let val_str = tag[prefix..].trim().trim_end_matches('%');
-            if let Ok(v) = val_str.parse::<f32>() {
+            match val_str.parse::<f32>() {
                 // Accept 0–100 range or 0.0–1.0 range
-                progress = if v > 1.0 { (v / 100.0).clamp(0.0, 1.0) } else { v.clamp(0.0, 1.0) };
+                Ok(v) => progress = if v > 1.0 { (v / 100.0).clamp(0.0, 1.0) } else { v.clamp(0.0, 1.0) },
+                // Non-numeric (e.g. `{progress:half}`, `{pct:done}`) —
+                // preserve for lint numeric-expected warning. Previously
+                // silent-dropped with no user feedback.
+                Err(_) => unknown_tags.push(tag.to_string()),
             }
         } else if tag == "bold" || tag == "strong" {
             bold = true;
@@ -4303,6 +4315,65 @@ pub fn suggest_layer_name(raw: &str) -> Option<&'static str> {
     // `kubernets`→`kubernetes`.
     let mut best: Option<(usize, &'static str)> = None;
     for &cand in KNOWN_LAYERS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // exact match = already valid
+        let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical camera preset name for a possibly-
+/// misspelled `camera = X` config directive. Vocabulary mirrors the
+/// `camera`/`camera-preset`/`cam` arm in parse_config_line, returning
+/// the closest match within distance 2 (or 1 for short 3-char names
+/// to avoid cross-bucket collisions like `top`→`tip`).
+///
+/// Returns None on exact match, empty input, or no close candidate.
+pub fn suggest_camera_preset(raw: &str) -> Option<&'static str> {
+    const KNOWN_PRESETS: &[&str] = &[
+        // iso bucket
+        "iso", "isometric", "default",
+        // top bucket
+        "top", "overhead", "bird",
+        // front bucket
+        "front", "elevation",
+        // side bucket
+        "side", "right", "left",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    // Length-scaled cutoff matching suggest_layer_name: short names
+    // need d<=1 to avoid false positives (`top`→`tip`→`hop`), longer
+    // names tolerate d<=2.
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_PRESETS {
         let d = distance(&raw_lower, cand);
         if d == 0 { return None; } // exact match = already valid
         let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };

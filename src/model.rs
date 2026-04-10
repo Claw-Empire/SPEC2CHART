@@ -865,6 +865,13 @@ pub struct ImportHints {
     /// describe the location. Suggestion is attached lazily by lint from
     /// the fixed (top/bottom/left/right) vocabulary. Never serialized.
     pub invalid_port_side_values: Vec<(String, String)>,
+    /// Unrecognized `camera = X` config preset names. The parser silently
+    /// left camera_yaw/pitch unchanged on unknown values, so `camera = ios`
+    /// (typo for `iso`) or `camera = isometrci` vanished without a warning
+    /// and the view stayed at whatever default was active. Used by `lint`
+    /// to emit did-you-mean hints from the canonical preset vocabulary
+    /// (iso/top/front/side + synonyms). Never serialized.
+    pub unknown_camera_preset: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -1381,6 +1381,11 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 ("z:",         "number (z offset for 3D layering)"),
                 ("3d-depth:",  "number (3D extrusion depth, 0–400)"),
                 ("depth:",     "number (3D extrusion depth, 0–400)"),
+                // Progress ring numeric prefixes — accept either 0–100
+                // (auto-divided) or 0.0–1.0. Optional trailing `%`.
+                ("progress:",  "0–100 number, 0.0–1.0 float, or percent (optional trailing %)"),
+                ("percent:",   "0–100 number, 0.0–1.0 float, or percent (optional trailing %)"),
+                ("pct:",       "0–100 number, 0.0–1.0 float, or percent (optional trailing %)"),
             ]
                 .iter()
                 .find_map(|(p, desc)| tag.strip_prefix(p).map(|_| (*p, *desc)));
@@ -2154,6 +2159,26 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
             warnings.push(format!(
                 "Invalid {} port side `{}` — did you mean `{}`? (valid: top, bottom, left, right)",
                 kind_desc, raw, suggestion
+            ));
+        }
+    }
+
+    // Unknown `camera = X` preset values: the parser used to silently
+    // leave camera_yaw/pitch unchanged on unrecognized preset names, so
+    // typos like `camera = ios` (for `iso`) or `camera = isometrci`
+    // vanished without a warning and the view stayed at the default.
+    // Now records the raw value so we can emit did-you-mean hints from
+    // the canonical vocabulary.
+    for raw in &doc.import_hints.unknown_camera_preset {
+        if let Some(suggestion) = crate::specgraph::hrf::suggest_camera_preset(raw) {
+            warnings.push(format!(
+                "Config: unknown camera preset `{}` — did you mean `{}`?",
+                raw, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "Config: unknown camera preset `{}` — expected iso, top, front, or side",
+                raw
             ));
         }
     }
@@ -4868,6 +4893,91 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_progress_non_numeric_via_cli() {
+        // `{progress:half}`, `{pct:done}`, `{percent:almost}` — all three
+        // prefixes previously used `if let Ok` without else and silently
+        // dropped non-numeric values. Parser now pushes to unknown_tags
+        // and cli_lint surfaces the numeric-expected warning.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {progress:half}\n\
+                    - [b] Beta {pct:done}\n\
+                    - [c] Gamma {percent:almost}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("progress_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["progress:half", "pct:done", "percent:almost"] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(needle) && s.contains("unresolved")
+            });
+            assert!(has, "expected `{needle}` warning, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_progress_valid_values_no_warning_via_cli() {
+        // Valid numeric progress values (0–100, 0.0–1.0, with/without %)
+        // must NOT warn. Regression guard for the new unknown_tags path
+        // and the numeric_prefix_match table row.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {progress:50}\n\
+                    - [b] Beta {progress:0.75}\n\
+                    - [c] Gamma {pct:80%}\n\
+                    - [d] Delta {percent:0}\n\
+                    - [e] Epsilon {progress:100}\n\
+                    ## Flow\n\
+                    a --> b\n\
+                    b --> c\n\
+                    c --> d\n\
+                    d --> e\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("progress_exact_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["progress:50", "progress:0.75", "pct:80%", "percent:0", "progress:100"] {
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("unresolved") && s.contains(needle)
+            });
+            assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_status_typo_via_cli() {
         // `{status:doen}` should warn and suggest `{status:done}`. Previously
         // the parser's `status:` arm fell through to `tag_to_node_tag` which
@@ -5645,6 +5755,115 @@ mod cli_tests {
             w.as_str().unwrap_or("").contains("Unknown layout direction")
         });
         assert!(!has_dir, "known direction must not fire, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unknown_camera_preset_typo_via_cli() {
+        // `camera = ios` (typo for `iso`) and `camera = isometrci` (typo
+        // for `isometric`) used to silently leave camera_yaw/pitch
+        // unchanged. Parser now pushes to unknown_camera_preset and
+        // cli_lint surfaces a did-you-mean suggestion from the canonical
+        // vocabulary (iso/top/front/side + synonyms).
+        let spec = "## Config\ncamera = isometrci\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("cam_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown camera preset")
+                && s.contains("isometrci")
+                && s.contains("did you mean")
+                && s.contains("isometric")
+        });
+        assert!(has, "expected camera preset typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_unknown_camera_preset_no_suggestion_via_cli() {
+        // A far-off preset name should fall back to the explanatory
+        // warning listing the 4 canonical buckets.
+        let spec = "## Config\ncamera = xyzzy\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("cam_nosug_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown camera preset")
+                && s.contains("xyzzy")
+                && s.contains("expected iso, top, front, or side")
+        });
+        assert!(has, "expected camera preset fallback warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_known_camera_presets_not_flagged_via_cli() {
+        // Canonical preset names + synonyms must NOT fire the unknown
+        // camera warning. Regression guard across all 4 buckets.
+        let specs = [
+            "## Config\ncamera = iso\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n",
+            "## Config\ncamera = isometric\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n",
+            "## Config\ncamera = top\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n",
+            "## Config\ncamera = front\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n",
+            "## Config\ncamera = side\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n",
+            "## Config\ncam = default\n## Nodes\n- [a] A\n- [b] B\n## Flow\na --> b\n",
+        ];
+        for (i, spec) in specs.iter().enumerate() {
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("cam_ok_{}_{}.spec", i, uid));
+            std::fs::write(&tmp, spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let bad = warnings.iter().any(|w| {
+                w.as_str().unwrap_or("").contains("unknown camera preset")
+            });
+            assert!(!bad, "canonical preset spec #{i} must not warn, got: {stdout}");
+        }
     }
 
     #[test]
