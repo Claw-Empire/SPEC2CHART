@@ -1656,6 +1656,55 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Duplicate display labels: when two different HRF IDs carry the same
+    // visible label, readers can't tell which node an edge points at.
+    // Common after a copy-paste — users duplicate a node row and forget to
+    // rename one side. Frames and empty labels are excluded since they have
+    // legitimate reasons to repeat. Comparison is case-insensitive so
+    // "Start" and "START" are treated as the same; the first-seen original
+    // casing is what gets reported.
+    {
+        use std::collections::HashMap;
+        let mut label_to_ids: HashMap<String, (String, Vec<String>)> = HashMap::new();
+        for node in &doc.nodes {
+            if node.is_frame { continue; }
+            let label = node.display_label().trim().to_string();
+            if label.is_empty() { continue; }
+            let key = label.to_lowercase();
+            // Prefer hrf_id for reporting; fall back to the label itself
+            // for nodes that came in without an explicit ID.
+            let ident = if node.hrf_id.is_empty() {
+                label.clone()
+            } else {
+                node.hrf_id.clone()
+            };
+            label_to_ids
+                .entry(key)
+                .or_insert_with(|| (label.clone(), Vec::new()))
+                .1
+                .push(ident);
+        }
+        let mut dupes: Vec<_> = label_to_ids
+            .into_iter()
+            .filter(|(_, (_, ids))| ids.len() >= 2)
+            .collect();
+        dupes.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_key, (display_label, mut ids)) in dupes {
+            ids.sort();
+            ids.dedup();
+            // After dedup we still need >=2 distinct identifiers to warrant
+            // a warning — otherwise the duplication is really the same node
+            // referenced twice under the same label which is harmless.
+            if ids.len() < 2 { continue; }
+            warnings.push(format!(
+                "Duplicate node label {:?} used by {} different nodes ({}) — readers may not know which is referenced",
+                display_label,
+                ids.len(),
+                ids.join(", ")
+            ));
+        }
+    }
+
     // Output
     if json {
         // Structured output for CI/IDE integration. Shape is intentionally
@@ -2096,6 +2145,103 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_duplicate_display_labels_flagged_e2e() {
+        // Two different HRF IDs carrying the same display label is a
+        // readability smell. lint --json should emit a warning that names
+        // both IDs and preserves the original casing.
+        let spec = "## Nodes\n- [first] Start\n- [middle] Middle\n\
+                    - [second] Start\n\n## Flow\nfirst --> middle\nmiddle --> second\n";
+        let tmp = std::env::temp_dir().join(format!("dup_label_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let hit = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Duplicate node label") && s.contains("\"Start\"")
+                && s.contains("first") && s.contains("second")
+        });
+        assert!(
+            hit,
+            "expected duplicate-label warning naming 'Start', 'first', 'second', got: {}",
+            stdout
+        );
+    }
+
+    #[test]
+    fn test_lint_duplicate_label_case_insensitive() {
+        // "Review" and "REVIEW" should still collapse since readers
+        // can't tell them apart at a glance.
+        let spec = "## Nodes\n- [r1] Review\n- [next] Next\n- [r2] REVIEW\n\n\
+                    ## Flow\nr1 --> next\nnext --> r2\n";
+        let tmp = std::env::temp_dir().join(format!("dup_label_case_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let hit = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Duplicate node label") && (s.contains("Review") || s.contains("REVIEW"))
+        });
+        assert!(hit, "expected duplicate-label warning, got: {}", stdout);
+    }
+
+    #[test]
+    fn test_lint_distinct_labels_not_flagged() {
+        // Two different labels must never trip the duplicate-label lint.
+        let spec = "## Nodes\n- [a] Alpha\n- [b] Beta\n- [c] Gamma\n\n\
+                    ## Flow\na --> b\nb --> c\n";
+        let tmp = std::env::temp_dir().join(format!("distinct_{}.spec", uuid::Uuid::new_v4()));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {}", stdout));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let any_dup = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("Duplicate node label")
+        });
+        assert!(!any_dup, "distinct labels must not trip the lint, got: {}", stdout);
+    }
+
+    #[test]
     fn test_description_parsed_as_sublabel() {
         // Indented continuation after a node should populate the Shape.description field,
         // which export.rs renders as a sublabel.
@@ -2352,6 +2498,152 @@ mod cli_tests {
             "should NOT warn about duplicate edges when labels differ, got: {warnings:?}"
         );
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_lint_duplicate_display_label_unit() {
+        // Two distinct hrf_ids with the same display label should be
+        // grouped and flagged by the duplicate-label lint. This is a
+        // pure parse test that mirrors the cli_lint algorithm without
+        // needing the CLI binary.
+        let spec = "## Nodes\n- [a] Deploy\n- [b] Deploy\n- [c] Review\n## Flow\na --> c\nb --> c\n";
+        let doc = crate::specgraph::hrf::parse_hrf(spec).unwrap();
+        use std::collections::HashMap;
+        let mut label_to_ids: HashMap<String, Vec<String>> = HashMap::new();
+        for node in &doc.nodes {
+            if node.is_frame { continue; }
+            let label = node.display_label().trim().to_string();
+            if label.is_empty() { continue; }
+            let key = label.to_lowercase();
+            let ident = if node.hrf_id.is_empty() {
+                label.clone()
+            } else {
+                node.hrf_id.clone()
+            };
+            label_to_ids.entry(key).or_default().push(ident);
+        }
+        let dupes: Vec<_> = label_to_ids
+            .iter()
+            .filter(|(_, ids)| {
+                let mut sorted = (*ids).clone();
+                sorted.sort();
+                sorted.dedup();
+                sorted.len() >= 2
+            })
+            .collect();
+        assert_eq!(dupes.len(), 1, "expected exactly one duplicated label group");
+        let (label, ids) = dupes[0];
+        assert_eq!(label, "deploy");
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn test_lint_duplicate_display_label_case_insensitive_via_cli() {
+        // "Deploy" and "DEPLOY" should collapse via lowercasing and
+        // fire the duplicate-label warning end-to-end through lint --json.
+        let spec = "## Nodes\n- [first] Deploy\n- [second] DEPLOY\n- [third] Review\n\
+                    ## Flow\nfirst --> third\nsecond --> third\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dup_label_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dupe = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Duplicate node label") && s.to_lowercase().contains("deploy")
+        });
+        assert!(
+            has_dupe,
+            "expected duplicate-label warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_duplicate_display_label_distinct_labels_not_flagged() {
+        // Three distinct labels: must NOT fire the duplicate-label warning.
+        let spec = "## Nodes\n- [a] Alpha\n- [b] Beta\n- [c] Gamma\n## Flow\na --> b\nb --> c\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dup_label_none_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_dupe = warnings.iter().any(|w| {
+            w.as_str().unwrap_or("").contains("Duplicate node label")
+        });
+        assert!(
+            !has_dupe,
+            "distinct labels must not be flagged, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_duplicate_display_label_frames_excluded() {
+        // Frames with duplicate labels must NOT fire the warning —
+        // frames often legitimately share names across groups. Build the
+        // doc programmatically so we can inject two is_frame=true nodes
+        // with identical labels without depending on group syntax.
+        let mut doc = crate::model::FlowchartDocument::default();
+        let mut f1 = crate::model::Node::new_frame(egui::Pos2::new(0.0, 0.0));
+        f1.size = [200.0, 200.0];
+        f1.hrf_id = "g1".into();
+        if let crate::model::NodeKind::Shape { label, .. } = &mut f1.kind {
+            *label = "Cluster".into();
+        }
+        let mut f2 = crate::model::Node::new_frame(egui::Pos2::new(500.0, 0.0));
+        f2.size = [200.0, 200.0];
+        f2.hrf_id = "g2".into();
+        if let crate::model::NodeKind::Shape { label, .. } = &mut f2.kind {
+            *label = "Cluster".into();
+        }
+        doc.nodes.push(f1);
+        doc.nodes.push(f2);
+        assert_eq!(doc.nodes.iter().filter(|n| n.is_frame).count(), 2);
+
+        // Mirror the lint's exclusion rule: frames are skipped entirely.
+        use std::collections::HashMap;
+        let mut label_to_ids: HashMap<String, Vec<String>> = HashMap::new();
+        for node in &doc.nodes {
+            if node.is_frame { continue; } // <- exclusion under test
+            let label = node.display_label().trim().to_lowercase();
+            if label.is_empty() { continue; }
+            label_to_ids.entry(label).or_default().push(node.hrf_id.clone());
+        }
+        // "cluster" must be absent because both carriers are frames.
+        assert!(
+            !label_to_ids.contains_key("cluster"),
+            "frame labels must not be counted toward duplicates"
+        );
     }
 
     #[test]
