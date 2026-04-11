@@ -1528,6 +1528,18 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 Port { node_id: src_node_id, side: PortSide::Right },
                 Port { node_id: tgt_node_id, side: PortSide::Left },
             );
+            // Apply edge tags. The deferred inline-edge handler was
+            // previously a subset of the regular edge parser at
+            // hrf.rs:3145: it only supported color/note/dashed/glow/
+            // animated/thick/thin/ortho/escalate/resolves/blocks and
+            // silently fell through on arrow:*, bend:, weight:/w:,
+            // src-port:/sport:, tgt-port:/tport:, from:, to:,
+            // c-src:, c-tgt: — users writing
+            // `- [alpha] Alpha → bravo {arrow:circle}` got a misleading
+            // "unknown tag — ignored" warning and the arrow style
+            // silently dropped. Now the inline path matches the regular
+            // path for all tag vocabularies so inline and Flow edges are
+            // behaviorally identical.
             for etag in edge_tags {
                 if let Some(rest) = etag.strip_prefix("color:") {
                     if let Some(c) = tag_to_edge_color(rest.trim()) {
@@ -1540,6 +1552,64 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     }
                 } else if let Some(rest) = etag.strip_prefix("note:") {
                     edge.comment = rest.trim().to_string();
+                } else if let Some(rest) = etag.strip_prefix("bend:") {
+                    match rest.trim().parse::<f32>() {
+                        Ok(b) => edge.style.curve_bend = b.clamp(-1.0, 1.0),
+                        Err(_) => edge.unknown_tags.push(etag.clone()),
+                    }
+                } else if let Some(v) = etag.strip_prefix("weight:").or_else(|| etag.strip_prefix("w:")) {
+                    match v.trim().parse::<f32>() {
+                        Ok(w) => edge.style.width = (w * 1.8).clamp(1.0, 9.0),
+                        Err(_) => edge.unknown_tags.push(etag.clone()),
+                    }
+                } else if let Some(rest) = etag.strip_prefix("from:") {
+                    edge.source_label = rest.trim().to_string();
+                } else if let Some(rest) = etag.strip_prefix("to:") {
+                    edge.target_label = rest.trim().to_string();
+                } else if let Some(rest) = etag.strip_prefix("c-src:") {
+                    // parse_cardinality returns Cardinality::None for
+                    // unknown values; preserve for lint did-you-mean.
+                    let trimmed = rest.trim();
+                    let parsed = parse_cardinality(trimmed);
+                    if matches!(parsed, Cardinality::None) && !trimmed.is_empty() {
+                        edge.unknown_tags.push(etag.clone());
+                    } else {
+                        edge.source_cardinality = parsed;
+                    }
+                } else if let Some(rest) = etag.strip_prefix("c-tgt:") {
+                    let trimmed = rest.trim();
+                    let parsed = parse_cardinality(trimmed);
+                    if matches!(parsed, Cardinality::None) && !trimmed.is_empty() {
+                        edge.unknown_tags.push(etag.clone());
+                    } else {
+                        edge.target_cardinality = parsed;
+                    }
+                } else if etag.starts_with("src-port:") || etag.starts_with("sport:") {
+                    let key_len = if etag.starts_with("src-port:") { 9 } else { 6 };
+                    let raw = &etag[key_len..];
+                    match tag_to_port_side(raw) {
+                        Some(ps) => edge.source.side = ps,
+                        None => {
+                            // Record into import_hints so cli_lint's
+                            // existing `invalid_port_side_values` walk
+                            // surfaces a did-you-mean hint against the
+                            // canonical top/bottom/left/right vocabulary.
+                            doc.import_hints
+                                .invalid_port_side_values
+                                .push(("src".to_string(), raw.to_string()));
+                        }
+                    }
+                } else if etag.starts_with("tgt-port:") || etag.starts_with("tport:") {
+                    let key_len = if etag.starts_with("tgt-port:") { 9 } else { 6 };
+                    let raw = &etag[key_len..];
+                    match tag_to_port_side(raw) {
+                        Some(ps) => edge.target.side = ps,
+                        None => {
+                            doc.import_hints
+                                .invalid_port_side_values
+                                .push(("tgt".to_string(), raw.to_string()));
+                        }
+                    }
                 } else {
                     match etag.as_str() {
                         "dashed" | "dash" | "dotted" => edge.style.dashed = true,
@@ -1548,6 +1618,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         "thick" | "bold" => edge.style.width = 5.0,
                         "thin" => edge.style.width = 1.5,
                         "ortho" | "orthogonal" => edge.style.orthogonal = true,
+                        "arrow:open" | "open" => edge.style.arrow_head = ArrowHead::Open,
+                        "arrow:circle" | "circle-end" => edge.style.arrow_head = ArrowHead::Circle,
+                        "arrow:none" | "no-arrow" | "line" => edge.style.arrow_head = ArrowHead::None,
                         "escalate" | "escalation" | "escalated" => {
                             edge.style.color = [243, 139, 168, 255];
                             edge.style.width = 3.5;

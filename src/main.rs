@@ -10757,4 +10757,208 @@ mod cli_tests {
             "fallback must not fire when suggestor already matched, got: {stdout}"
         );
     }
+
+    #[test]
+    fn test_lint_inline_edge_arrow_parity_via_cli() {
+        // Round 52: `- [alpha] Alpha → bravo {arrow:circle}` style
+        // deferred inline edges used to silently drop `arrow:*` because
+        // the deferred tag handler was a subset of the regular edge
+        // parser. Now the inline path supports arrow:open, arrow:circle,
+        // and arrow:none the same as Flow-section edges.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> bravo {arrow:circle}\n\
+                    - [bravo] Bravo -> charlie {arrow:open}\n\
+                    - [charlie] Charlie -> delta {arrow:none}\n\
+                    - [delta] Delta\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_arrow_parity_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let unknown_tag_count = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .filter(|w| w.contains("unknown tag") && w.contains("arrow:"))
+            .count();
+        assert_eq!(
+            unknown_tag_count, 0,
+            "valid arrow:* tags on inline edges must not warn, got: {stdout}"
+        );
+        // Verify edges were created.
+        let edge_count = v["edge_count"].as_u64().unwrap_or(0);
+        assert_eq!(
+            edge_count, 3,
+            "expected 3 inline edges with arrow:*, got edge_count={edge_count}: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_inline_edge_weight_bend_parity_via_cli() {
+        // Round 52: `weight:`, `w:`, and `bend:` on inline edges used
+        // to be silently dropped as unknown tags. Now they parse the
+        // numeric value and adjust style.width / style.curve_bend the
+        // same as the Flow-section edge parser.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> bravo {weight:3}\n\
+                    - [bravo] Bravo -> charlie {bend:0.5}\n\
+                    - [charlie] Charlie -> delta {w:2}\n\
+                    - [delta] Delta\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_weight_bend_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown tag")
+                && (s.contains("weight:") || s.contains("bend:") || s.contains("w:"))
+        });
+        assert!(
+            !bad,
+            "valid weight:/bend:/w: tags on inline edges must not warn, got: {stdout}"
+        );
+        let edge_count = v["edge_count"].as_u64().unwrap_or(0);
+        assert_eq!(
+            edge_count, 3,
+            "expected 3 inline edges with weight/bend, got edge_count={edge_count}: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_inline_edge_port_parity_via_cli() {
+        // Round 52: `src-port:`, `sport:`, `tgt-port:`, and `tport:` on
+        // inline edges used to be silently dropped. Now they set the
+        // source/target port side the same as the regular edge parser.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> bravo {src-port:top}\n\
+                    - [bravo] Bravo -> charlie {tgt-port:right}\n\
+                    - [charlie] Charlie -> delta {sport:bottom} {tport:left}\n\
+                    - [delta] Delta\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_port_parity_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown tag")
+                && (s.contains("port:") || s.contains("sport:") || s.contains("tport:"))
+        });
+        assert!(
+            !bad,
+            "valid port tags on inline edges must not warn, got: {stdout}"
+        );
+        // Also: valid port sides should NOT trigger the "Invalid source
+        // port side" / "Invalid target port side" warnings.
+        let port_bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("Invalid") && s.contains("port side")
+        });
+        assert!(
+            !port_bad,
+            "valid port sides must not trigger invalid-port-side warnings, got: {stdout}"
+        );
+        let edge_count = v["edge_count"].as_u64().unwrap_or(0);
+        assert_eq!(
+            edge_count, 3,
+            "expected 3 inline edges with ports, got edge_count={edge_count}: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_inline_edge_invalid_values_still_lint_via_cli() {
+        // Round 52 regression guard: the parity fix must NOT mask
+        // did-you-mean hints for close-but-wrong values. Typos on the
+        // inline path should still surface the same guidance as the
+        // regular Flow-edge path.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> bravo {arrow:cirlce}\n\
+                    - [bravo] Bravo -> charlie {weight:heavy}\n\
+                    - [charlie] Charlie -> delta {src-port:topleft}\n\
+                    - [delta] Delta\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_invalid_values_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // arrow:cirlce → did you mean arrow:circle
+        assert!(
+            joined.contains("arrow:cirlce") && joined.contains("arrow:circle"),
+            "expected did-you-mean for arrow:cirlce → arrow:circle, got: {stdout}"
+        );
+        // weight:heavy → unresolved number
+        assert!(
+            joined.contains("weight:heavy") && joined.contains("number"),
+            "expected unresolved-number hint for weight:heavy, got: {stdout}"
+        );
+        // src-port:topleft → invalid port side with did-you-mean
+        assert!(
+            joined.contains("topleft") && joined.contains("port side"),
+            "expected invalid-port-side hint for src-port:topleft, got: {stdout}"
+        );
+    }
 }
