@@ -2282,6 +2282,28 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Unknown bg-pattern values: `bg = dts` (meant: dots) or
+    // `bg-pattern = crosshach` used to be stored verbatim into
+    // `import_hints.bg_pattern` and then silently fall back to
+    // `BgPattern::None` (or the previous pattern) in the toolbar's
+    // application code. The parser now validates against the accepted
+    // vocabulary and preserves unresolved values here. Emit a did-you-mean
+    // hint from `suggest_bg_pattern` when there's a close canonical name,
+    // otherwise list the accepted vocabulary.
+    for (key, raw) in &doc.import_hints.unknown_bg_pattern {
+        if let Some(suggestion) = crate::specgraph::hrf::suggest_bg_pattern(raw) {
+            warnings.push(format!(
+                "Config: `{} = {}` not a recognized pattern — did you mean `{} = {}`?",
+                key, raw, key, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "Config: `{} = {}` not a recognized pattern — expected one of: dots, lines, crosshatch, none",
+                key, raw
+            ));
+        }
+    }
+
     // Unknown numeric config values: `grid = small`, `camera_yaw = tilted`,
     // `gap = wide`, `sla-p1 = three` used to silently drop because the parser
     // did `if let Ok(v) = val.parse::<f32>()` with no else branch. The parser
@@ -5306,6 +5328,137 @@ mod cli_tests {
                 let s = w.as_str().unwrap_or("");
                 (s.contains("not recognized") || s.contains("not a recognized color"))
                     && s.contains(needle)
+            });
+            assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_bg_pattern_typo_via_cli() {
+        // `bg = dts` (typo for `dots`) and `bg-pattern = crosshach` (typo for
+        // `crosshatch`) used to silently fall back to `BgPattern::None` or
+        // keep the previous pattern after import, with no user feedback.
+        // Verify they now surface as lint warnings with did-you-mean hints.
+        let spec = "## Config\n\
+                    bg = dts\n\
+                    bg-pattern = crosshach\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bg_pattern_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("bg = dts") && joined.contains("did you mean `bg = dots`"),
+            "expected bg=dts did-you-mean hint, got: {stdout}"
+        );
+        assert!(
+            joined.contains("bg-pattern = crosshach")
+                && joined.contains("did you mean `bg-pattern = crosshatch`"),
+            "expected bg-pattern=crosshach did-you-mean hint, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_bg_pattern_nonsense_expected_vocabulary_via_cli() {
+        // Unresolvable values like `bg = zzzqqq` should still warn, falling
+        // back to listing the accepted vocabulary rather than a did-you-mean.
+        let spec = "## Config\n\
+                    bg = zzzqqq\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bg_pattern_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("bg = zzzqqq")
+                && joined.contains("expected one of")
+                && joined.contains("dots")
+                && joined.contains("lines")
+                && joined.contains("crosshatch"),
+            "expected accepted-vocabulary fallback, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_bg_pattern_valid_values_no_warning_via_cli() {
+        // Regression guard: canonical bg / bg-pattern values must not warn.
+        let spec = "## Config\n\
+                    bg = dots\n\
+                    bg-pattern = lines\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bg_pattern_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["bg = dots", "bg-pattern = lines"] {
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("not a recognized pattern") && s.contains(needle)
             });
             assert!(!bad, "valid {needle} should not warn, got: {stdout}");
         }

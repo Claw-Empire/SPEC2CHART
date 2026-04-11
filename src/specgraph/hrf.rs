@@ -1307,7 +1307,26 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             "description" | "desc" => { doc.description = val.clone(); }
             // import hints — applied by the toolbar after import
             "bg" | "bg-pattern" => {
-                doc.import_hints.bg_pattern = Some(val.to_lowercase());
+                let trimmed = val.trim().to_lowercase();
+                match trimmed.as_str() {
+                    "dots" | "dot"
+                    | "lines" | "line" | "grid"
+                    | "crosshatch" | "cross" | "hash"
+                    | "none" | "off" | "blank" => {
+                        doc.import_hints.bg_pattern = Some(trimmed);
+                    }
+                    _ if !trimmed.is_empty() => {
+                        // Preserve typos like `bg = dts` or `bg = crosshach`
+                        // so cli_lint can suggest a canonical pattern name.
+                        // Previously any value was stored verbatim and the
+                        // toolbar silently fell back to `BgPattern::None` or
+                        // kept the current pattern, dropping the directive.
+                        doc.import_hints
+                            .unknown_bg_pattern
+                            .push((key.clone(), trimmed));
+                    }
+                    _ => {}
+                }
             }
             "snap" | "snap-to-grid" | "snap_to_grid" => {
                 let trimmed = val.trim();
@@ -4357,6 +4376,64 @@ pub fn suggest_sticky_color(raw: &str) -> Option<&'static str> {
         // Length-scaled cutoff: short vocab words like `ok`/`wip` would be
         // indistinguishable under d<=2 (half their length!), so restrict to
         // d<=1 when either string is <= 4 chars.
+        let max_d = if cand.len() <= 4 || raw_lower.len() <= 4 { 1 } else { 2 };
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical bg-pattern name for a possibly-misspelled
+/// `bg = X` / `bg-pattern = X` config value. Returns None on exact match,
+/// empty input, or no close candidate. The vocabulary mirrors the accepted
+/// spellings in `parse_hrf`'s `bg`/`bg-pattern` arm and the toolbar's
+/// application code (`dots`/`dot`, `lines`/`line`/`grid`,
+/// `crosshatch`/`cross`/`hash`, `none`/`off`/`blank`) — every returned
+/// suggestion is guaranteed to apply cleanly after substitution.
+///
+/// `allow(dead_code)`: consumed by the `bin` target (cli_lint).
+#[allow(dead_code)]
+pub fn suggest_bg_pattern(raw: &str) -> Option<&'static str> {
+    const KNOWN_BG_PATTERNS: &[&str] = &[
+        "dots", "dot",
+        "lines", "line", "grid",
+        "crosshatch", "cross", "hash",
+        "none", "off", "blank",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+    if raw_lower.len() < 2 { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_BG_PATTERNS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // already valid
+        // Length-scaled cutoff: short vocab words like `dot`/`off`/`line`
+        // would be indistinguishable under d<=2.
         let max_d = if cand.len() <= 4 || raw_lower.len() <= 4 { 1 } else { 2 };
         if d <= max_d {
             match best {

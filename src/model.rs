@@ -909,6 +909,15 @@ pub struct ImportHints {
     /// `unknown_layout_direction`. Used by `lint` to emit did-you-mean hints
     /// via `suggest_layout_direction`. Never serialized.
     pub unknown_timeline_dir: Vec<(String, String)>,
+    /// Unresolved `bg = X` / `bg-pattern = X` config values. The parser
+    /// accepted any lowercased string into `bg_pattern`, then the toolbar
+    /// mapped unknown values to `BgPattern::None` or silently kept the
+    /// current pattern. Typos like `bg = dts` (meant: dots) or
+    /// `bg = crosshach` used to vanish without a warning and the canvas
+    /// kept whatever default was in effect. Pair is (key_name, raw_value).
+    /// Used by `lint` to emit did-you-mean hints via `suggest_bg_pattern`.
+    /// Never serialized.
+    pub unknown_bg_pattern: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
