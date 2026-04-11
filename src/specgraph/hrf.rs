@@ -1,6 +1,6 @@
 use crate::model::*;
 use egui::Pos2;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Parse a Human-Readable Format (.spec) string into a FlowchartDocument.
 ///
@@ -566,6 +566,16 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // at each indentation level so that `  - child` lines become edges parent → child.
     let mut orgtree_parent_stack: Vec<(usize, NodeId)> = Vec::new();
 
+    // Lane names that were EXPLICITLY declared via `## Swimlane:` /
+    // `## Lane N:` / `## Kanban:` / `## Swimlanes` list sections. This is
+    // distinct from `doc.timeline_lanes` which ALSO collects auto-discovered
+    // lanes from `{lane:X}` node tags. The validation post-pass uses this
+    // set to flag unresolved `{lane:X}` references (typos) against the
+    // declared vocabulary — typos would otherwise silently auto-create a
+    // phantom empty lane in layout.rs. Populated only at explicit
+    // declaration sites below, never at auto-discovery sites.
+    let mut declared_lane_names: HashSet<String> = HashSet::new();
+
     for (line_num, raw_line) in input.lines().enumerate() {
         let line = raw_line.trim_end();
         // Strip inline `//` comments: only strip when `//` appears OUTSIDE of {} tags
@@ -730,10 +740,14 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 _ if header.starts_with("grid") || header.starts_with("matrix") || header.starts_with("table") => {
                     // ## Grid [cols=N] / ## Grid N / ## Matrix [cols=N]
                     // Parse optional cols parameter from header
-                    let rest = if header.starts_with("grid") { header_raw[4..].trim() }
-                               else if header.starts_with("matrix") { header_raw[6..].trim() }
-                               else { header_raw[5..].trim() }; // table
-                    let cols = rest
+                    let (header_alias, rest) = if header.starts_with("grid") {
+                        ("Grid", header_raw[4..].trim())
+                    } else if header.starts_with("matrix") {
+                        ("Matrix", header_raw[6..].trim())
+                    } else {
+                        ("Table", header_raw[5..].trim())
+                    };
+                    let parsed_cols: Option<usize> = rest
                         .split_whitespace()
                         .find_map(|tok| {
                             let v = tok.trim_start_matches("cols=")
@@ -743,8 +757,24 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                                        .trim_start_matches("c=");
                             v.parse::<usize>().ok()
                         })
-                        .or_else(|| rest.parse::<usize>().ok())
-                        .unwrap_or(3); // default 3 columns
+                        .or_else(|| rest.parse::<usize>().ok());
+                    let cols = match parsed_cols {
+                        Some(n) if n > 0 => n,
+                        _ => {
+                            // Record unresolved `cols=` value if the user
+                            // wrote *something* that failed to parse — we
+                            // still use the default 3 to keep rendering
+                            // stable, but cli_lint will surface the typo.
+                            // Empty `rest` = user omitted cols entirely, no
+                            // warning needed.
+                            if !rest.is_empty() {
+                                doc.import_hints
+                                    .unknown_grid_cols
+                                    .push((header_alias.to_string(), rest.to_string()));
+                            }
+                            3
+                        }
+                    };
                     Section::Grid { cols, default_z: 0.0, nodes: Vec::new() }
                 }
                 _ => {
@@ -789,6 +819,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                             let idx = after_raw.trim().parse::<usize>().unwrap_or(0);
                             (idx, format!("Lane {}", idx))
                         };
+                        // Track explicit declaration for unresolved `{lane:X}` lint.
+                        declared_lane_names.insert(label.clone());
                         // Register in doc.timeline_lanes preserving order
                         while doc.timeline_lanes.len() < idx.saturating_sub(1) {
                             doc.timeline_lanes.push(format!("Lane {}", doc.timeline_lanes.len() + 1));
@@ -848,6 +880,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         } else {
                             after_raw.to_string()
                         };
+                        // Track explicit declaration for unresolved `{lane:X}` lint.
+                        declared_lane_names.insert(label.clone());
                         if !doc.timeline_lanes.contains(&label) {
                             doc.timeline_lanes.push(label.clone());
                         }
@@ -868,6 +902,11 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         } else {
                             after_raw.to_string()
                         };
+                        // Track explicit declaration for unresolved `{lane:X}` lint.
+                        // Kanban columns are exposed to nodes via `node.timeline_lane`,
+                        // so a typo'd `{lane:X}` against a kanban column should still
+                        // lint against this declared vocabulary.
+                        declared_lane_names.insert(label.clone());
                         if !doc.kanban_columns.contains(&label) {
                             doc.kanban_columns.push(label.clone());
                         }
@@ -1998,6 +2037,60 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             doc.import_hints
                 .unresolved_dep_targets
                 .push((src_id_str, dep_target));
+        }
+    }
+
+    // Validate `{lane:X}` references against the EXPLICITLY declared lane
+    // vocabulary. Only fires when at least one lane was declared via
+    // `## Swimlane:` / `## Lane N:` / `## Kanban:`; otherwise `{lane:X}`
+    // tags are accepted as new auto-discovered lanes (backwards compatible).
+    // Skip frames: they don't get rendered in the lane grid. Walk
+    // `node.timeline_lane` which is how the parser stores `{lane:X}`,
+    // `{section:X}`, and `{col:X}` inline tags.
+    if !declared_lane_names.is_empty() {
+        for node in &doc.nodes {
+            if node.is_frame {
+                continue;
+            }
+            if let Some(lane_name) = node.timeline_lane.as_ref() {
+                if !declared_lane_names.contains(lane_name) {
+                    let src_id_str = if !node.hrf_id.is_empty() {
+                        node.hrf_id.clone()
+                    } else {
+                        node.display_label().to_string()
+                    };
+                    doc.import_hints
+                        .unresolved_lane_refs
+                        .push((src_id_str, lane_name.clone()));
+                }
+            }
+        }
+    }
+
+    // Validate `{phase:X}` / `{period:X}` references against the declared
+    // period vocabulary. `doc.timeline_periods` is only populated from
+    // explicit `## Period N:` / `## Timeline` section declarations, so it
+    // can be used directly without a parallel set. Only fires when at least
+    // one period has been declared (backwards compatible).
+    if !doc.timeline_periods.is_empty() {
+        let declared_periods: HashSet<&str> =
+            doc.timeline_periods.iter().map(String::as_str).collect();
+        for node in &doc.nodes {
+            if node.is_frame {
+                continue;
+            }
+            if let Some(period_name) = node.timeline_period.as_ref() {
+                if !declared_periods.contains(period_name.as_str()) {
+                    let src_id_str = if !node.hrf_id.is_empty() {
+                        node.hrf_id.clone()
+                    } else {
+                        node.display_label().to_string()
+                    };
+                    doc.import_hints
+                        .unresolved_period_refs
+                        .push((src_id_str, period_name.clone()));
+                }
+            }
         }
     }
 

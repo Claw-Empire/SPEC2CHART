@@ -947,6 +947,40 @@ pub struct ImportHints {
     /// through. Pair is (palette_name, raw_value). Used by `lint` to emit
     /// did-you-mean hints via `suggest_fill_color_name`. Never serialized.
     pub unknown_palette_values: Vec<(String, String)>,
+    /// Unresolved `## Grid` / `## Matrix` / `## Table` `cols=X` header
+    /// values that did not parse as a positive integer. The parser used
+    /// `rest.split_whitespace().find_map(parse).or_else(parse).unwrap_or(3)`
+    /// which silently fell back to a 3-column layout on any unrecognized
+    /// value — a user who typed `## Grid cols=fve` (meant: 5) or
+    /// `## Matrix cols=four` silently got a 3-column rendering with no
+    /// indication the directive was dropped. Pair is (header_alias,
+    /// raw_value) where header_alias is one of `Grid`, `Matrix`, or
+    /// `Table` so the warning names the actual section the user typed.
+    /// Used by `lint` to emit a "not a positive integer" warning. Never
+    /// serialized.
+    pub unknown_grid_cols: Vec<(String, String)>,
+    /// Unresolved `{phase:X}` / `{period:X}` decorator references on
+    /// nodes where X did not match any declared period in the `## Timeline`
+    /// section. Layout silently drops such nodes into an "unperioded" bucket
+    /// far below the grid, so typos like `{phase:Q1}` against a declared
+    /// `Q1 2026` vanish off-canvas without feedback. Pair is
+    /// (source_hrf_id, raw_period_name). Used by `lint` to emit did-you-mean
+    /// hints via Levenshtein distance against the declared period vocabulary.
+    /// Populated only when at least one period is declared — otherwise the
+    /// `{phase:X}` tag is accepted as a new auto-discovered period. Never
+    /// serialized.
+    pub unresolved_period_refs: Vec<(String, String)>,
+    /// Unresolved `{lane:X}` / `{section:X}` / `{col:X}` decorator references
+    /// on nodes where X did not match any declared lane in the
+    /// `## Swimlane:` / `## Lane N:` / `## Kanban:` / `## Swimlanes` sections.
+    /// Layout silently auto-creates a phantom empty lane for the typo, so a
+    /// user writing `{lane:Enginering}` (meant: Engineering) sees an extra
+    /// empty lane instead of their intended assignment. Pair is
+    /// (source_hrf_id, raw_lane_name). Used by `lint` to emit did-you-mean
+    /// hints against the declared lane vocabulary. Populated only when at
+    /// least one lane is declared — otherwise the `{lane:X}` tag is accepted
+    /// as a new auto-discovered lane. Never serialized.
+    pub unresolved_lane_refs: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

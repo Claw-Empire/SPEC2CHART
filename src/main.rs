@@ -1757,6 +1757,78 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // `{lane:X}` unresolved references: when a node tag like `{lane:Enginering}`
+    // doesn't match any declared lane from `## Swimlane:` / `## Lane N:` /
+    // `## Kanban:` / `## Swimlanes` list, layout.rs silently auto-creates a
+    // phantom empty lane with the typo name — the user sees an extra column/row
+    // but no feedback about the mistake. The parser now records
+    // (source_id, raw_lane_name) into `unresolved_lane_refs` whenever at least
+    // one lane was explicitly declared. Emit did-you-mean hints drawn from the
+    // declared lane vocabulary. Candidates are `doc.timeline_lanes` minus the
+    // set of typo'd names (so typos don't self-suggest).
+    if !doc.import_hints.unresolved_lane_refs.is_empty() {
+        let typo_set: std::collections::HashSet<&str> = doc
+            .import_hints
+            .unresolved_lane_refs
+            .iter()
+            .map(|(_, n)| n.as_str())
+            .collect();
+        let declared_lanes: Vec<&str> = doc
+            .timeline_lanes
+            .iter()
+            .map(String::as_str)
+            .filter(|s| !typo_set.contains(*s))
+            .collect();
+        for (src_id, lane_name) in &doc.import_hints.unresolved_lane_refs {
+            let src_display = if src_id.is_empty() { "?" } else { src_id.as_str() };
+            let suggestion =
+                crate::specgraph::hrf::suggest_node_id_from_candidates(lane_name, &declared_lanes);
+            match suggestion {
+                Some(s) => warnings.push(format!(
+                    "Node [{}]: {{lane:{}}} does not match any declared lane — did you mean `{{lane:{}}}`?",
+                    src_display, lane_name, s
+                )),
+                None => warnings.push(format!(
+                    "Node [{}]: {{lane:{}}} does not match any declared lane in ## Swimlane/## Lane/## Kanban sections",
+                    src_display, lane_name
+                )),
+            }
+        }
+    }
+
+    // `{phase:X}` / `{period:X}` unresolved references: when a node tag doesn't
+    // match any declared period in the ## Timeline section, layout.rs drops the
+    // node into an "unperioded" bucket far below the grid (effectively vanishes
+    // off-canvas). Completely silent before this lint. The parser now records
+    // (source_id, raw_period_name) into `unresolved_period_refs` whenever the
+    // ## Timeline section declared at least one period. `doc.timeline_periods`
+    // is only populated from explicit declaration so can be used directly as
+    // the candidate vocabulary.
+    if !doc.import_hints.unresolved_period_refs.is_empty() {
+        let declared_periods: Vec<&str> = doc
+            .timeline_periods
+            .iter()
+            .map(String::as_str)
+            .collect();
+        for (src_id, period_name) in &doc.import_hints.unresolved_period_refs {
+            let src_display = if src_id.is_empty() { "?" } else { src_id.as_str() };
+            let suggestion = crate::specgraph::hrf::suggest_node_id_from_candidates(
+                period_name,
+                &declared_periods,
+            );
+            match suggestion {
+                Some(s) => warnings.push(format!(
+                    "Node [{}]: {{phase:{}}} does not match any declared period — did you mean `{{phase:{}}}`?",
+                    src_display, period_name, s
+                )),
+                None => warnings.push(format!(
+                    "Node [{}]: {{phase:{}}} does not match any declared period in ## Timeline",
+                    src_display, period_name
+                )),
+            }
+        }
+    }
+
     // `## Groups` fill typos: when `{fill:X}` on a group line doesn't resolve
     // (`{fill:blu}`, `{fill:gren}`, bad hex), the frame silently falls back
     // to the default color with no feedback. The parser now records these
@@ -2396,6 +2468,18 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 name, raw
             ));
         }
+    }
+
+    // Unresolved `## Grid` / `## Matrix` / `## Table` `cols=` header values.
+    // The parser falls back to `cols=3` on any parse failure — a user who
+    // typed `## Grid cols=fve` (meant: 5) silently gets a 3-column grid
+    // with no indication their value was dropped. Emit one warning per
+    // unresolved header so the typo surfaces in lint output.
+    for (header_alias, raw) in &doc.import_hints.unknown_grid_cols {
+        warnings.push(format!(
+            "## {}: `{}` is not a positive integer column count — expected a number like `cols=5`, `cols=3`, or a bare integer (defaulted to 3)",
+            header_alias, raw
+        ));
     }
 
     // Duplicate parallel edges: same (source, target, label) tuple appearing
@@ -5973,6 +6057,125 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_grid_cols_typo_via_cli() {
+        // `## Grid cols=fve` used to silently fall back to a 3-column
+        // grid via `.unwrap_or(3)`, dropping the user's intended value
+        // with no warning. Verify the typo now surfaces in lint output.
+        let spec = "## Grid cols=fve\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    - [c] Gamma\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("grid_cols_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("## Grid")
+                && joined.contains("cols=fve")
+                && joined.contains("positive integer"),
+            "expected grid cols typo warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_matrix_and_table_cols_typo_via_cli() {
+        // `## Matrix cols=X` and `## Table cols=X` share the same code
+        // path as Grid and must surface typos under their own alias so
+        // users see the section name they actually typed.
+        for (header, expected_alias) in [
+            ("## Matrix cols=fore\n", "## Matrix"),
+            ("## Table cols=tree\n",  "## Table"),
+        ] {
+            let spec = format!("{header}- [a] Alpha\n- [b] Beta\n");
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir()
+                .join(format!("grid_alias_typo_{}_{}.spec", expected_alias.replace("## ", ""), uid));
+            std::fs::write(&tmp, &spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let joined: String = warnings.iter()
+                .filter_map(|w| w.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains(expected_alias) && joined.contains("positive integer"),
+                "expected `{expected_alias}` cols typo warning, got: {stdout}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_lint_grid_cols_valid_not_flagged_via_cli() {
+        // Regression guard: valid cols values and bare-number forms and
+        // missing cols (empty rest) must NOT emit the warning.
+        for spec in [
+            "## Grid cols=4\n- [a] Alpha\n- [b] Beta\n",
+            "## Grid 5\n- [a] Alpha\n- [b] Beta\n",
+            "## Grid\n- [a] Alpha\n- [b] Beta\n",
+            "## Matrix cols=2\n- [a] Alpha\n- [b] Beta\n",
+            "## Table columns=3\n- [a] Alpha\n- [b] Beta\n",
+        ] {
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("grid_ok_{}.spec", uid));
+            std::fs::write(&tmp, spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("positive integer column count")
+            });
+            assert!(!bad, "valid grid cols should not warn: spec={spec:?} out={stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_group_fill_typo_via_cli() {
         // `## Groups` {fill:X} typos (`{fill:blu}`, `{fill:gren}`) used to
         // silently drop to the default frame color. Verify they now surface
@@ -8822,5 +9025,261 @@ mod cli_tests {
 
         let _ = std::fs::remove_file(&tmp_a);
         let _ = std::fs::remove_file(&tmp_b);
+    }
+
+    #[test]
+    fn test_lint_lane_ref_typo_via_cli() {
+        // `{lane:Enginering}` (typo for `Engineering`) used to silently
+        // auto-create a phantom empty lane in layout.rs with no warning.
+        // Verify cli_lint now emits a did-you-mean hint against the
+        // declared lane vocabulary from ## Lane N: sections.
+        let spec = "## Lane 1: Engineering\n\
+                    ## Lane 2: Design\n\
+                    ## Nodes\n\
+                    - [a] Alpha {lane:Enginering}\n\
+                    - [b] Beta {lane:Design}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("lane_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{lane:Enginering}")
+                && joined.contains("did you mean `{lane:Engineering}`"),
+            "expected lane:Enginering did-you-mean hint, got: {stdout}"
+        );
+        // Valid `{lane:Design}` on the same node must NOT warn.
+        let bad_valid = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("{lane:Design}") && s.contains("does not match any declared lane")
+        });
+        assert!(!bad_valid, "valid {{lane:Design}} must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_lane_ref_nonsense_falls_back_via_cli() {
+        // Unresolvable lane references with no close match (e.g. `zxqwrty`)
+        // should still warn, falling back to a generic "does not match any
+        // declared lane" message instead of a did-you-mean suggestion.
+        let spec = "## Lane 1: Engineering\n\
+                    ## Lane 2: Design\n\
+                    ## Nodes\n\
+                    - [a] Alpha {lane:zxqwrty}\n\
+                    - [b] Beta {lane:Design}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("lane_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{lane:zxqwrty}")
+                && joined.contains("does not match any declared lane in"),
+            "expected generic fallback for unresolvable lane, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_lane_ref_auto_discovered_not_flagged_via_cli() {
+        // Backwards-compat: when NO lane is explicitly declared via a
+        // ## Swimlane: / ## Lane N: / ## Kanban: section, `{lane:X}` tags
+        // should continue to auto-discover lanes without warning. The new
+        // lint only fires against an explicit declaration vocabulary.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {lane:Engineering}\n\
+                    - [b] Beta {lane:Design}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("lane_auto_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("does not match any declared lane")
+        });
+        assert!(!bad, "auto-discovered lanes must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_phase_ref_typo_via_cli() {
+        // `{phase:Planing}` (typo for `Planning`) used to silently drop
+        // the node into an "unperioded" bucket far below the grid with
+        // no feedback — effectively vanishing the node off-canvas.
+        // Verify cli_lint now emits a did-you-mean hint against the
+        // declared period vocabulary from ## Period N: sections.
+        let spec = "## Period 1: Planning\n\
+                    ## Period 2: Execution\n\
+                    ## Nodes\n\
+                    - [a] Alpha {phase:Planing}\n\
+                    - [b] Beta {phase:Execution}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("phase_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{phase:Planing}")
+                && joined.contains("did you mean `{phase:Planning}`"),
+            "expected phase:Planing did-you-mean hint, got: {stdout}"
+        );
+        // Valid `{phase:Execution}` on the same node must NOT warn.
+        let bad_valid = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("{phase:Execution}") && s.contains("does not match any declared period")
+        });
+        assert!(!bad_valid, "valid {{phase:Execution}} must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_phase_ref_nonsense_falls_back_via_cli() {
+        // Unresolvable phase references with no close match should still
+        // warn, falling back to a generic "does not match any declared
+        // period" message instead of a did-you-mean suggestion.
+        let spec = "## Period 1: Planning\n\
+                    ## Period 2: Execution\n\
+                    ## Nodes\n\
+                    - [a] Alpha {phase:zxqwrty}\n\
+                    - [b] Beta {phase:Execution}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("phase_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{phase:zxqwrty}")
+                && joined.contains("does not match any declared period in ## Timeline"),
+            "expected generic fallback for unresolvable phase, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_phase_ref_auto_discovered_not_flagged_via_cli() {
+        // Backwards-compat: when NO period is declared via a ## Period N:
+        // section, `{phase:X}` tags should continue to auto-discover
+        // periods without warning.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {phase:Q1}\n\
+                    - [b] Beta {phase:Q2}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("phase_auto_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("does not match any declared period")
+        });
+        assert!(!bad, "auto-discovered phases must not warn, got: {stdout}");
     }
 }
