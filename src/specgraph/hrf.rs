@@ -1336,17 +1336,58 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         (raw_label_and_tags.to_string(), None)
                     }
                 };
-                // Find shape tag — look for known shape names in tags
-                let shape = tags.iter()
-                    .find(|t| matches!(t.as_str(),
-                        "diamond" | "circle" | "rectangle" | "rounded_rect" | "parallelogram"
-                        | "hexagon" | "connector" | "text" | "entity" | "decision" | "start" | "end"))
-                    .map(|t| tag_to_shape(t))
-                    .unwrap_or(NodeShape::RoundedRect);
+                // Find shape tag — use the full `tag_to_shape_opt` alias vocabulary
+                // for consistency with `parse_node_line`. The previous inline
+                // `matches!(...)` list only recognized a tiny subset of names
+                // (`diamond`, `circle`, `rectangle`, etc.) and silently fell
+                // through to `RoundedRect` for valid aliases like `oval`,
+                // `rhombus`, `db`, `pyramid`, `cloud`. A typo like `{diamon}`
+                // was equally invisible — no warning, no visual signal.
+                //
+                // Fix:
+                //   1. Iterate tags and resolve shape via `tag_to_shape_opt` (last
+                //      match wins, matching `parse_node_line` semantics).
+                //   2. For tags that do NOT resolve as a shape AND are not a
+                //      known meta-prefix (`fill:`, `z:`, `dep:`, `id:`, `metric:`,
+                //      `pinned`), check `suggest_shape_alias` — if it returns
+                //      Some, the tag is shape-ish (close Levenshtein distance to
+                //      a known alias), so preserve it in `node.unknown_tags`
+                //      where `cli_lint`'s existing suggest_shape_alias walk will
+                //      emit a did-you-mean warning automatically.
+                //
+                // Meta-prefixed tags and other non-shape-ish tokens are left
+                // unhandled to avoid changing existing Steps behavior beyond the
+                // shape silent-drop fix that is the scope of this round.
+                let mut shape = NodeShape::RoundedRect;
+                let mut step_shape_typos: Vec<String> = Vec::new();
+                for t in &tags {
+                    // Skip meta-prefixed tags — not this round's scope.
+                    if t.starts_with("fill:")
+                        || t.starts_with("z:")
+                        || t.starts_with("dep:")
+                        || t.starts_with("id:")
+                        || t.starts_with("metric:")
+                        || t.starts_with("icon:")
+                        || t == "pinned"
+                        || t == "tier-color"
+                    {
+                        continue;
+                    }
+                    if let Some(s) = tag_to_shape_opt(t) {
+                        shape = s;
+                    } else if suggest_shape_alias(t).is_some() {
+                        // Shape-ish typo (close distance to a known shape
+                        // alias). Record so cli_lint surfaces it.
+                        step_shape_typos.push(t.clone());
+                    }
+                }
                 let fill = tags.iter()
                     .find(|t| t.starts_with("fill:"))
                     .and_then(|t| tag_to_fill_color(t[5..].trim()));
                 let mut node = Node::new(shape, egui::Pos2::ZERO);
+                // Preserve shape-ish typo tags for cli_lint's suggest_shape_alias
+                // walk. Regular `node.unknown_tags` field; no new model field.
+                node.unknown_tags.extend(step_shape_typos);
                 if let NodeKind::Shape { label: lbl, .. } = &mut node.kind {
                     *lbl = label.trim().to_string();
                 }
@@ -1439,8 +1480,32 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
 
     doc.description = preamble_lines.join("\n");
 
-    // Resolve deferred inline edges (from "- [id] Label → target1, target2" syntax)
+    // Resolve deferred inline edges (from "- [id] Label → target1, target2" syntax).
+    //
+    // A conditional `if let (Some, Some)` guard here used to silently drop the
+    // entire edge whenever the source OR target id_map lookup failed. A typo
+    // like `- [alpha] Alpha → bravoo` produced zero warning — the user saw
+    // only the secondary symptom ("disconnected node Alpha") with no pointer
+    // to the real cause. Now we record (source_hrf_id, raw_target_token) into
+    // `doc.import_hints.unresolved_inline_edge_targets` so cli_lint can emit
+    // a did-you-mean warning against the known hrf id vocabulary.
+    //
+    // Source-side failure (src_id not in id_map) is also possible when an
+    // upstream group expansion produced an edge referencing a stale id, but
+    // that is rare enough in practice that we only lint the common case:
+    // target-side failure. Source-side failure still silently drops but is
+    // left out of this round's scope since it cannot arise from a user-side
+    // typo on the inline-edge line itself.
     for (src_id, tgt_id, edge_tags) in &deferred_inline_edges {
+        if !id_map.contains_key(tgt_id) {
+            // Target typo — record for lint surfaceing. Use the raw src_id
+            // (the authored hrf id) as the locator so the user can find the
+            // bad line in their spec.
+            doc.import_hints
+                .unresolved_inline_edge_targets
+                .push((src_id.clone(), tgt_id.clone()));
+            continue;
+        }
         if let (Some(&src_node_id), Some(&tgt_node_id)) = (id_map.get(src_id), id_map.get(tgt_id)) {
             let mut edge = Edge::new(
                 Port { node_id: src_node_id, side: PortSide::Right },
@@ -4298,6 +4363,7 @@ fn is_emoji_only(tag: &str) -> bool {
     })
 }
 
+#[allow(dead_code)]
 fn tag_to_shape(tag: &str) -> NodeShape {
     tag_to_shape_opt(tag).unwrap_or(NodeShape::RoundedRect)
 }

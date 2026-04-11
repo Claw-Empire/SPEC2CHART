@@ -1031,6 +1031,17 @@ pub struct ImportHints {
     /// suggestions against `PK`/`FK`/`PRIMARY KEY`/`FOREIGN KEY`. Never
     /// serialized.
     pub unknown_entity_attr_tags: Vec<(String, String)>,
+    /// Inline-edge targets (`- [alpha] Alpha → bravoo {thick}`) that failed
+    /// to resolve during the `deferred_inline_edges` post-pass. The parser
+    /// used a conditional `if let (Some(src), Some(tgt)) = (id_map.get(src_id),
+    /// id_map.get(tgt_id))` to guard edge creation, silently dropping the
+    /// whole edge when either side failed to resolve. Users then saw the
+    /// symptom ("disconnected node") but no pointer to the typo. Pair is
+    /// (source_hrf_id, raw_target_token) — the raw token is the exact text
+    /// the user wrote after the `→` / `->` arrow. Used by `lint` to emit a
+    /// "inline edge target does not resolve" warning with did-you-mean
+    /// suggestions via `suggest_node_id_from_candidates`. Never serialized.
+    pub unresolved_inline_edge_targets: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
