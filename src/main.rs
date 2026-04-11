@@ -2482,6 +2482,37 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         ));
     }
 
+    // Unresolved `## Layer X` / `## Layer z=X` header values. The parser
+    // falls back to z=0.0 on any parse failure, which collides with the
+    // default layer and silently drops the user's intent — a user who
+    // typed `## Layer z=abc: Frontend` (meant: `z=120`) or `## Layer foo`
+    // (meant: `Layer 1`) gets a layer at z=0 with no feedback. Emit one
+    // warning per unresolved header so the typo surfaces in lint output.
+    for raw in &doc.import_hints.unknown_layer_z {
+        warnings.push(format!(
+            "## Layer: `{}` is not a valid layer index or z value — expected a bare integer like `Layer 1` (0-10), a raw z like `Layer 120`, or an explicit form like `Layer z=120` (defaulted to z=0)",
+            raw
+        ));
+    }
+
+    // `## Config` `layerN = Name` keys where N was missing or non-numeric.
+    // The parser handles these via `if let Ok(idx) = ... { doc.layer_names.insert(...) }`
+    // with no else, AND the generic unknown-config-keys fallthrough below
+    // specifically excludes `layer*`-prefixed keys, so typos like
+    // `layer = Frontend` or `layerfoo = Backend` receive zero feedback.
+    // Emit a warning listing the valid formats. Lists examples with
+    // existing layer_names (if any) so the user can see the working
+    // pattern at a glance.
+    for (bad_key, bad_val) in &doc.import_hints.unknown_layer_config_keys {
+        warnings.push(format!(
+            "## Config: `{} = {}` — `{}` is not a valid layer index key; expected `layer0`, `layer1`, `layer2`, ... (the digit selects the layer, e.g. `layer0 = Base`, `layer1 = {}`)",
+            bad_key,
+            bad_val,
+            bad_key,
+            bad_val,
+        ));
+    }
+
     // Duplicate parallel edges: same (source, target, label) tuple appearing
     // more than once. Almost always a copy-paste typo in `## Flow` — the two
     // edges get drawn on top of each other and look like one, so the user has
@@ -6172,6 +6203,127 @@ mod cli_tests {
                 s.contains("positive integer column count")
             });
             assert!(!bad, "valid grid cols should not warn: spec={spec:?} out={stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_layer_z_typo_via_cli() {
+        // `## Layer z=abc: Frontend` used to silently fall back to z=0.0
+        // (colliding with the default layer) with no user feedback. Verify
+        // the typo now surfaces in lint output.
+        let spec = "## Layer z=abc: Frontend\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_z_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("## Layer")
+                && joined.contains("z=abc")
+                && joined.contains("not a valid layer index"),
+            "expected layer z typo warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_layer_bare_typo_via_cli() {
+        // `## Layer foo` (bare non-number) used to silently fall back to
+        // z=0.0 just like the explicit z=X form. Verify the bare typo
+        // surfaces via lint under the same warning code path.
+        let spec = "## Layer foo\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_bare_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("## Layer")
+                && joined.contains("`foo`")
+                && joined.contains("not a valid layer index"),
+            "expected bare layer typo warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_layer_valid_not_flagged_via_cli() {
+        // Regression guard: all legal layer forms must NOT emit a warning.
+        // Includes `z:N` which was a pre-existing parser bug fixed alongside
+        // the lint — `## Layer z:240` now parses correctly to z=240.
+        for spec in [
+            "## Layer 1\n- [a] Alpha\n",
+            "## Layer z=120\n- [a] Alpha\n",
+            "## Layer z:240\n- [a] Alpha\n",
+            "## Layer 120\n- [a] Alpha\n",
+            "## Layer\n- [a] Alpha\n",
+            "## Layer 2: Backend\n- [a] Alpha\n",
+            "## Layer z=240: Frontend\n- [a] Alpha\n",
+        ] {
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("layer_ok_{}.spec", uid));
+            std::fs::write(&tmp, spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("not a valid layer index")
+            });
+            assert!(!bad, "valid layer form should not warn: spec={spec:?} out={stdout}");
         }
     }
 

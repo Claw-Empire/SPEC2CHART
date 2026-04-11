@@ -846,21 +846,76 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         let z = if after_lower.is_empty() {
                             0.0_f32
                         } else {
-                            // Strip ": Name" or "— description" and parse the number
-                            let num_part = after_lower.split(':').next()
-                                .and_then(|s| { let s = s.trim(); if s.is_empty() { None } else { Some(s) } })
-                                .unwrap_or(after_lower.split('—').next().unwrap_or(after_lower).trim());
-                            // Explicit "z=N" or "z:N" → use raw value
-                            if num_part.starts_with("z=") || num_part.starts_with("z:") {
-                                let num_str = &num_part[2..];
-                                num_str.parse::<f32>().unwrap_or(0.0)
-                            } else {
-                                // Plain number: ≤ 10 → layer index (×120), > 10 → raw z
-                                if let Ok(v) = num_part.parse::<f32>() {
-                                    if v <= 10.0 { v * 120.0 } else { v }
+                            // Detect the explicit `z=N` / `z:N` form FIRST,
+                            // before splitting on `:` — the previous logic
+                            // stripped the `:240` suffix of `z:240` so the
+                            // `starts_with("z:")` branch was dead code and
+                            // `## Layer z:240` silently parsed to z=0. Now
+                            // both z=N and z:N work uniformly.
+                            //
+                            // For the z=N / z:N form we still want to strip
+                            // a trailing `: Name` / `— description` after
+                            // the number, e.g. `z=120: Frontend`.
+                            let (num_str_opt, raw_num_for_lint) =
+                                if let Some(rest) = after_lower
+                                    .strip_prefix("z=")
+                                    .or_else(|| after_lower.strip_prefix("z:"))
+                                {
+                                    // Strip trailing name/description from `rest`.
+                                    // For `z:N: Name` the first `:` belongs to
+                                    // the `z:` prefix (already stripped) and a
+                                    // second `:` introduces the name.
+                                    let num_only = rest
+                                        .split_whitespace()
+                                        .next()
+                                        .unwrap_or(rest)
+                                        .split(':')
+                                        .next()
+                                        .unwrap_or(rest)
+                                        .split('—')
+                                        .next()
+                                        .unwrap_or(rest)
+                                        .trim();
+                                    let prefix_marker = if after_lower.starts_with("z=") { "z=" } else { "z:" };
+                                    (Some(num_only), format!("{}{}", prefix_marker, num_only))
                                 } else {
-                                    0.0
+                                    // Bare form: strip ": Name" or "— description"
+                                    let num_only = after_lower
+                                        .split(':')
+                                        .next()
+                                        .unwrap_or(after_lower)
+                                        .split('—')
+                                        .next()
+                                        .unwrap_or(after_lower)
+                                        .trim();
+                                    (Some(num_only), num_only.to_string())
+                                };
+                            let is_explicit_z_form = after_lower.starts_with("z=")
+                                || after_lower.starts_with("z:");
+                            let num_str = num_str_opt.unwrap_or("");
+                            if num_str.is_empty() {
+                                // Bare `## Layer z=` with empty value counts
+                                // as empty directive → default z=0, no warn.
+                                if is_explicit_z_form {
+                                    doc.import_hints
+                                        .unknown_layer_z
+                                        .push(raw_num_for_lint.clone());
                                 }
+                                0.0
+                            } else if let Ok(v) = num_str.parse::<f32>() {
+                                if is_explicit_z_form {
+                                    // Explicit z=/z: → raw z value
+                                    v
+                                } else {
+                                    // Plain number: ≤ 10 → layer index (×120), > 10 → raw z
+                                    if v <= 10.0 { v * 120.0 } else { v }
+                                }
+                            } else {
+                                // Parse failed — record for lint.
+                                doc.import_hints
+                                    .unknown_layer_z
+                                    .push(raw_num_for_lint);
+                                0.0
                             }
                         };
                         // Store optional layer name: "Layer 1: Frontend" → "Frontend"
@@ -1674,10 +1729,22 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             }
             _ if key.starts_with("layer") => {
                 let num_part = key.trim_start_matches("layer").trim();
-                if let Ok(idx) = num_part.trim_matches(|c: char| !c.is_ascii_digit())
-                    .parse::<i32>()
-                {
-                    doc.layer_names.insert(idx, val.clone());
+                let digits_only = num_part
+                    .trim_matches(|c: char| !c.is_ascii_digit());
+                match digits_only.parse::<i32>() {
+                    Ok(idx) => {
+                        doc.layer_names.insert(idx, val.clone());
+                    }
+                    Err(_) => {
+                        // Silent-drop: `layer = Frontend` (no digit),
+                        // `layerfoo = Frontend` (non-digit suffix). The
+                        // fallthrough `_` arm below also skips `layer*` keys,
+                        // so without this branch the user gets zero feedback.
+                        // Record raw (key, value) for cli_lint did-you-mean.
+                        doc.import_hints
+                            .unknown_layer_config_keys
+                            .push((key.clone(), val.clone()));
+                    }
                 }
             }
             // SLA target days by priority: sla-p1 = 1, sla-p2 = 3, etc.

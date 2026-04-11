@@ -981,6 +981,27 @@ pub struct ImportHints {
     /// least one lane is declared — otherwise the `{lane:X}` tag is accepted
     /// as a new auto-discovered lane. Never serialized.
     pub unresolved_lane_refs: Vec<(String, String)>,
+    /// Unresolved `## Layer X` / `## Layer z=X` header values that did not
+    /// parse as a number. The parser fell back to z=0.0 on any parse failure,
+    /// so a user typing `## Layer z=abc: Frontend` (meant: `z=120`) or
+    /// `## Layer foo` (meant: `Layer 1`) silently got a layer at z=0 — which
+    /// collides with the default layer and hides the typo. Raw value is the
+    /// portion after `## Layer ` with any `: Name` / `— description` suffix
+    /// stripped. Used by `lint` to emit a "not a valid layer index or z value"
+    /// warning with expected formats (`Layer 1`, `Layer z=120`). Never
+    /// serialized.
+    pub unknown_layer_z: Vec<String>,
+    /// `## Config` keys that match the `layer*` prefix heuristic but whose
+    /// digit suffix could not be parsed as an integer — e.g. `layer = Frontend`
+    /// (no digit), `layerfoo = Frontend` (non-digit suffix), `layer-main = UI`
+    /// (dash-separated, no digit). The parser used
+    /// `if let Ok(idx) = num_part.trim_matches(non_digit).parse::<i32>() { ... }`
+    /// with NO else branch, silently dropping the layer name. The fallthrough
+    /// `unknown_config_keys` arm ALSO skips `layer*` keys explicitly, so these
+    /// receive no warning at all. Pair is (raw_key, raw_value). Used by `lint`
+    /// to emit a "not a valid layer index" warning with expected formats
+    /// (`layer0 = Base`, `layer1 = Backend`, ...). Never serialized.
+    pub unknown_layer_config_keys: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
