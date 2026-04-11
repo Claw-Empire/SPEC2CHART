@@ -10365,6 +10365,133 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_step_fill_typo_via_cli() {
+        // `{fill:blu}` / `{fill:gren}` on a `## Steps` line used to silently
+        // drop via `find().and_then(tag_to_fill_color)` — the step rendered
+        // with the default color and the user got zero feedback. Now the
+        // parser pushes unresolved fill tags into `node.unknown_tags` so
+        // cli_lint's existing color walk surfaces a did-you-mean hint
+        // against the built-in color vocabulary (blue/green/…).
+        let spec = "## Steps\n\
+                    1. Kickoff {fill:blu}\n\
+                    2. Build {fill:gren}\n\
+                    3. Ship\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_fill_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{fill:blu}") && joined.contains("{fill:blue}"),
+            "expected step fill typo warning for blu → blue, got: {stdout}"
+        );
+        assert!(
+            joined.contains("{fill:gren}") && joined.contains("{fill:green}"),
+            "expected step fill typo warning for gren → green, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_fill_nonsense_fallback_via_cli() {
+        // `{fill:asdfzzz}` is far from any built-in color and is not a hex
+        // value. The color walk should still surface the drop via the
+        // generic "not a built-in color, hex value, or ## Palette entry"
+        // fallback so the step does not render silently with default fill.
+        let spec = "## Steps\n\
+                    1. Start {fill:asdfzzz}\n\
+                    2. Finish\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_fill_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let fallback = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("{fill:asdfzzz}") && s.contains("not a built-in color")
+        });
+        assert!(
+            fallback,
+            "expected step fill nonsense fallback warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_fill_valid_not_flagged_via_cli() {
+        // Regression guard: valid named colors and valid hex values on a
+        // `## Steps` line must NOT surface as unresolved color warnings.
+        // Covers the built-in vocabulary (`blue`), the alias set
+        // (`peach` == orange), and raw hex (`#abc` / `#aabbcc`).
+        let spec = "## Steps\n\
+                    1. Kickoff {fill:blue}\n\
+                    2. Design {fill:peach}\n\
+                    3. Build {fill:#abc}\n\
+                    4. Ship {fill:#aabbcc}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_fill_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for good in &["{fill:blue}", "{fill:peach}", "{fill:#abc}", "{fill:#aabbcc}"] {
+            let flagged = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(good) && s.contains("unresolved color")
+            });
+            assert!(
+                !flagged,
+                "valid fill {} must not warn, got: {stdout}",
+                good
+            );
+        }
+    }
+
+    #[test]
     fn test_lint_inline_edge_target_typo_via_cli() {
         // Inline edge syntax `- [alpha] Alpha → bravoo` with a typo'd
         // target used to be silently dropped by the parser's

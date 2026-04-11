@@ -1381,13 +1381,30 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         step_shape_typos.push(t.clone());
                     }
                 }
-                let fill = tags.iter()
-                    .find(|t| t.starts_with("fill:"))
-                    .and_then(|t| tag_to_fill_color(t[5..].trim()));
+                // Resolve {fill:X}. On typo (`{fill:blu}`, `{fill:gren}`,
+                // bad hex) the old code used `find().and_then(tag_to_fill_color)`
+                // which silently dropped the value — the step rendered with the
+                // default fill and the user got no feedback. Now we record
+                // every unresolved fill tag into `node.unknown_tags` so the
+                // existing cli_lint color walk (main.rs:1497) surfaces a
+                // did-you-mean hint against the built-in color vocabulary and
+                // the palette map.
+                let mut fill: Option<[u8; 4]> = None;
+                let mut step_fill_typos: Vec<String> = Vec::new();
+                for t in &tags {
+                    if let Some(v) = t.strip_prefix("fill:") {
+                        match tag_to_fill_color(v.trim()) {
+                            Some(c) => fill = Some(c),
+                            None => step_fill_typos.push(t.clone()),
+                        }
+                    }
+                }
                 let mut node = Node::new(shape, egui::Pos2::ZERO);
                 // Preserve shape-ish typo tags for cli_lint's suggest_shape_alias
-                // walk. Regular `node.unknown_tags` field; no new model field.
+                // walk and fill-typo tags for cli_lint's color walk. Regular
+                // `node.unknown_tags` field; no new model field.
                 node.unknown_tags.extend(step_shape_typos);
+                node.unknown_tags.extend(step_fill_typos);
                 if let NodeKind::Shape { label: lbl, .. } = &mut node.kind {
                     *lbl = label.trim().to_string();
                 }
