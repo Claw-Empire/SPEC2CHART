@@ -1310,11 +1310,20 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 doc.import_hints.bg_pattern = Some(val.to_lowercase());
             }
             "snap" | "snap-to-grid" | "snap_to_grid" => {
-                doc.import_hints.snap = match val.to_lowercase().as_str() {
-                    "true" | "on" | "yes" | "1" => Some(true),
-                    "false" | "off" | "no" | "0" => Some(false),
-                    _ => None,
-                };
+                let trimmed = val.trim();
+                match trimmed.to_lowercase().as_str() {
+                    "true" | "on" | "yes" | "1" => { doc.import_hints.snap = Some(true); }
+                    "false" | "off" | "no" | "0" => { doc.import_hints.snap = Some(false); }
+                    _ if !trimmed.is_empty() => {
+                        // Preserve typos like `snap = tru` so cli_lint can
+                        // suggest a canonical boolean value. Previously
+                        // `_ => None` silently left snap disabled.
+                        doc.import_hints
+                            .unknown_bool_config
+                            .push((key.clone(), trimmed.to_string()));
+                    }
+                    _ => {}
+                }
             }
             "grid-size" | "grid_size" | "grid" => {
                 let trimmed = val.trim();
@@ -1431,10 +1440,32 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 }
             }
             "timeline-dir" | "timeline_dir" => {
-                doc.timeline_dir = match val.to_uppercase().as_str() {
-                    "TB" | "TOP-BOTTOM" | "VERTICAL" => "TB".to_string(),
-                    _ => "LR".to_string(),
+                let upper = val.to_uppercase();
+                let dir = match upper.as_str() {
+                    "TB" | "TOP-BOTTOM" | "TOP_BOTTOM" | "DOWN" | "VERTICAL" => Some("TB"),
+                    "LR" | "LEFT-RIGHT" | "LEFT_RIGHT" | "HORIZONTAL" => Some("LR"),
+                    _ => None,
                 };
+                match dir {
+                    Some(d) => doc.timeline_dir = d.to_string(),
+                    None => {
+                        // Silent-default failure mode: unknown `timeline-dir`
+                        // value used to silently become LR via `_ => "LR"`.
+                        // Record raw value + best-effort suggestion so lint
+                        // can surface it. Timeline only accepts TB/LR so we
+                        // clamp `suggest_layout_direction`'s output (which
+                        // can return RL/BT) back to TB/LR before recording.
+                        let sug = suggest_layout_direction(&upper).unwrap_or("LR");
+                        let canonical = match sug {
+                            "TB" | "BT" => "TB",
+                            _ => "LR",
+                        };
+                        doc.import_hints
+                            .unknown_timeline_dir
+                            .push((val.to_string(), canonical.to_string()));
+                        doc.timeline_dir = "LR".to_string();
+                    }
+                }
             }
             "flow" | "layout" | "direction" | "layout-dir" | "layout_dir" => {
                 let upper = val.to_uppercase();
@@ -1492,8 +1523,17 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             "bg-color" | "background-color" | "background" | "canvas-bg" | "canvas-color" => {
                 let v = val.trim();
                 let rgba = parse_hex_color(v).or_else(|| tag_to_fill_color(v).filter(|c| c[3] > 0));
-                if let Some(c) = rgba {
-                    doc.import_hints.canvas_bg = Some(c);
+                match rgba {
+                    Some(c) => { doc.import_hints.canvas_bg = Some(c); }
+                    None if !v.is_empty() => {
+                        // Unresolved canvas bg color — typos like
+                        // `bg-color = primry` or `bg-color = drk` used to
+                        // silently drop. Preserve for cli_lint did-you-mean.
+                        doc.import_hints
+                            .unknown_canvas_bg
+                            .push((key.clone(), v.to_string()));
+                    }
+                    None => {}
                 }
             }
             // project title watermark (title is handled above; these are aliases)
@@ -3845,7 +3885,7 @@ fn tag_to_fill_color(name: &str) -> Option<[u8; 4]> {
         "sky"      => Some([137, 220, 235, 255]),
         "lavender" => Some([180, 190, 254, 255]),
         "gray" | "grey" => Some([108, 112, 134, 255]),
-        "surface" | "default" => Some([30, 30, 46, 255]),
+        "surface" | "default" | "dark" => Some([30, 30, 46, 255]),
         "none" | "transparent" | "clear" => Some([0, 0, 0, 0]),
         _ => parse_hex_color(name),
     }

@@ -2186,6 +2186,17 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         ));
     }
 
+    // Unknown `timeline-dir = X` / `timeline_dir = X` config values: the
+    // parser used `_ => "LR"` fallthrough, so typos like `virtical` (→ TB)
+    // silently became LR with no feedback. Now recorded as (raw, canonical)
+    // pairs; canonical is clamped to the timeline-accepted TB/LR subset.
+    for (raw, suggestion) in &doc.import_hints.unknown_timeline_dir {
+        warnings.push(format!(
+            "Unknown timeline direction `{}` — did you mean `{}`? (valid: TB, LR)",
+            raw, suggestion
+        ));
+    }
+
     // Invalid `{src-port:X}` / `{tgt-port:X}` values: unknown values used
     // to silently fall back to the default Bottom/Top port, causing edges
     // to connect at the wrong attachment point without any warning. Now
@@ -2247,6 +2258,25 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         } else {
             warnings.push(format!(
                 "Config: `{} = {}` not recognized — expected true/false, yes/no, on/off, or 1/0",
+                key, raw
+            ));
+        }
+    }
+
+    // Unknown canvas background color: `bg-color = primry` or
+    // `background = drk` used to silently leave canvas_bg unset. The parser
+    // now records (key, raw_value) on unresolved values. Emit a did-you-mean
+    // hint when `suggest_fill_color_name` finds a close built-in; otherwise
+    // list the accepted vocabulary so the user knows what the field takes.
+    for (key, raw) in &doc.import_hints.unknown_canvas_bg {
+        if let Some(suggestion) = crate::specgraph::hrf::suggest_fill_color_name(raw) {
+            warnings.push(format!(
+                "Config: `{} = {}` not a recognized color — did you mean `{} = {}`?",
+                key, raw, key, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "Config: `{} = {}` not a recognized color — expected a hex value (#rrggbb) or built-in name (blue, surface, black, ...)",
                 key, raw
             ));
         }
@@ -5153,6 +5183,135 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_snap_config_typo_via_cli() {
+        // `snap = tru` used to silently leave snap disabled via a
+        // `_ => None` fallthrough. Verify it now surfaces via the
+        // existing unknown_bool_config walk with a did-you-mean hint.
+        let spec = "## Config\n\
+                    snap = tru\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("snap_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("snap = tru")
+                && s.contains("did you mean")
+                && s.contains("snap = true")
+        });
+        assert!(has, "expected snap=tru typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_bg_color_typo_via_cli() {
+        // `bg-color = blu` / `canvas-bg = gren` / `background = yelow` all
+        // used to silently leave canvas_bg unset. Verify cli_lint now emits
+        // did-you-mean hints via suggest_fill_color_name.
+        let spec = "## Config\n\
+                    bg-color = blu\n\
+                    canvas-bg = gren\n\
+                    background = yelow\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("bg_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for (key, typo, expected) in [
+            ("bg-color",   "blu",   "blue"),
+            ("canvas-bg",  "gren",  "green"),
+            ("background", "yelow", "yellow"),
+        ] {
+            let has = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(&format!("{key} = {typo}"))
+                    && s.contains("did you mean")
+                    && s.contains(&format!("{key} = {expected}"))
+            });
+            assert!(has, "expected {key}={typo} → {expected} warning, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_snap_bg_valid_values_no_warning_via_cli() {
+        // Regression guard: canonical snap + bg-color values must not warn.
+        let spec = "## Config\n\
+                    snap = true\n\
+                    bg-color = #1e1e2e\n\
+                    canvas-bg = surface\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("snap_bg_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        for needle in ["snap = true", "bg-color = #1e1e2e", "canvas-bg = surface"] {
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                (s.contains("not recognized") || s.contains("not a recognized color"))
+                    && s.contains(needle)
+            });
+            assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_group_fill_typo_via_cli() {
         // `## Groups` {fill:X} typos (`{fill:blu}`, `{fill:gren}`) used to
         // silently drop to the default frame color. Verify they now surface
@@ -6475,6 +6634,87 @@ mod cli_tests {
             s.contains("sticky color") || (s.contains("Note") && s.contains("unknown"))
         });
         assert!(!bad, "canonical sticky tags must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_timeline_dir_typo_via_cli() {
+        // `timeline-dir = virtical` (meant: vertical/TB) used to silently
+        // default to LR through a `_ => "LR"` fallthrough. Lint should now
+        // surface "Unknown timeline direction" with a did-you-mean hint
+        // clamped to TB/LR (timeline doesn't support RL/BT).
+        let spec = "## Config\n\
+                    timeline = true\n\
+                    timeline-dir = virtical\n\
+                    ## Nodes\n\
+                    - [a] A\n\
+                    - [b] B\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("tdir_bad_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let has_tdir = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("timeline direction") && s.contains("virtical")
+        });
+        assert!(has_tdir, "expected timeline direction typo warning, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_timeline_dir_valid_values_not_flagged_via_cli() {
+        // Regression guard: canonical timeline-dir values must not fire.
+        for val in ["TB", "tb", "LR", "lr", "horizontal", "vertical", "top-bottom"] {
+            let spec = format!(
+                "## Config\n\
+                 timeline = true\n\
+                 timeline-dir = {}\n\
+                 ## Nodes\n\
+                 - [a] A\n\
+                 - [b] B\n\
+                 ## Flow\n\
+                 a --> b\n",
+                val
+            );
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("tdir_ok_{}.spec", uid));
+            std::fs::write(&tmp, &spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let bad = warnings.iter().any(|w| {
+                w.as_str().unwrap_or("").contains("timeline direction")
+            });
+            assert!(!bad, "`timeline-dir = {val}` should not warn, got: {stdout}");
+        }
     }
 
     #[test]

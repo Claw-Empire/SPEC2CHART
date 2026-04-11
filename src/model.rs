@@ -895,6 +895,20 @@ pub struct ImportHints {
     /// group rendered with the default frame color. Used by `lint` to emit
     /// did-you-mean hints from `suggest_fill_color_name`. Never serialized.
     pub unknown_group_fill: Vec<(String, String)>,
+    /// Unresolved `bg-color = X` / `canvas-bg = X` config values. The parser
+    /// tried `parse_hex_color` then `tag_to_fill_color`; on both failing the
+    /// directive silently dropped and the canvas kept its default. Typos
+    /// like `bg-color = primry` or `bg-color = drk` used to vanish without a
+    /// warning. Pair is (key_name, raw_value). Used by `lint` to emit
+    /// did-you-mean hints from `suggest_fill_color_name`. Never serialized.
+    pub unknown_canvas_bg: Vec<(String, String)>,
+    /// Unresolved `timeline-dir = X` / `timeline_dir = X` config values. The
+    /// parser used `_ => LR` fallthrough, so typos like `timeline-dir = virtical`
+    /// (meant: vertical/TB) silently defaulted to LR with zero user feedback.
+    /// Pair is (raw_value, canonical_suggestion) mirroring
+    /// `unknown_layout_direction`. Used by `lint` to emit did-you-mean hints
+    /// via `suggest_layout_direction`. Never serialized.
+    pub unknown_timeline_dir: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
