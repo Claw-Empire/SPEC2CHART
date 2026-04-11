@@ -1018,6 +1018,19 @@ pub struct ImportHints {
     /// label with no feedback. Pair is (raw_index, optional_label). Used by
     /// `lint` to emit a "not a valid lane index" warning. Never serialized.
     pub unknown_lane_idx: Vec<(String, Option<String>)>,
+    /// Unknown bracket tags on entity attributes. When a user writes an entity
+    /// attribute line like `  email [PRIM]` or `  user_id [FKK]`, the parser
+    /// iterates each comma-separated token inside the brackets and matches
+    /// against the closed set `{PK, PRIMARY, PRIMARY KEY, FK, FOREIGN, FOREIGN KEY}`.
+    /// The catch-all `_ => {}` arm at `parse_entity_attribute` silently
+    /// discards anything else, so typos like `PRIM`, `FKK`, or unsupported
+    /// keywords like `UNIQUE`, `INDEX` vanish without any feedback and the
+    /// attribute ends up with no key marker at all. Pair is
+    /// (entity_display_label, raw_bracket_tag_uppercased). Used by `lint` to
+    /// emit a "unknown entity attribute tag" warning with did-you-mean
+    /// suggestions against `PK`/`FK`/`PRIMARY KEY`/`FOREIGN KEY`. Never
+    /// serialized.
+    pub unknown_entity_attr_tags: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -2549,6 +2549,85 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         ));
     }
 
+    // Entity attribute bracket tags the parser silently dropped. The
+    // parser's `parse_entity_attribute` matches each comma-separated token
+    // inside `[...]` against `{PK, PRIMARY, PRIMARY KEY, FK, FOREIGN,
+    // FOREIGN KEY}` and silently discards anything else via `_ => {}`, so
+    // `[PRIM]` or `[FKK]` produce an attribute with no key marker and zero
+    // feedback. Emit a did-you-mean warning against the known vocabulary so
+    // the typo is visible in `lint` output.
+    for (entity_label, bad_tag) in &doc.import_hints.unknown_entity_attr_tags {
+        // Full vocabulary accepted by `parse_entity_attribute`. Include the
+        // short aliases (`PRIMARY`, `FOREIGN`) so a typo like `PRIM`
+        // correctly suggests `PRIMARY` instead of falling through to the
+        // generic "only PK/FK are tracked" message.
+        const ENTITY_TAG_VOCAB: &[&str] = &[
+            "PK",
+            "FK",
+            "PRIMARY",
+            "FOREIGN",
+            "PRIMARY KEY",
+            "FOREIGN KEY",
+        ];
+        // Prefer prefix matches first: if the bad tag is a non-trivial
+        // prefix of a known form (e.g. `PRIM` → `PRIMARY`, `FOR` →
+        // `FOREIGN`), that is almost certainly what the user meant, and
+        // the raw Levenshtein distance (3+) would otherwise miss it
+        // because the threshold caps at 2 for short tokens. Only treat a
+        // prefix as meaningful when it is at least 3 chars, to avoid
+        // collapsing `P` → `PK` or `F` → `FK` ambiguously.
+        let bad_upper = bad_tag.to_uppercase();
+        let mut best: Option<(usize, &'static str)> = None;
+        if bad_upper.chars().count() >= 3 {
+            for candidate in ENTITY_TAG_VOCAB {
+                if *candidate == bad_upper.as_str() {
+                    continue;
+                }
+                if candidate.starts_with(bad_upper.as_str()) {
+                    // Use remaining-length as the "distance" so shorter
+                    // candidates (e.g. `PRIMARY` vs `PRIMARY KEY`) win.
+                    let d = candidate.len() - bad_upper.len();
+                    match best {
+                        Some((cur_d, _)) if cur_d <= d => {}
+                        _ => best = Some((d, candidate)),
+                    }
+                }
+            }
+        }
+        // Fall back to length-scaled Levenshtein if no prefix match,
+        // consistent with other suggest_* helpers: tighter for short
+        // tokens, looser for long.
+        if best.is_none() {
+            let threshold = match bad_upper.chars().count() {
+                0..=2 => 1,
+                3..=6 => 2,
+                _ => 3,
+            };
+            for candidate in ENTITY_TAG_VOCAB {
+                let d = levenshtein_distance(&bad_upper, candidate);
+                if d == 0 {
+                    continue;
+                }
+                if d <= threshold {
+                    match best {
+                        Some((cur_d, _)) if cur_d <= d => {}
+                        _ => best = Some((d, candidate)),
+                    }
+                }
+            }
+        }
+        match best {
+            Some((_, suggestion)) => warnings.push(format!(
+                "Entity `{}`: attribute tag `[{}]` is not a recognized key marker — did you mean `[{}]`? Expected one of PK, FK, PRIMARY KEY, FOREIGN KEY (the attribute was imported with no key flag set)",
+                entity_label, bad_tag, suggestion
+            )),
+            None => warnings.push(format!(
+                "Entity `{}`: attribute tag `[{}]` is not a recognized key marker — only PK, FK, PRIMARY KEY, FOREIGN KEY are tracked (the attribute was imported with no key flag set)",
+                entity_label, bad_tag
+            )),
+        }
+    }
+
     // Duplicate parallel edges: same (source, target, label) tuple appearing
     // more than once. Almost always a copy-paste typo in `## Flow` — the two
     // edges get drawn on top of each other and look like one, so the user has
@@ -9716,5 +9795,173 @@ mod cli_tests {
             s.contains("is not a valid layer index key")
         });
         assert!(!bad, "canonical layerN keys must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_entity_attr_tag_pk_typo_via_cli() {
+        // `[PRIM]` is a close typo of `PRIMARY`. The parser's
+        // `parse_entity_attribute` `_ => {}` catch-all used to silently
+        // drop these, leaving the attribute with no key flag set and
+        // zero user-visible feedback. Verify cli_lint now surfaces the
+        // typo with a did-you-mean suggestion.
+        // NOTE: Must NOT use `\` line continuation here — Rust eats all
+        // leading whitespace after `\`+newline, which would collapse the
+        // 2-space attribute indentation and the parser would stop treating
+        // the line as an entity attribute continuation. Use explicit `\n`
+        // with hardcoded 2-space indents instead.
+        let spec = "## Nodes\n- [users] Users {entity}\n  id (uuid) [PRIM]\n  name (text)\n## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("entity_pk_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("Entity `users`")
+                && joined.contains("`[PRIM]`")
+                && joined.contains("did you mean `[PRIMARY]`"),
+            "expected PRIM did-you-mean PRIMARY warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_entity_attr_tag_fk_typo_via_cli() {
+        // `[FKK]` is a single-edit typo of `FK`. Must get a did-you-mean
+        // hint. Also verifies the entity label appears in the warning so
+        // the user can locate the bad attribute in a multi-entity diagram.
+        // See note in test_lint_entity_attr_tag_pk_typo_via_cli about
+        // avoiding `\` line continuation here.
+        let spec = "## Nodes\n- [orders] Orders {entity}\n  id (int) [PK]\n  user_id (int) [FKK]\n## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("entity_fk_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("Entity `orders`")
+                && joined.contains("`[FKK]`")
+                && joined.contains("did you mean `[FK]`"),
+            "expected FKK did-you-mean FK warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_entity_attr_tag_unsupported_fallback_via_cli() {
+        // `[UNIQUE]` is a legitimate SQL concept but not one that
+        // openDraftly tracks. It is too far from PK/FK for a did-you-mean
+        // hint to fire, so verify the fallback message is emitted
+        // instead of silent-dropping.
+        // See note in test_lint_entity_attr_tag_pk_typo_via_cli about
+        // avoiding `\` line continuation here.
+        let spec = "## Nodes\n- [products] Products {entity}\n  id (int) [PK]\n  sku (string) [UNIQUE]\n## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("entity_unsupported_tag_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("Entity `products`")
+                && joined.contains("`[UNIQUE]`")
+                && joined.contains("only PK, FK, PRIMARY KEY, FOREIGN KEY are tracked"),
+            "expected UNIQUE fallback warning, got: {stdout}"
+        );
+        // Regression: must NOT offer a bogus did-you-mean for UNIQUE.
+        assert!(
+            !joined.contains("did you mean") || !joined.contains("`[UNIQUE]`"),
+            "UNIQUE should not get a did-you-mean hint, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_entity_attr_tag_valid_not_flagged_via_cli() {
+        // Regression guard: all supported forms (`PK`, `FK`,
+        // `PRIMARY KEY`, `FOREIGN KEY`, combined `PK, FK`) must NOT
+        // trigger the unknown-tag warning.
+        // See note in test_lint_entity_attr_tag_pk_typo_via_cli about
+        // avoiding `\` line continuation here.
+        let spec = "## Nodes\n- [users] Users {entity}\n  id (uuid) [PK]\n  team_id (uuid) [FK]\n  composite_a (int) [PRIMARY KEY]\n  composite_b (int) [FOREIGN KEY]\n  bridge (int) [PK, FK]\n## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("entity_valid_tags_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("is not a recognized key marker")
+        });
+        assert!(
+            !bad,
+            "canonical PK/FK/PRIMARY KEY/FOREIGN KEY tags must not warn, got: {stdout}"
+        );
     }
 }

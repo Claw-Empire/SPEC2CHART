@@ -1145,15 +1145,32 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 } else if line.starts_with("  ") || line.starts_with("\t") {
                     // Indented continuation — entity attribute or description
                     if let Some(nid) = last_node_id {
+                        let mut pending_unknown_tags: Vec<String> = Vec::new();
+                        let mut pending_entity_label: Option<String> = None;
                         if let Some(node) = doc.find_node_mut(&nid) {
                             if matches!(node.kind, NodeKind::Entity { .. }) {
                                 // Parse as entity attribute: `name (type) [PK, FK]`
-                                let attr = parse_entity_attribute(trimmed);
+                                let (attr, unknown_tags) = parse_entity_attribute(trimmed);
+                                if !unknown_tags.is_empty() {
+                                    pending_entity_label = Some(if !node.hrf_id.is_empty() {
+                                        node.hrf_id.clone()
+                                    } else {
+                                        node.display_label().to_string()
+                                    });
+                                    pending_unknown_tags = unknown_tags;
+                                }
                                 if let NodeKind::Entity { attributes, .. } = &mut node.kind {
                                     attributes.push(attr);
                                 }
                             } else {
                                 append_description(node, trimmed);
+                            }
+                        }
+                        if let Some(label) = pending_entity_label {
+                            for tag in pending_unknown_tags {
+                                doc.import_hints
+                                    .unknown_entity_attr_tags
+                                    .push((label.clone(), tag));
                             }
                         }
                     }
@@ -4099,11 +4116,19 @@ fn parse_note_line(line: &str) -> Result<Node, String> {
 }
 
 /// Parse an entity attribute line: `name (type) [PK, FK]`
-fn parse_entity_attribute(line: &str) -> EntityAttribute {
+///
+/// Returns the parsed `EntityAttribute` alongside any bracket tags that did
+/// not match the known vocabulary (`PK`, `PRIMARY`, `PRIMARY KEY`, `FK`,
+/// `FOREIGN`, `FOREIGN KEY`). The unknown tags are emitted uppercased and
+/// trimmed so the linter can suggest replacements without needing to
+/// re-normalize. Empty bracket tokens (e.g. a stray trailing comma
+/// `[PK,]`) are dropped silently because they are not a user intent.
+fn parse_entity_attribute(line: &str) -> (EntityAttribute, Vec<String>) {
     let mut name = line.to_string();
     let mut attr_type = String::new();
     let mut is_pk = false;
     let mut is_fk = false;
+    let mut unknown_tags: Vec<String> = Vec::new();
 
     // Extract [PK, FK] suffix
     if let Some(bracket_start) = line.rfind('[') {
@@ -4111,10 +4136,14 @@ fn parse_entity_attribute(line: &str) -> EntityAttribute {
             if bracket_end > bracket_start {
                 let tags_str = &line[bracket_start + 1..bracket_end];
                 for part in tags_str.split(',') {
-                    match part.trim().to_uppercase().as_str() {
+                    let trimmed = part.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    match trimmed.to_uppercase().as_str() {
                         "PK" | "PRIMARY" | "PRIMARY KEY" => is_pk = true,
                         "FK" | "FOREIGN" | "FOREIGN KEY" => is_fk = true,
-                        _ => {}
+                        other => unknown_tags.push(other.to_string()),
                     }
                 }
                 name = line[..bracket_start].trim().to_string();
@@ -4130,12 +4159,15 @@ fn parse_entity_attribute(line: &str) -> EntityAttribute {
         }
     }
 
-    EntityAttribute {
-        name,
-        attr_type,
-        is_primary_key: is_pk,
-        is_foreign_key: is_fk,
-    }
+    (
+        EntityAttribute {
+            name,
+            attr_type,
+            is_primary_key: is_pk,
+            is_foreign_key: is_fk,
+        },
+        unknown_tags,
+    )
 }
 
 fn tag_to_node_tag(tag: &str) -> Option<NodeTag> {
