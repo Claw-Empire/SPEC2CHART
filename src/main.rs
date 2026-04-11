@@ -1548,30 +1548,44 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 continue;
             }
             // Style-template fallback: match against `## Style` definitions.
-            if doc.import_hints.style_definition_usage.is_empty() {
-                continue;
-            }
-            let tag_lower = tag.to_ascii_lowercase();
-            let mut best: Option<(String, usize)> = None;
-            for (style_name, _count) in &doc.import_hints.style_definition_usage {
-                if style_name.len() < 3 { continue; }
-                let sn_lower = style_name.to_ascii_lowercase();
-                if sn_lower == tag_lower { continue; } // defensive
-                let max_d: usize = if style_name.len() <= 4 { 1 } else { 2 };
-                let d = levenshtein_distance(&tag_lower, &sn_lower);
-                if d == 0 || d > max_d { continue; }
-                match &best {
-                    None => best = Some((style_name.clone(), d)),
-                    Some((_, bd)) if d < *bd => best = Some((style_name.clone(), d)),
-                    _ => {}
+            // Only runs when a `## Style` section was defined; otherwise
+            // falls through to the generic fallback below.
+            if !doc.import_hints.style_definition_usage.is_empty() {
+                let tag_lower = tag.to_ascii_lowercase();
+                let mut best: Option<(String, usize)> = None;
+                for (style_name, _count) in &doc.import_hints.style_definition_usage {
+                    if style_name.len() < 3 { continue; }
+                    let sn_lower = style_name.to_ascii_lowercase();
+                    if sn_lower == tag_lower { continue; } // defensive
+                    let max_d: usize = if style_name.len() <= 4 { 1 } else { 2 };
+                    let d = levenshtein_distance(&tag_lower, &sn_lower);
+                    if d == 0 || d > max_d { continue; }
+                    match &best {
+                        None => best = Some((style_name.clone(), d)),
+                        Some((_, bd)) if d < *bd => best = Some((style_name.clone(), d)),
+                        _ => {}
+                    }
+                }
+                if let Some((style_name, _)) = best {
+                    warnings.push(format!(
+                        "Node {}: unknown tag {{{}}} — did you mean {{{}}}? (defined in ## Style)",
+                        id_str, tag, style_name
+                    ));
+                    continue;
                 }
             }
-            if let Some((style_name, _)) = best {
-                warnings.push(format!(
-                    "Node {}: unknown tag {{{}}} — did you mean {{{}}}? (defined in ## Style)",
-                    id_str, tag, style_name
-                ));
-            }
+            // Generic fallback: the tag reached `node.unknown_tags` (so the
+            // parser couldn't place it) AND no handler fired (shape, align,
+            // numeric, layer, status, color, style-template, ...). Emit a
+            // generic "unknown node tag" warning so users see at least
+            // SOME signal that the tag was silently dropped — parallel to
+            // the edge fallback. Without this, garbage tags like
+            // `{zzzgarbage}` or `{compleltelyunknown}` on a node fell
+            // through the entire walk with zero warnings.
+            warnings.push(format!(
+                "Node {}: unknown tag {{{}}} — ignored (not a recognized shape, color, layer, status, alignment, size, position, numeric property, or ## Style entry)",
+                id_str, tag
+            ));
         }
     }
 
@@ -1765,6 +1779,39 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                 None => warnings.push(format!(
                     "Node [{}]: {{dep:{}}} does not resolve to any node in ## Nodes",
                     src_display, dep_target
+                )),
+            }
+        }
+    }
+
+    // Inline-edge target unresolved references. The parser's post-pass at
+    // `hrf.rs:1484` used to silently drop entire edges when either end of a
+    // `- [src] Src → tgt` syntax failed to resolve in `id_map`. Users then
+    // saw "disconnected node Src" as the symptom but had no pointer to the
+    // typo in `tgt`. The parser now records (src_hrf_id, raw_tgt_token)
+    // whenever the target lookup fails. Emit did-you-mean hints against the
+    // same known-hrf-id vocabulary used for `{dep:X}` and group-member
+    // resolution, so typos are surfaceed at the point of failure rather
+    // than via a secondary structural warning.
+    if !doc.import_hints.unresolved_inline_edge_targets.is_empty() {
+        let known_ids: Vec<&str> = doc
+            .nodes
+            .iter()
+            .filter(|n| !n.hrf_id.is_empty())
+            .map(|n| n.hrf_id.as_str())
+            .collect();
+        for (src_id, tgt_raw) in &doc.import_hints.unresolved_inline_edge_targets {
+            let src_display = if src_id.is_empty() { "?" } else { src_id.as_str() };
+            let suggestion =
+                crate::specgraph::hrf::suggest_node_id_from_candidates(tgt_raw, &known_ids);
+            match suggestion {
+                Some(s) => warnings.push(format!(
+                    "Node [{}]: inline edge target `{}` does not resolve — did you mean `{}`? (edge was dropped)",
+                    src_display, tgt_raw, s
+                )),
+                None => warnings.push(format!(
+                    "Node [{}]: inline edge target `{}` does not resolve to any node in ## Nodes (edge was dropped)",
+                    src_display, tgt_raw
                 )),
             }
         }
@@ -4204,9 +4251,12 @@ mod cli_tests {
 
     #[test]
     fn test_lint_no_style_section_no_fallback_via_cli() {
-        // When no `## Style` section exists, the style-template fallback
-        // must stay silent — an unknown tag with no shape suggestion is
-        // simply dropped (there's nothing to suggest from).
+        // When no `## Style` section exists, the style-template
+        // suggestion path must stay silent — there is nothing to suggest
+        // from. The unknown tag now falls through to the generic
+        // Round-50 fallback instead, which is fine (the user still needs
+        // to know the tag was dropped), but the specific "did you mean X
+        // (defined in ## Style)" form must not fire.
         let spec = "## Nodes\n- [a] Alpha {weirdstyle}\n- [b] Beta\n## Flow\na --> b\n";
         let uid = uuid::Uuid::new_v4();
         let tmp = std::env::temp_dir().join(format!("no_style_fallback_{}.spec", uid));
@@ -4227,11 +4277,29 @@ mod cli_tests {
         let v: serde_json::Value = serde_json::from_str(&stdout)
             .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
         let warnings = v["warnings"].as_array().expect("warnings array");
-        let has = warnings.iter().any(|w| {
+        // The style-template hint form is "did you mean {X}? (defined in
+        // ## Style)" — assert that exact phrase is NOT present for
+        // `weirdstyle` since no style section is defined.
+        let has_style_hint = warnings.iter().any(|w| {
             let s = w.as_str().unwrap_or("");
-            s.contains("weirdstyle") && s.contains("## Style")
+            s.contains("weirdstyle")
+                && s.contains("did you mean")
+                && s.contains("(defined in ## Style)")
         });
-        assert!(!has, "unknown tag without style section must not trigger fallback, got: {stdout}");
+        assert!(
+            !has_style_hint,
+            "style-template hint must not fire without a ## Style section, got: {stdout}"
+        );
+        // Round 50: the generic fallback SHOULD now fire so the user
+        // sees that the tag was dropped.
+        let has_generic = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("weirdstyle") && s.contains("ignored")
+        });
+        assert!(
+            has_generic,
+            "expected generic 'unknown node tag ignored' fallback, got: {stdout}"
+        );
     }
 
     #[test]
@@ -10294,5 +10362,272 @@ mod cli_tests {
                 bad
             );
         }
+    }
+
+    #[test]
+    fn test_lint_inline_edge_target_typo_via_cli() {
+        // Inline edge syntax `- [alpha] Alpha → bravoo` with a typo'd
+        // target used to be silently dropped by the parser's
+        // `deferred_inline_edges` post-pass (conditional `if let Some(src),
+        // Some(tgt)`). Users saw only the "disconnected node" symptom but
+        // had no pointer to the typo. Verify cli_lint now surfaces the
+        // unresolved target with a did-you-mean hint against the known
+        // hrf id vocabulary.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> bravoo\n\
+                    - [bravo] Bravo\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_edge_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("[alpha]")
+                && joined.contains("bravoo")
+                && joined.contains("did you mean `bravo`")
+                && joined.contains("(edge was dropped)"),
+            "expected inline edge typo warning with did-you-mean, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_inline_edge_target_nonsense_fallback_via_cli() {
+        // Inline edge target `zzzgone` — too far from any known id to
+        // trigger did-you-mean, but must still emit the unresolved
+        // fallback so the user has SOME signal that the edge was
+        // dropped. Guards the generic path in the cli_lint walk.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> zzzgone\n\
+                    - [bravo] Bravo\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_edge_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("[alpha]")
+                && joined.contains("`zzzgone`")
+                && joined.contains("does not resolve to any node")
+                && joined.contains("(edge was dropped)"),
+            "expected inline edge nonsense fallback, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_inline_edge_multi_target_typo_via_cli() {
+        // Multi-target inline edge syntax `- [charlie] Charlie → alphaa, bravoo`
+        // must emit one warning per bad target. Verify both typos surface
+        // independently with their own did-you-mean hints.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha\n\
+                    - [bravo] Bravo\n\
+                    - [charlie] Charlie -> alphaa, bravoo\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_edge_multi_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("alphaa") && joined.contains("did you mean `alpha`"),
+            "expected alphaa → alpha suggestion, got: {stdout}"
+        );
+        assert!(
+            joined.contains("bravoo") && joined.contains("did you mean `bravo`"),
+            "expected bravoo → bravo suggestion, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_inline_edge_valid_targets_not_flagged_via_cli() {
+        // Regression guard: valid inline edge targets must NOT fire the
+        // unresolved-target warning. The edges should be created
+        // successfully and `edge_count` should reflect them.
+        let spec = "## Nodes\n\
+                    - [alpha] Alpha -> bravo\n\
+                    - [bravo] Bravo -> charlie, delta\n\
+                    - [charlie] Charlie\n\
+                    - [delta] Delta\n\
+                    ## Flow\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("inline_edge_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("inline edge target") && s.contains("does not resolve")
+        });
+        assert!(
+            !bad,
+            "valid inline edge targets must not warn, got: {stdout}"
+        );
+        // Verify edges were actually created (3 inline edges: alpha→bravo,
+        // bravo→charlie, bravo→delta).
+        let edge_count = v["edge_count"].as_u64().unwrap_or(0);
+        assert_eq!(
+            edge_count, 3,
+            "expected 3 inline edges, got edge_count={edge_count}: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_node_unknown_tag_fallback_via_cli() {
+        // Round 50: node tags that reach `node.unknown_tags` but don't
+        // match ANY handler (shape, align, numeric, layer, status, size,
+        // pos, color, or ## Style template) used to fall through the
+        // cli_lint walk with zero warnings, mirroring the same silent-drop
+        // that Round 49 fixed for edges. Assert that `{zzzgarbage}` on a
+        // node now produces a generic "unknown node tag, ignored" warning
+        // so users have SOME signal that the tag was dropped.
+        let spec = "## Nodes\n- [a] Alpha {zzzgarbage}\n- [b] Bravo\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("node_unknown_fallback_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{zzzgarbage}") && joined.contains("ignored"),
+            "expected generic 'unknown node tag ignored' fallback, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_node_unknown_tag_shape_typo_still_suggests_via_cli() {
+        // Regression guard: close-to-known shape typos like `diamon` must
+        // STILL hit `suggest_shape_alias` and emit a did-you-mean, not the
+        // new generic fallback. If this fails, the fallback is firing too
+        // eagerly and masking the shape suggestor output.
+        let spec = "## Nodes\n- [a] Alpha {diamon}\n- [b] Bravo\n## Flow\na --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("node_shape_typo_guard_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Must get a did-you-mean suggestion for diamond, not a fallback.
+        assert!(
+            joined.contains("{diamon}") && joined.contains("did you mean") && joined.contains("diamond"),
+            "expected did-you-mean for `diamon`, got: {stdout}"
+        );
+        // Must NOT emit the generic fallback for the same tag.
+        let fallback_count = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .filter(|w| w.contains("{diamon}") && w.contains("ignored"))
+            .count();
+        assert_eq!(
+            fallback_count, 0,
+            "fallback must not fire when suggestor already matched, got: {stdout}"
+        );
     }
 }
