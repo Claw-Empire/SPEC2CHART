@@ -209,11 +209,17 @@ use std::collections::HashMap;
 /// where `{fill:name}` and `{color:name}` are replaced with `{fill:#hex}` / `{color:#hex}`.
 fn expand_palette(
     input: &str,
-) -> (String, HashMap<String, [u8; 4]>, Vec<(String, usize)>) {
+) -> (String, HashMap<String, [u8; 4]>, Vec<(String, usize)>, Vec<(String, String)>) {
     // Insertion-ordered list preserves deterministic lint output.
     let mut palette_order: Vec<(String, [u8; 4])> = Vec::new();
     let mut palette_idx: HashMap<String, usize> = HashMap::new();
     let mut in_palette = false;
+    // Collected unresolved palette entries for cli_lint. An entry here means
+    // the line had a valid `name = val` form but `val` was neither a
+    // recognized color name nor a valid hex. Previously these were silently
+    // dropped and any `{fill:name}` references remained unresolved as literal
+    // tags, which also silent-fell-through downstream.
+    let mut unresolved: Vec<(String, String)> = Vec::new();
     // First pass: collect palette entries
     for line in input.lines() {
         let t = line.trim();
@@ -222,11 +228,13 @@ fn expand_palette(
             in_palette = matches!(h.as_str(), "palette" | "colors" | "colour" | "colours" | "theme");
             continue;
         }
-        if in_palette && !t.is_empty() {
+        if in_palette && !t.is_empty() && !t.starts_with("//") {
             let sep = if t.contains('=') { '=' } else if t.contains(':') { ':' } else { continue; };
             if let Some(pos) = t.find(sep) {
                 let name = t[..pos].trim().to_lowercase();
+                if name.is_empty() { continue; }
                 let val = t[pos+1..].trim();
+                if val.is_empty() { continue; }
                 if let Some(color) = tag_to_fill_color(val) {
                     if let Some(&idx) = palette_idx.get(&name) {
                         palette_order[idx].1 = color;
@@ -234,12 +242,16 @@ fn expand_palette(
                         palette_idx.insert(name.clone(), palette_order.len());
                         palette_order.push((name, color));
                     }
+                } else {
+                    // Unresolved color — neither a canonical name nor a
+                    // valid hex. Preserve raw (name, value) for cli_lint.
+                    unresolved.push((name, val.to_string()));
                 }
             }
         }
     }
     if palette_order.is_empty() {
-        return (input.to_string(), HashMap::new(), Vec::new());
+        return (input.to_string(), HashMap::new(), Vec::new(), unresolved);
     }
     // Track expansion counts per palette name.
     let mut usage: Vec<usize> = vec![0; palette_order.len()];
@@ -283,7 +295,7 @@ fn expand_palette(
         .zip(usage.into_iter())
         .map(|((name, _color), count)| (name, count))
         .collect();
-    (out, palette_map, usage_vec)
+    (out, palette_map, usage_vec, unresolved)
 }
 
 /// Pre-scan `## Style` sections and return an expanded string where
@@ -484,7 +496,8 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Pre-expand style templates, then palette color names
     let (input_with_layers, unresolved_layers) = expand_layers(input);
     let (input_with_styles, style_usage) = expand_styles(&input_with_layers);
-    let (expanded_input, _palette_map, palette_usage) = expand_palette(&input_with_styles);
+    let (expanded_input, _palette_map, palette_usage, unresolved_palette) =
+        expand_palette(&input_with_styles);
     let input = expanded_input.as_str();
 
     let mut doc = FlowchartDocument::default();
@@ -496,6 +509,10 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Transient: `## Layers` lines whose value was neither a number nor a
     // canonical tier name. Consumed by cli_lint to emit did-you-mean hints.
     doc.import_hints.unknown_layer_values = unresolved_layers;
+    // Transient: `## Palette` lines whose value was neither a recognized
+    // color name nor a valid hex. Consumed by cli_lint to emit did-you-mean
+    // hints via `suggest_fill_color_name`.
+    doc.import_hints.unknown_palette_values = unresolved_palette;
     let mut id_map: HashMap<String, NodeId> = HashMap::new();
     // label_map: slugified display label → NodeId for natural-language flow references
     let mut label_map: HashMap<String, NodeId> = HashMap::new();

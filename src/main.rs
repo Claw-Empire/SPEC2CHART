@@ -2370,6 +2370,34 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // Unresolved `## Palette` entries: values that were neither a canonical
+    // color name nor a valid hex. Typos like `accent = primray` (meant:
+    // purple) or `brand = reed` (meant: red) used to silently drop from the
+    // palette map, so any later `{fill:accent}` / `{color:brand}` references
+    // also silent-fell-through downstream. Emit a did-you-mean hint from
+    // `suggest_fill_color_name` when close to a canonical name, otherwise
+    // advertise that the value must be a color name or hex.
+    for (name, raw) in &doc.import_hints.unknown_palette_values {
+        // Hex prefix gets its own message — the user clearly intended a hex
+        // value, suggesting a named color would be unhelpful.
+        if raw.starts_with('#') {
+            warnings.push(format!(
+                "## Palette: `{} = {}` is not a valid hex color — expected `#rgb`, `#rrggbb`, or `#rrggbbaa`",
+                name, raw
+            ));
+        } else if let Some(suggestion) = crate::specgraph::hrf::suggest_fill_color_name(raw) {
+            warnings.push(format!(
+                "## Palette: `{} = {}` is not a recognized color — did you mean `{} = {}`?",
+                name, raw, name, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "## Palette: `{} = {}` is not a recognized color — expected a color name (blue, green, red, ...) or a hex value (#rrggbb)",
+                name, raw
+            ));
+        }
+    }
+
     // Duplicate parallel edges: same (source, target, label) tuple appearing
     // more than once. Almost always a copy-paste typo in `## Flow` — the two
     // edges get drawn on top of each other and look like one, so the user has
@@ -5518,6 +5546,174 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_dep_target_typo_via_cli() {
+        // `{dep:auth_servce}` (typo for `auth_service`) used to silently
+        // drop the dependency edge with no warning. Verify cli_lint now
+        // emits a did-you-mean hint against the known node id vocabulary.
+        let spec = "## Nodes\n\
+                    - [auth_service] Auth Service\n\
+                    - [db] Database\n\
+                    - [api] API Gateway {dep:auth_servce} {dep:db}\n\
+                    ## Flow\n\
+                    api --> db\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dep_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{dep:auth_servce}")
+                && joined.contains("did you mean `{dep:auth_service}`"),
+            "expected dep:auth_servce did-you-mean hint, got: {stdout}"
+        );
+        // Valid `{dep:db}` on the same node must NOT warn.
+        let bad_valid = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("{dep:db}") && s.contains("does not resolve")
+        });
+        assert!(!bad_valid, "valid {{dep:db}} must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_dep_target_nonsense_falls_back_via_cli() {
+        // Unresolvable dep targets with no close match (e.g. `xyznonsense`)
+        // should still warn, falling back to a generic "does not resolve
+        // to any node" message instead of a did-you-mean suggestion.
+        let spec = "## Nodes\n\
+                    - [a] Alpha {dep:xyznonsense}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dep_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{dep:xyznonsense}")
+                && joined.contains("does not resolve to any node in ## Nodes"),
+            "expected generic fallback for unresolvable dep, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_dep_target_valid_no_warning_via_cli() {
+        // Regression guard: a valid `{dep:X}` pointing at an existing node
+        // must not warn. Tests both HRF-id lookup and label-slug fallback.
+        let spec = "## Nodes\n\
+                    - [auth_service] Auth Service\n\
+                    - [api] API Gateway {dep:auth_service}\n\
+                    - [db] Database\n\
+                    ## Flow\n\
+                    api --> db\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("dep_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("{dep:auth_service}") && s.contains("does not resolve")
+        });
+        assert!(!bad, "valid {{dep:auth_service}} must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_palette_value_nonsense_falls_back_via_cli() {
+        // Unresolvable palette values with no close match (e.g. `zzzqqq`)
+        // should still warn, falling back to a generic "expected a color
+        // name or hex" message instead of a did-you-mean suggestion. This
+        // complements the `test_lint_palette_value_typo_via_cli` test that
+        // covers the did-you-mean path — together they exercise both
+        // branches of the `suggest_fill_color_name` fallback logic.
+        let spec = "## Palette\n\
+                    accent = zzzqqq\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("palette_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("accent = zzzqqq")
+                && joined.contains("expected a color name"),
+            "expected generic fallback for unresolvable palette value, got: {stdout}"
+        );
+    }
+
+    #[test]
     fn test_lint_layer_value_tier_typo_via_cli() {
         // `## Layers` with a tier name typo like `api = backned` used to
         // silently drop from the layer map — no warning, and any
@@ -5647,6 +5843,133 @@ mod cli_tests {
             });
             assert!(!bad, "`{name} = {val}` should not warn, got: {stdout}");
         }
+    }
+
+    #[test]
+    fn test_lint_palette_value_typo_via_cli() {
+        // `## Palette` with a color-name typo like `brand = reed` used to
+        // silently drop from the palette map — no warning, and any
+        // `{fill:brand}` references also silent-fell-through. Verify the
+        // typo now surfaces with a did-you-mean hint.
+        let spec = "## Palette\n\
+                    brand = reed\n\
+                    ## Nodes\n\
+                    - [a] Alpha {fill:brand}\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("palette_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("brand = reed")
+                && joined.contains("## Palette")
+                && joined.contains("did you mean")
+                && joined.contains("red"),
+            "expected palette color typo did-you-mean hint, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_palette_invalid_hex_via_cli() {
+        // `## Palette` with a bad hex value should emit a dedicated
+        // "not a valid hex color" warning (not a color-name suggestion).
+        let spec = "## Palette\n\
+                    accent = #zzghij\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("palette_hex_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("accent = #zzghij")
+                && joined.contains("not a valid hex"),
+            "expected palette hex warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_palette_valid_values_not_flagged_via_cli() {
+        // Regression guard: canonical palette values (named colors and valid
+        // hex) must not fire the warning.
+        let spec = "## Palette\n\
+                    primary = blue\n\
+                    danger = red\n\
+                    accent = #f38ba8\n\
+                    soft = #fce\n\
+                    ## Nodes\n\
+                    - [a] Alpha {fill:primary}\n\
+                    - [b] Beta {fill:danger}\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("palette_ok_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("## Palette")
+                && (s.contains("not a recognized color") || s.contains("not a valid hex"))
+        });
+        assert!(!bad, "canonical palette values should not warn, got: {stdout}");
     }
 
     #[test]

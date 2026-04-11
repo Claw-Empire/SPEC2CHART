@@ -938,6 +938,15 @@ pub struct ImportHints {
     /// against the known node id vocabulary via `suggest_id`. Never
     /// serialized.
     pub unresolved_dep_targets: Vec<(String, String)>,
+    /// Unresolved `## Palette` (or `## Colors`/`## Theme`) entries whose
+    /// value was neither a recognized color name nor a valid hex. The
+    /// `expand_palette` pre-pass silently dropped such entries, so typos
+    /// like `accent = primray` (meant: purple) or `brand = reed` (meant:
+    /// red) vanished from the palette map without a warning; any later
+    /// `{fill:accent}` / `{color:brand}` references also silent-fell-
+    /// through. Pair is (palette_name, raw_value). Used by `lint` to emit
+    /// did-you-mean hints via `suggest_fill_color_name`. Never serialized.
+    pub unknown_palette_values: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
