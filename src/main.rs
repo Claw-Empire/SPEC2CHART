@@ -1674,7 +1674,20 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
                     "Edge {}: unknown tag {{{}}} — did you mean {{{}}}?",
                     edge_label, tag, suggestion
                 ));
+                continue;
             }
+            // Fallback: the tag reached `edge.unknown_tags` (so the parser
+            // couldn't place it) AND no suggestor fired (so it's not a
+            // single-edit typo of a known style/arrow/color/bend/etc.).
+            // Previously the loop would silently fall through here and the
+            // user had zero feedback that `{zzzgarbage}` on an edge was
+            // dropped. Emit a generic "unknown edge tag" warning so the
+            // user at least knows something was ignored — they can then
+            // cross-check against the documented edge vocabulary.
+            warnings.push(format!(
+                "Edge {}: unknown tag {{{}}} — ignored (not a recognized edge style, arrow, color, weight, bend, cardinality, or port tag)",
+                edge_label, tag
+            ));
         }
     }
 
@@ -9963,5 +9976,323 @@ mod cli_tests {
             !bad,
             "canonical PK/FK/PRIMARY KEY/FOREIGN KEY tags must not warn, got: {stdout}"
         );
+    }
+
+    #[test]
+    fn test_lint_edge_unknown_tag_fallback_via_cli() {
+        // Round 49: edge tags that reach `edge.unknown_tags` but are not
+        // close enough to any known alias (Levenshtein > 2) used to fall
+        // through the cli_lint walk with zero warnings. A completely
+        // garbage tag like `{zzzgarbage}` on an edge must now produce a
+        // generic "unknown edge tag, ignored" warning so the user has at
+        // least SOME signal that the tag was silently dropped.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {zzzgarbage}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_unknown_fallback_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{zzzgarbage}") && joined.contains("ignored"),
+            "expected generic 'unknown edge tag ignored' fallback, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_edge_unknown_tag_typo_still_suggests_via_cli() {
+        // Regression guard: close-to-known typos like `dashd` must STILL
+        // hit the did-you-mean path, not the new fallback. If this test
+        // fails, the fallback is firing too eagerly and masking the
+        // suggestor output.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {dashd}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_unknown_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Must get a did-you-mean, not a fallback.
+        assert!(
+            joined.contains("{dashd}") && joined.contains("did you mean"),
+            "expected did-you-mean for `dashd`, got: {stdout}"
+        );
+        // Must NOT emit the generic fallback for the same tag (that would
+        // mean both warnings fired on the same unknown tag).
+        let fallback_count = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .filter(|w| w.contains("{dashd}") && w.contains("ignored"))
+            .count();
+        assert_eq!(
+            fallback_count, 0,
+            "fallback must not fire when suggestor already matched, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_edge_valid_tags_not_flagged_via_cli() {
+        // Regression guard: canonical edge tags (dashed, thick, animated,
+        // glow, ortho, arrow:open, color:red, bend:0.3, weight:2,
+        // c-src:1..N, c-tgt:1) must NOT trigger the fallback warning.
+        let spec = "## Nodes\n- [a] A\n- [b] B\n\n## Flow\na --> b {dashed} {thick} {animated} {glow} {ortho} {arrow:open} {color:red} {bend:0.3} {weight:2} {c-src:1..N} {c-tgt:1}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("edge_valid_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("unknown tag") || s.contains("ignored")
+        });
+        assert!(
+            !bad,
+            "canonical edge tags must not warn, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_shape_typo_via_cli() {
+        // `{diamon}` on a `## Steps` line is a close typo of `diamond`.
+        // The Steps parser used to match shape tags via a narrow inline
+        // `matches!(...)` set and silently fall back to `RoundedRect` for
+        // anything unrecognized, including obvious typos — zero feedback.
+        // Now unrecognized shape-ish tags flow into `node.unknown_tags`
+        // where cli_lint's existing `suggest_shape_alias` walk surfaces
+        // them with a did-you-mean hint.
+        let spec = "## Steps\n\
+                    1. Detect incident {diamon}\n\
+                    2. Triage and route\n\
+                    3. Post-mortem {hexogan}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_shape_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{diamon}") && joined.contains("did you mean {diamond}"),
+            "expected step shape typo warning for diamon → diamond, got: {stdout}"
+        );
+        assert!(
+            joined.contains("{hexogan}") && joined.contains("did you mean {hexagon}"),
+            "expected step shape typo warning for hexogan → hexagon, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_shape_widened_vocab_not_flagged_via_cli() {
+        // Regression fix: the old Steps parser accepted only a narrow
+        // shape vocab (`diamond`, `circle`, `rectangle`, ...), so valid
+        // aliases like `oval`, `rhombus`, `db`, `pyramid`, `cloud` were
+        // silently downgraded to `RoundedRect` with no feedback. The fix
+        // routes shape resolution through `tag_to_shape_opt`, which
+        // accepts the full alias set used by regular `## Nodes`. Verify
+        // these aliases are no longer flagged as "unknown tag" in the
+        // Steps context.
+        let spec = "## Steps\n\
+                    1. Review requirements {oval}\n\
+                    2. Design {rhombus}\n\
+                    3. Store artifacts {db}\n\
+                    4. Deploy {cloud}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_shape_widen_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // None of these alias tags should surface as "unknown tag". Other
+        // warnings (e.g. diamond-has-1-outgoing-edge) may still fire and
+        // are not this test's concern.
+        for bad in &["{oval}", "{rhombus}", "{db}", "{cloud}"] {
+            let flagged = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(bad) && (s.contains("unknown tag") || s.contains("did you mean"))
+            });
+            assert!(
+                !flagged,
+                "widened alias {} must be recognized by Steps parser, got: {stdout}",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn test_lint_step_canonical_shapes_not_flagged_via_cli() {
+        // Regression guard: the canonical shape names that were always
+        // accepted by the old inline match (`diamond`, `circle`,
+        // `rectangle`, `parallelogram`, `hexagon`, `connector`,
+        // `decision`, `start`, `end`) must continue to resolve cleanly
+        // without triggering an unknown-tag warning.
+        let spec = "## Steps\n\
+                    1. Start {start}\n\
+                    2. Process {rectangle}\n\
+                    3. Decide {diamond}\n\
+                    4. Side effect {parallelogram}\n\
+                    5. Compute {hexagon}\n\
+                    6. Endpoint {connector}\n\
+                    7. Complete {end}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_shape_canon_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // None of the canonical shape names should surface as "unknown tag"
+        // or "did you mean" suggestions. Other lint warnings (e.g. diamond
+        // decision flow constraints) may still fire and are OK.
+        for bad in &[
+            "{start}", "{rectangle}", "{diamond}", "{parallelogram}",
+            "{hexagon}", "{connector}", "{end}",
+        ] {
+            let flagged = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(bad) && (s.contains("unknown tag") || s.contains("did you mean"))
+            });
+            assert!(
+                !flagged,
+                "canonical shape {} must not warn in Steps section, got: {stdout}",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn test_lint_step_meta_prefixes_not_flagged_via_cli() {
+        // Regression guard: meta-prefixed tags (`{fill:blue}`, `{z:100}`,
+        // `{dep:x}`, `{pinned}`, `{metric:$10M}`) must NOT be pushed to
+        // `unknown_tags` as shape-ish candidates — they have known
+        // non-shape prefixes and should be either handled silently (as
+        // before) or left untouched without emitting a shape-typo
+        // warning.
+        let spec = "## Steps\n\
+                    1. Kickoff {fill:blue}\n\
+                    2. Build {z:100}\n\
+                    3. Ship {metric:$2M}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_meta_tags_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        // Meta tags must not produce shape-tag warnings.
+        for bad in &["{fill:blue}", "{z:100}", "{metric:$2M}"] {
+            let flagged = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains(bad)
+                    && (s.contains("did you mean") && !s.contains("fill"))
+            });
+            assert!(
+                !flagged,
+                "meta tag {} must not be treated as shape typo, got: {stdout}",
+                bad
+            );
+        }
     }
 }
