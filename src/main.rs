@@ -1726,6 +1726,37 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         }
     }
 
+    // `{dep:X}` unresolved targets: when the dep target doesn't resolve to
+    // any existing node by id or slugified label, the parser previously
+    // silent-dropped the dependency edge at `Resolve {dep:target}` in
+    // hrf.rs with no warning. Typos like `{dep:authservce}` → vanished.
+    // The parser now records (source_id, raw_target) here. Emit a lint
+    // warning with did-you-mean hints drawn from the same known-id
+    // vocabulary used for unresolved group members.
+    if !doc.import_hints.unresolved_dep_targets.is_empty() {
+        let known_ids: Vec<&str> = doc
+            .nodes
+            .iter()
+            .filter(|n| !n.hrf_id.is_empty())
+            .map(|n| n.hrf_id.as_str())
+            .collect();
+        for (src_id, dep_target) in &doc.import_hints.unresolved_dep_targets {
+            let src_display = if src_id.is_empty() { "?" } else { src_id.as_str() };
+            let suggestion =
+                crate::specgraph::hrf::suggest_node_id_from_candidates(dep_target, &known_ids);
+            match suggestion {
+                Some(s) => warnings.push(format!(
+                    "Node [{}]: {{dep:{}}} does not resolve — did you mean `{{dep:{}}}`?",
+                    src_display, dep_target, s
+                )),
+                None => warnings.push(format!(
+                    "Node [{}]: {{dep:{}}} does not resolve to any node in ## Nodes",
+                    src_display, dep_target
+                )),
+            }
+        }
+    }
+
     // `## Groups` fill typos: when `{fill:X}` on a group line doesn't resolve
     // (`{fill:blu}`, `{fill:gren}`, bad hex), the frame silently falls back
     // to the default color with no feedback. The parser now records these
@@ -2315,6 +2346,28 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
             "Config: `{} = {}` is not a number — this directive was ignored",
             key, raw
         ));
+    }
+
+    // Unresolved `## Layers` value assignments: values that weren't
+    // parseable as numbers AND didn't match any canonical tier name
+    // (db/app/ui/edge/infra + aliases). Typos like `ui = 24o` (meant:
+    // 240) or `api = backned` (meant: backend) used to silently drop
+    // from the layer map, leaving `{layer:X}` / `{tier:X}` references
+    // unexpanded in the rendered document. Emit a did-you-mean hint
+    // from `suggest_layer_tier_name` when close to a canonical tier,
+    // otherwise advertise the accepted vocabulary.
+    for (name, raw) in &doc.import_hints.unknown_layer_values {
+        if let Some(suggestion) = crate::specgraph::hrf::suggest_layer_tier_name(raw) {
+            warnings.push(format!(
+                "## Layers: `{} = {}` is not a number or known tier — did you mean `{} = {}`?",
+                name, raw, name, suggestion
+            ));
+        } else {
+            warnings.push(format!(
+                "## Layers: `{} = {}` is not a number or known tier — expected a number (z offset) or one of: db, app, ui, edge, infra",
+                name, raw
+            ));
+        }
     }
 
     // Duplicate parallel edges: same (source, target, label) tuple appearing
@@ -5461,6 +5514,138 @@ mod cli_tests {
                 s.contains("not a recognized pattern") && s.contains(needle)
             });
             assert!(!bad, "valid {needle} should not warn, got: {stdout}");
+        }
+    }
+
+    #[test]
+    fn test_lint_layer_value_tier_typo_via_cli() {
+        // `## Layers` with a tier name typo like `api = backned` used to
+        // silently drop from the layer map — no warning, and any
+        // `{layer:api}` references in Flow stayed as literal tags.
+        // Verify the typo now surfaces with a did-you-mean hint.
+        let spec = "## Layers\n\
+                    api = backned\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_tier_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("api = backned") && joined.contains("did you mean"),
+            "expected layer tier typo did-you-mean hint, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_layer_value_nonsense_expected_vocabulary_via_cli() {
+        // Unresolvable layer values like `svc = zzzqqq` should warn with
+        // the accepted-vocabulary fallback.
+        let spec = "## Layers\n\
+                    svc = zzzqqq\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_nonsense_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("svc = zzzqqq") && joined.contains("expected a number"),
+            "expected accepted-vocabulary fallback, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_layer_value_valid_not_flagged_via_cli() {
+        // Regression guard: valid layer values (numbers and canonical tier
+        // names) must not fire the warning.
+        for (name, val) in [
+            ("data", "0"),
+            ("app", "120"),
+            ("ui", "240"),
+            ("db", "database"),
+            ("svc", "backend"),
+            ("web", "frontend"),
+            ("edge", "gateway"),
+            ("infra", "platform"),
+        ] {
+            let spec = format!(
+                "## Layers\n\
+                 {name} = {val}\n\
+                 ## Nodes\n\
+                 - [a] Alpha\n\
+                 - [b] Beta\n\
+                 ## Flow\n\
+                 a --> b\n"
+            );
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("layer_ok_{}_{}.spec", name, uid));
+            std::fs::write(&tmp, &spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                s.contains("## Layers") && s.contains("not a number or known tier")
+            });
+            assert!(!bad, "`{name} = {val}` should not warn, got: {stdout}");
         }
     }
 

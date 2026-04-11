@@ -390,10 +390,16 @@ fn expand_styles(input: &str) -> (String, Vec<(String, usize)>) {
 /// data     = 0
 /// ```
 /// After this pass, `{layer:frontend}` becomes `{z:240}` for downstream parsing.
-fn expand_layers(input: &str) -> String {
+fn expand_layers(input: &str) -> (String, Vec<(String, String)>) {
     use std::collections::HashMap;
     let mut layer_map: HashMap<String, f32> = HashMap::new();
     let mut in_layers = false;
+    // Collected unresolved layer definitions for cli_lint. An entry here
+    // means the line had a valid `name = val` form but `val` was neither a
+    // number nor a canonical tier name. Previously these were silently
+    // dropped and any `{layer:X}` references in the Flow stayed as literal
+    // unresolved tags.
+    let mut unresolved: Vec<(String, String)> = Vec::new();
 
     // First pass: collect layer definitions
     for line in input.lines() {
@@ -425,12 +431,19 @@ fn expand_layers(input: &str) -> String {
                     _ => None,
                 }
             };
-            if let Some(z_val) = z {
-                layer_map.insert(name, z_val);
+            match z {
+                Some(z_val) => { layer_map.insert(name, z_val); }
+                None if !val.is_empty() => {
+                    // Preserve raw (name, value) for cli_lint. Previously this
+                    // line silently dropped and any `{layer:name}` references
+                    // remained unexpanded as literal tag strings.
+                    unresolved.push((name, val.to_string()));
+                }
+                None => {}
             }
         }
     }
-    if layer_map.is_empty() { return input.to_string(); }
+    if layer_map.is_empty() { return (input.to_string(), unresolved); }
 
     // Second pass: replace {layer:name} with {z:N}
     let mut out = String::with_capacity(input.len() + 64);
@@ -457,7 +470,7 @@ fn expand_layers(input: &str) -> String {
         }
         out.push_str(&expanded); out.push('\n');
     }
-    out
+    (out, unresolved)
 }
 
 /// Parse a `.spec` Human-Readable Format string into a `FlowchartDocument`.
@@ -469,7 +482,7 @@ fn expand_layers(input: &str) -> String {
 /// before edge parsing.
 pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // Pre-expand style templates, then palette color names
-    let input_with_layers = expand_layers(input);
+    let (input_with_layers, unresolved_layers) = expand_layers(input);
     let (input_with_styles, style_usage) = expand_styles(&input_with_layers);
     let (expanded_input, _palette_map, palette_usage) = expand_palette(&input_with_styles);
     let input = expanded_input.as_str();
@@ -480,6 +493,9 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
     // serialization via the transient ImportHints pattern.
     doc.import_hints.style_definition_usage = style_usage;
     doc.import_hints.palette_definition_usage = palette_usage;
+    // Transient: `## Layers` lines whose value was neither a number nor a
+    // canonical tier name. Consumed by cli_lint to emit did-you-mean hints.
+    doc.import_hints.unknown_layer_values = unresolved_layers;
     let mut id_map: HashMap<String, NodeId> = HashMap::new();
     // label_map: slugified display label → NodeId for natural-language flow references
     let mut label_map: HashMap<String, NodeId> = HashMap::new();
@@ -1945,6 +1961,26 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
             let mut edge = edge;
             edge.style.dashed = true;
             doc.edges.push(edge);
+        } else {
+            // Unresolved {dep:X} target — previously silent-dropped, dropping
+            // both the edge AND any user feedback about the typo. Preserve
+            // the source node's HRF id (or label fallback) and the raw target
+            // so cli_lint can emit a did-you-mean hint against the known id
+            // vocabulary via `suggest_id`.
+            let src_id_str = doc.nodes
+                .iter()
+                .find(|n| n.id == from_id)
+                .map(|n| {
+                    if !n.hrf_id.is_empty() {
+                        n.hrf_id.clone()
+                    } else {
+                        n.display_label().to_string()
+                    }
+                })
+                .unwrap_or_default();
+            doc.import_hints
+                .unresolved_dep_targets
+                .push((src_id_str, dep_target));
         }
     }
 
@@ -4435,6 +4471,66 @@ pub fn suggest_bg_pattern(raw: &str) -> Option<&'static str> {
         // Length-scaled cutoff: short vocab words like `dot`/`off`/`line`
         // would be indistinguishable under d<=2.
         let max_d = if cand.len() <= 4 || raw_lower.len() <= 4 { 1 } else { 2 };
+        if d <= max_d {
+            match best {
+                Some((best_d, _)) if d >= best_d => {}
+                _ => best = Some((d, cand)),
+            }
+        }
+    }
+    best.map(|(_, name)| name)
+}
+
+/// Suggest the closest canonical tier name for a possibly-misspelled
+/// `## Layers` value (e.g. `ui = backned` → `backend`). Returns None on
+/// exact match, empty input, or no close candidate (Levenshtein > cutoff).
+/// The vocabulary mirrors the tier fallback in `expand_layers`:
+///   db/data/database/storage/cache/queue/persistence
+///   app/api/service/backend/server/logic/worker
+///   ui/frontend/client/web/browser/view/spa
+///   edge/gateway/lb/proxy/cdn/ingress
+///   infra/platform/ops/host/cloud
+/// Uses a length-scaled cutoff so short words like `db`/`ui` don't
+/// indiscriminately match arbitrary two-letter typos.
+pub fn suggest_layer_tier_name(raw: &str) -> Option<&'static str> {
+    const KNOWN_TIERS: &[&str] = &[
+        "db", "data", "database", "storage", "cache", "queue", "persistence",
+        "app", "api", "service", "backend", "server", "logic", "worker",
+        "ui", "frontend", "client", "web", "browser", "view", "spa",
+        "edge", "gateway", "lb", "proxy", "cdn", "ingress",
+        "infra", "platform", "ops", "host", "cloud",
+    ];
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.is_empty() { return None; }
+    if raw_lower.len() < 2 { return None; }
+
+    fn distance(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let m = a_bytes.len();
+        let n = b_bytes.len();
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0usize; n + 1];
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    let mut best: Option<(usize, &'static str)> = None;
+    for &cand in KNOWN_TIERS {
+        let d = distance(&raw_lower, cand);
+        if d == 0 { return None; } // already valid
+        // Length-scaled cutoff so short vocab words like `db`/`ui`/`lb`
+        // don't match arbitrary two-letter typos.
+        let max_d = if cand.len() <= 3 || raw_lower.len() <= 3 { 1 } else { 2 };
         if d <= max_d {
             match best {
                 Some((best_d, _)) if d >= best_d => {}

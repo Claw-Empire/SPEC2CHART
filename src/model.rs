@@ -918,6 +918,26 @@ pub struct ImportHints {
     /// Used by `lint` to emit did-you-mean hints via `suggest_bg_pattern`.
     /// Never serialized.
     pub unknown_bg_pattern: Vec<(String, String)>,
+    /// Unresolved `## Layers` section value assignments. Each entry is the
+    /// raw `(layer_name, raw_value)` from a line whose value could not be
+    /// parsed as a number AND did not match any canonical tier name
+    /// (db/app/ui/edge/infra and their aliases). The `expand_layers` pre-pass
+    /// silently dropped such lines and any `{layer:X}` references in the
+    /// Flow/Nodes sections were left unexpanded, so typos like
+    /// `ui = 24o` (meant: 240) or `api = backned` (meant: backend) vanished
+    /// with no user feedback. Used by `lint` to emit did-you-mean hints via
+    /// `suggest_layer_tier_name` when close to a canonical tier, else an
+    /// "expected number or tier name" warning. Never serialized.
+    pub unknown_layer_values: Vec<(String, String)>,
+    /// Unresolved `{dep:X}` decorator targets: pairs of (source_hrf_id,
+    /// raw_dep_target) where the target did not resolve to any node by
+    /// HRF id or slugified label. The parser's `{dep:target}` → dashed
+    /// dependency edge resolution previously silent-dropped on None, so
+    /// typos like `{dep:authservce}` or `{dep:nonexistent}` produced no
+    /// edge and no warning. Used by `lint` to emit did-you-mean hints
+    /// against the known node id vocabulary via `suggest_id`. Never
+    /// serialized.
+    pub unresolved_dep_targets: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
