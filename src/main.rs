@@ -2495,6 +2495,42 @@ fn cli_lint(input: PathBuf, strict: bool, json: bool) {
         ));
     }
 
+    // Unresolved `## Period N` / `## Period N: Label` index values. The
+    // parser falls back to idx=0 on any parse failure, so a user who
+    // typed `## Period two: Q2 2026` silently placed "Q2 2026" at
+    // position 0 instead of position 2. Emit one warning per unresolved
+    // header so the typo surfaces in lint output.
+    for (raw, label_opt) in &doc.import_hints.unknown_period_idx {
+        match label_opt {
+            Some(label) => warnings.push(format!(
+                "## Period: `{}` in `## Period {}: {}` is not a valid index — expected a positive integer like `## Period 2: {}` (defaulted to position 0)",
+                raw, raw, label, label
+            )),
+            None => warnings.push(format!(
+                "## Period: `{}` is not a valid index — expected a positive integer like `## Period 2` or `## Period 2: Label` (defaulted to position 0)",
+                raw
+            )),
+        }
+    }
+
+    // Unresolved `## Lane N` / `## Lane N: Label` index values. Same
+    // silent-drop pattern as Period — `## Lane three: Engineering`
+    // placed "Engineering" at lane 0 and `## Lane foo` created a phantom
+    // "Lane 0" label with no feedback. Emit one warning per unresolved
+    // header so the typo surfaces in lint output.
+    for (raw, label_opt) in &doc.import_hints.unknown_lane_idx {
+        match label_opt {
+            Some(label) => warnings.push(format!(
+                "## Lane: `{}` in `## Lane {}: {}` is not a valid index — expected a positive integer like `## Lane 2: {}` (defaulted to position 0)",
+                raw, raw, label, label
+            )),
+            None => warnings.push(format!(
+                "## Lane: `{}` is not a valid index — expected a positive integer like `## Lane 2` or `## Lane 2: Label` (defaulted to position 0)",
+                raw
+            )),
+        }
+    }
+
     // `## Config` `layerN = Name` keys where N was missing or non-numeric.
     // The parser handles these via `if let Ok(idx) = ... { doc.layer_names.insert(...) }`
     // with no else, AND the generic unknown-config-keys fallthrough below
@@ -6328,6 +6364,123 @@ mod cli_tests {
     }
 
     #[test]
+    fn test_lint_period_idx_typo_via_cli() {
+        // `## Period two: Q2 2026` silently placed "Q2 2026" at position
+        // 0 via `.unwrap_or(0)`. Verify the typo now surfaces in lint.
+        let spec = "## Period two: Q2 2026\n\
+                    - [a] Alpha\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("period_idx_typo_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("## Period")
+                && joined.contains("`two`")
+                && joined.contains("not a valid index"),
+            "expected period idx typo warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_lane_idx_typo_via_cli() {
+        // `## Lane three: Engineering` silently placed "Engineering" at
+        // lane 0, and `## Lane foo` created a phantom "Lane 0" label.
+        // Verify both variants surface in lint.
+        for (spec, expected_raw) in [
+            ("## Lane three: Engineering\n- [a] Alpha\n", "`three`"),
+            ("## Lane foo\n- [a] Alpha\n",                "`foo`"),
+        ] {
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("lane_idx_typo_{}.spec", uid));
+            std::fs::write(&tmp, spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let joined: String = warnings
+                .iter()
+                .filter_map(|w| w.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains("## Lane")
+                    && joined.contains(expected_raw)
+                    && joined.contains("not a valid index"),
+                "expected lane idx typo warning for {expected_raw}, got: {stdout}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_lint_period_lane_valid_not_flagged_via_cli() {
+        // Regression guard: legal Period/Lane index forms must NOT warn.
+        for spec in [
+            "## Period 1: Q1 2026\n- [a] Alpha\n",
+            "## Period 2\n- [a] Alpha\n",
+            "## Lane 1: Engineering\n- [a] Alpha\n",
+            "## Lane 3\n- [a] Alpha\n",
+        ] {
+            let uid = uuid::Uuid::new_v4();
+            let tmp = std::env::temp_dir().join(format!("period_lane_ok_{}.spec", uid));
+            std::fs::write(&tmp, spec).unwrap();
+            let bin = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+                .map(|p| p.join("open-draftly"));
+            let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+            if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+            let out = std::process::Command::new(&bin)
+                .args(["lint", "--json", tmp.to_str().unwrap()])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let _ = std::fs::remove_file(&tmp);
+            let v: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+            let warnings = v["warnings"].as_array().expect("warnings array");
+            let bad = warnings.iter().any(|w| {
+                let s = w.as_str().unwrap_or("");
+                (s.contains("## Period:") || s.contains("## Lane:"))
+                    && s.contains("not a valid index")
+            });
+            assert!(!bad, "valid period/lane form should not warn: spec={spec:?} out={stdout}");
+        }
+    }
+
+    #[test]
     fn test_lint_group_fill_typo_via_cli() {
         // `## Groups` {fill:X} typos (`{fill:blu}`, `{fill:gren}`) used to
         // silently drop to the default frame color. Verify they now surface
@@ -9433,5 +9586,135 @@ mod cli_tests {
             s.contains("does not match any declared period")
         });
         assert!(!bad, "auto-discovered phases must not warn, got: {stdout}");
+    }
+
+    #[test]
+    fn test_lint_layer_config_bare_key_via_cli() {
+        // `layer = Frontend` in ## Config (no digit suffix) used to be
+        // silently dropped by the `if let Ok(idx) = ... parse` arm with
+        // no else branch, AND the fallthrough unknown-config-keys arm
+        // specifically skips `layer*` keys — so the user got zero feedback
+        // and their "Frontend" label never appeared on any layer. Verify
+        // cli_lint now surfaces it with a concrete fix example.
+        let spec = "## Config\n\
+                    title = Test\n\
+                    layer = Frontend\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_bare_key_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("`layer = Frontend`")
+                && joined.contains("not a valid layer index key")
+                && joined.contains("layer0")
+                && joined.contains("layer1 = Frontend"),
+            "expected bare-layer-key warning with concrete fix example, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_layer_config_typo_key_via_cli() {
+        // `layerfoo = Backend` — the `foo` suffix has no digits, so
+        // `trim_matches(non_digit).parse::<i32>()` fails and the layer
+        // name is silently dropped. Verify the typo surfaces in lint.
+        let spec = "## Config\n\
+                    layerfoo = Backend\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_typo_key_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings.iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("`layerfoo = Backend`")
+                && joined.contains("`layerfoo` is not a valid layer index key"),
+            "expected layerfoo-key warning, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_layer_config_valid_keys_not_flagged_via_cli() {
+        // Regression guard: canonical `layer0 = Base`, `layer1 = Frontend`
+        // must not fire the warning. Only truly invalid keys (no digit
+        // anywhere) should surface.
+        let spec = "## Config\n\
+                    layer0 = Base\n\
+                    layer1 = Frontend\n\
+                    layer2 = Overlay\n\
+                    ## Nodes\n\
+                    - [a] Alpha\n\
+                    - [b] Beta\n\
+                    ## Flow\n\
+                    a --> b\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("layer_valid_key_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let bad = warnings.iter().any(|w| {
+            let s = w.as_str().unwrap_or("");
+            s.contains("is not a valid layer index key")
+        });
+        assert!(!bad, "canonical layerN keys must not warn, got: {stdout}");
     }
 }

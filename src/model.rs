@@ -1002,6 +1002,22 @@ pub struct ImportHints {
     /// to emit a "not a valid layer index" warning with expected formats
     /// (`layer0 = Base`, `layer1 = Backend`, ...). Never serialized.
     pub unknown_layer_config_keys: Vec<(String, String)>,
+    /// Unresolved `## Period X` / `## Period X: Label` header index values
+    /// that did not parse as a `usize`. The parser fell back to `idx=0` via
+    /// `.unwrap_or(0)`, so a user typing `## Period two: Q2 2026` silently
+    /// placed "Q2 2026" at position 0 instead of position 2. For the bare
+    /// form `## Period foo` the label became the nonsense "Period 0". Pair
+    /// is (raw_index, optional_label) where optional_label is the raw label
+    /// portion after the `:` or `None` for the bare form. Used by `lint` to
+    /// emit a "not a valid period index" warning. Never serialized.
+    pub unknown_period_idx: Vec<(String, Option<String>)>,
+    /// Unresolved `## Lane X` / `## Lane X: Label` header index values that
+    /// did not parse as a `usize`. Same silent-drop pattern as
+    /// `unknown_period_idx`: `## Lane three: Engineering` placed
+    /// "Engineering" at lane 0 and `## Lane foo` created a phantom "Lane 0"
+    /// label with no feedback. Pair is (raw_index, optional_label). Used by
+    /// `lint` to emit a "not a valid lane index" warning. Never serialized.
+    pub unknown_lane_idx: Vec<(String, Option<String>)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

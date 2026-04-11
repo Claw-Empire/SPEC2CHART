@@ -781,14 +781,38 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     // Check for "Period N" or "Period N: Label" patterns
                     if header.starts_with("period") {
                         let after_raw = header_raw[6..].trim();
-                        // Parse "Period N: Label" — extract index and label
+                        // Parse "Period N: Label" — extract index and label.
+                        // On parse failure we record the raw index into
+                        // `unknown_period_idx` for cli_lint. We still fall
+                        // back to idx=0 so rendering stays stable; the user
+                        // label (if any) is preserved unchanged.
                         let (idx, label) = if let Some(colon_pos) = after_raw.find(':') {
                             let num_str = after_raw[..colon_pos].trim();
-                            let idx = num_str.parse::<usize>().unwrap_or(0);
-                            let label = after_raw[colon_pos+1..].trim().to_string();
-                            (idx, if label.is_empty() { format!("Period {}", idx) } else { label })
+                            let label_str = after_raw[colon_pos+1..].trim().to_string();
+                            let idx = match num_str.parse::<usize>() {
+                                Ok(n) => n,
+                                Err(_) if !num_str.is_empty() => {
+                                    doc.import_hints.unknown_period_idx.push((
+                                        num_str.to_string(),
+                                        if label_str.is_empty() { None } else { Some(label_str.clone()) },
+                                    ));
+                                    0
+                                }
+                                Err(_) => 0,
+                            };
+                            (idx, if label_str.is_empty() { format!("Period {}", idx) } else { label_str })
                         } else {
-                            let idx = after_raw.trim().parse::<usize>().unwrap_or(0);
+                            let raw = after_raw.trim();
+                            let idx = match raw.parse::<usize>() {
+                                Ok(n) => n,
+                                Err(_) if !raw.is_empty() => {
+                                    doc.import_hints
+                                        .unknown_period_idx
+                                        .push((raw.to_string(), None));
+                                    0
+                                }
+                                Err(_) => 0,
+                            };
                             (idx, format!("Period {}", idx))
                         };
                         // Register in doc.timeline_periods at the right index position
@@ -810,13 +834,37 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                     // Check for "Lane N" or "Lane N: Name" patterns
                     } else if header.starts_with("lane") {
                         let after_raw = header_raw[4..].trim();
+                        // Parse "Lane N: Label" — extract index and label.
+                        // On parse failure we record the raw index into
+                        // `unknown_lane_idx` for cli_lint. We still fall
+                        // back to idx=0 so rendering stays stable.
                         let (idx, label) = if let Some(colon_pos) = after_raw.find(':') {
                             let num_str = after_raw[..colon_pos].trim();
-                            let idx = num_str.parse::<usize>().unwrap_or(0);
-                            let label = after_raw[colon_pos+1..].trim().to_string();
-                            (idx, if label.is_empty() { format!("Lane {}", idx) } else { label })
+                            let label_str = after_raw[colon_pos+1..].trim().to_string();
+                            let idx = match num_str.parse::<usize>() {
+                                Ok(n) => n,
+                                Err(_) if !num_str.is_empty() => {
+                                    doc.import_hints.unknown_lane_idx.push((
+                                        num_str.to_string(),
+                                        if label_str.is_empty() { None } else { Some(label_str.clone()) },
+                                    ));
+                                    0
+                                }
+                                Err(_) => 0,
+                            };
+                            (idx, if label_str.is_empty() { format!("Lane {}", idx) } else { label_str })
                         } else {
-                            let idx = after_raw.trim().parse::<usize>().unwrap_or(0);
+                            let raw = after_raw.trim();
+                            let idx = match raw.parse::<usize>() {
+                                Ok(n) => n,
+                                Err(_) if !raw.is_empty() => {
+                                    doc.import_hints
+                                        .unknown_lane_idx
+                                        .push((raw.to_string(), None));
+                                    0
+                                }
+                                Err(_) => 0,
+                            };
                             (idx, format!("Lane {}", idx))
                         };
                         // Track explicit declaration for unresolved `{lane:X}` lint.
