@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>openDraftly — Diagram as Code</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --black: #171717;
+    --white: #ffffff;
+    --gray-50: #fafafa;
+    --gray-100: #ebebeb;
+    --gray-400: #808080;
+    --gray-500: #666666;
+    --gray-600: #4d4d4d;
+    --blue: #0a72ef;
+    --pink: #de1d8d;
+    --red: #ff5b4f;
+    --shadow-border: rgba(0,0,0,0.08) 0px 0px 0px 1px;
+    --shadow-card: rgba(0,0,0,0.08) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 2px, rgba(0,0,0,0.04) 0px 8px 8px -8px, #fafafa 0px 0px 0px 1px;
+  }
+
+  html { font-size: 16px; }
+
+  body {
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    font-feature-settings: "liga";
+    background: var(--white);
+    color: var(--gray-600);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* NAV */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(255,255,255,0.8);
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shadow-border);
+    padding: 0 24px;
+  }
+  .nav-inner {
+    max-width: 1200px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .logo {
+    font-size: 16px; font-weight: 600; color: var(--black);
+    text-decoration: none; letter-spacing: -0.32px;
+  }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
+  .nav-links a {
+    font-size: 14px; font-weight: 500; color: var(--gray-500);
+    text-decoration: none; transition: color 0.15s;
+  }
+  .nav-links a:hover { color: var(--black); }
+
+  /* BUTTONS */
+  .btn-dark {
+    background: var(--black); color: var(--white);
+    padding: 8px 20px; border-radius: 6px; border: none;
+    font: inherit; font-size: 14px; font-weight: 500;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: opacity 0.15s;
+  }
+  .btn-dark:hover { opacity: 0.85; }
+
+  .btn-outline {
+    background: var(--white); color: var(--black);
+    padding: 8px 20px; border-radius: 6px; border: none;
+    box-shadow: var(--shadow-border);
+    font: inherit; font-size: 14px; font-weight: 500;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: box-shadow 0.15s;
+  }
+  .btn-outline:hover {
+    box-shadow: rgba(0,0,0,0.12) 0px 0px 0px 1px, rgba(0,0,0,0.06) 0px 2px 4px;
+  }
+
+  /* HERO */
+  .hero {
+    max-width: 1200px; margin: 0 auto;
+    padding: 120px 24px 80px;
+    text-align: center;
+  }
+  .hero-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #ebf5ff; color: #0068d6;
+    padding: 4px 14px; border-radius: 9999px;
+    font-size: 12px; font-weight: 500;
+    margin-bottom: 32px;
+  }
+  .hero h1 {
+    font-size: 56px; font-weight: 600; color: var(--black);
+    line-height: 1.05; letter-spacing: -2.4px;
+    margin-bottom: 20px;
+  }
+  .hero p {
+    font-size: 20px; font-weight: 400; color: var(--gray-600);
+    line-height: 1.6; max-width: 580px; margin: 0 auto 40px;
+  }
+  .hero-actions { display: flex; gap: 12px; justify-content: center; }
+
+  /* WORKFLOW */
+  .workflow {
+    max-width: 1200px; margin: 0 auto;
+    padding: 80px 24px;
+    border-top: 1px solid var(--gray-100);
+  }
+  .workflow-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 1px; background: var(--gray-100); border-radius: 12px;
+    overflow: hidden; box-shadow: var(--shadow-border);
+  }
+  .workflow-step {
+    background: var(--white); padding: 40px 32px;
+  }
+  .workflow-label {
+    font-family: ui-monospace, 'SF Mono', monospace;
+    font-size: 12px; font-weight: 500; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 12px;
+  }
+  .workflow-step:nth-child(1) .workflow-label { color: var(--blue); }
+  .workflow-step:nth-child(2) .workflow-label { color: var(--pink); }
+  .workflow-step:nth-child(3) .workflow-label { color: var(--red); }
+  .workflow-step h3 {
+    font-size: 24px; font-weight: 600; color: var(--black);
+    letter-spacing: -0.96px; margin-bottom: 8px;
+  }
+  .workflow-step p {
+    font-size: 15px; color: var(--gray-600); line-height: 1.6;
+  }
+
+  /* CODE */
+  .code-section {
+    max-width: 900px; margin: 0 auto;
+    padding: 80px 24px;
+  }
+  .code-section-header {
+    text-align: center; margin-bottom: 48px;
+  }
+  .code-section-header h2 {
+    font-size: 40px; font-weight: 600; color: var(--black);
+    letter-spacing: -2.0px; margin-bottom: 12px;
+  }
+  .code-section-header p {
+    font-size: 18px; color: var(--gray-600);
+  }
+  .code-window {
+    background: var(--white);
+    box-shadow: var(--shadow-card);
+    border-radius: 12px; overflow: hidden;
+  }
+  .code-titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .code-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--gray-100);
+  }
+  .code-filename {
+    font-family: ui-monospace, 'SF Mono', monospace;
+    font-size: 12px; font-weight: 500; color: var(--gray-500);
+    margin-left: 8px;
+  }
+  .code-body {
+    padding: 24px;
+    font-family: ui-monospace, 'SF Mono', monospace;
+    font-size: 13px; line-height: 1.7; color: var(--gray-600);
+  }
+  .code-body .kw { color: var(--blue); }
+  .code-body .str { color: #16a34a; }
+  .code-body .cmt { color: var(--gray-400); }
+  .code-body .tag { color: var(--pink); }
+
+  /* FEATURES */
+  .features {
+    max-width: 1200px; margin: 0 auto;
+    padding: 80px 24px;
+    border-top: 1px solid var(--gray-100);
+  }
+  .features-header {
+    text-align: center; margin-bottom: 64px;
+  }
+  .features-header h2 {
+    font-size: 40px; font-weight: 600; color: var(--black);
+    letter-spacing: -2.0px; margin-bottom: 12px;
+  }
+  .features-header p {
+    font-size: 18px; color: var(--gray-600);
+  }
+  .features-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .feature-card {
+    background: var(--white);
+    box-shadow: var(--shadow-card);
+    border-radius: 8px; padding: 32px;
+    transition: box-shadow 0.2s;
+  }
+  .feature-card:hover {
+    box-shadow: rgba(0,0,0,0.1) 0px 0px 0px 1px, rgba(0,0,0,0.06) 0px 4px 8px, #fafafa 0px 0px 0px 1px;
+  }
+  .feature-card h3 {
+    font-size: 16px; font-weight: 600; color: var(--black);
+    letter-spacing: -0.32px; margin-bottom: 8px;
+  }
+  .feature-card p {
+    font-size: 15px; color: var(--gray-600); line-height: 1.6;
+  }
+
+  /* CTA */
+  .cta-section {
+    max-width: 1200px; margin: 0 auto;
+    padding: 100px 24px; text-align: center;
+    border-top: 1px solid var(--gray-100);
+  }
+  .cta-section h2 {
+    font-size: 48px; font-weight: 600; color: var(--black);
+    letter-spacing: -2.4px; margin-bottom: 16px;
+  }
+  .cta-section p {
+    font-size: 18px; color: var(--gray-600); margin-bottom: 40px;
+  }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--gray-100);
+    padding: 40px 24px; text-align: center;
+    font-size: 14px; color: var(--gray-400);
+  }
+
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 36px; letter-spacing: -1.2px; }
+    .hero p { font-size: 16px; }
+    .features-grid, .workflow-grid { grid-template-columns: 1fr; }
+    .features-header h2, .code-section-header h2 { font-size: 28px; letter-spacing: -1.2px; }
+    .cta-section h2 { font-size: 32px; letter-spacing: -1.28px; }
+    .nav-links a:not(.btn-dark) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="logo">openDraftly</a>
+    <div class="nav-links">
+      <a href="#">Features</a>
+      <a href="#">Docs</a>
+      <a href="#">GitHub</a>
+      <a href="#" class="btn-dark">Download</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-pill">Open Source</div>
+  <h1>Diagrams that deploy<br>with your code</h1>
+  <p>A native, lightning-fast diagramming tool. Write architecture specs in text, render instantly, store in git. No drag-and-drop required.</p>
+  <div class="hero-actions">
+    <a href="#" class="btn-dark">Download for macOS</a>
+    <a href="#" class="btn-outline">View on GitHub</a>
+  </div>
+</section>
+
+<section class="workflow">
+  <div class="workflow-grid">
+    <div class="workflow-step">
+      <div class="workflow-label">Write</div>
+      <h3>Spec in text</h3>
+      <p>Define diagrams in HRF, a human-readable format designed for engineers. No mouse required.</p>
+    </div>
+    <div class="workflow-step">
+      <div class="workflow-label">Render</div>
+      <h3>See instantly</h3>
+      <p>60fps native rendering powered by Rust and egui. Handles 1000+ nodes without breaking a sweat.</p>
+    </div>
+    <div class="workflow-step">
+      <div class="workflow-label">Ship</div>
+      <h3>Export anywhere</h3>
+      <p>SVG, PNG, PDF, Mermaid. Embed in docs, PRs, or presentations with a single command.</p>
+    </div>
+  </div>
+</section>
+
+<section class="code-section">
+  <div class="code-section-header">
+    <h2>Diagram as code</h2>
+    <p>Your architecture lives where your code does.</p>
+  </div>
+  <div class="code-window">
+    <div class="code-titlebar">
+      <div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div>
+      <span class="code-filename">microservices.hrf</span>
+    </div>
+    <div class="code-body">
+<span class="cmt"># Microservices architecture diagram</span>
+<span class="kw">Title:</span> Order Processing Pipeline
+
+<span class="kw">Steps:</span>
+  <span class="tag">User</span> {shape: person}
+  <span class="tag">Web App</span>
+  <span class="tag">Order Service</span> {fill: blue}
+  <span class="tag">Inventory</span> {shape: cylinder}
+  <span class="tag">Notification</span>
+
+<span class="kw">Flow:</span>
+  <span class="tag">User</span> -> <span class="tag">Web App</span> -> <span class="tag">Order Service</span>
+  <span class="tag">Order Service</span> -> <span class="tag">Inventory</span>
+  <span class="tag">Order Service</span> -> <span class="tag">Notification</span> -> <span class="tag">User</span>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="features-header">
+    <h2>Everything you need</h2>
+    <p>Built from the ground up for speed, simplicity, and developer workflows.</p>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <h3>Native performance</h3>
+      <p>Written in Rust. No Electron, no browser engine. Just raw speed on your desktop.</p>
+    </div>
+    <div class="feature-card">
+      <h3>AI generation</h3>
+      <p>Describe your system in plain English. Get a production-ready diagram in seconds.</p>
+    </div>
+    <div class="feature-card">
+      <h3>3D system maps</h3>
+      <p>Layered 3D architecture visualization. See your entire stack at a glance.</p>
+    </div>
+    <div class="feature-card">
+      <h3>CLI-first</h3>
+      <p>Render, validate, diff, and watch from the terminal. Fits into any CI/CD pipeline.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Version control</h3>
+      <p>Plain-text specs live in git. Review diagram changes in PRs just like code.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Templates</h3>
+      <p>Built-in templates for common architectures. Start with a template, customize everything.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <h2>Start building</h2>
+  <p>Free and open source. No sign-up, no cloud, no limits.</p>
+  <a href="#" class="btn-dark">Download for macOS</a>
+</section>
+
+<footer>
+  <p>&copy; 2026 openDraftly &middot; MIT License</p>
+</footer>
+
+</body>
+</html>

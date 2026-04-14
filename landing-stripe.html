@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>openDraftly — Diagram as Code</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --navy: #061b31;
+    --label: #273951;
+    --body: #64748d;
+    --white: #ffffff;
+    --purple: #533afd;
+    --purple-hover: #4434d4;
+    --purple-light: #b9b9f9;
+    --border: #e5edf5;
+    --brand-dark: #1c1e54;
+    --ruby: #ea2261;
+    --magenta: #f96bee;
+    --shadow-blue: rgba(50,50,93,0.25);
+    --shadow-black: rgba(0,0,0,0.1);
+  }
+
+  html { font-size: 16px; }
+
+  body {
+    font-family: 'Inter', 'SF Pro Display', -apple-system, system-ui, sans-serif;
+    background: var(--white);
+    color: var(--body);
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* NAV */
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+  }
+  .nav-inner {
+    max-width: 1080px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+  }
+  .logo {
+    font-size: 17px; font-weight: 400; color: var(--navy);
+    text-decoration: none; letter-spacing: -0.2px;
+  }
+  .logo strong { font-weight: 500; }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
+  .nav-links a {
+    font-size: 14px; font-weight: 400; color: var(--navy);
+    text-decoration: none; transition: color 0.15s;
+  }
+  .nav-links a:hover { color: var(--purple); }
+
+  /* BUTTONS */
+  .btn-purple {
+    background: var(--purple); color: var(--white);
+    padding: 10px 20px; border-radius: 4px; border: none;
+    font: inherit; font-size: 15px; font-weight: 400;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: background 0.15s;
+    box-shadow: var(--shadow-blue) 0px 4px 12px -4px, var(--shadow-black) 0px 2px 6px -2px;
+  }
+  .btn-purple:hover { background: var(--purple-hover); }
+
+  .btn-ghost {
+    background: transparent; color: var(--purple);
+    padding: 10px 20px; border-radius: 4px;
+    border: 1px solid var(--purple-light);
+    font: inherit; font-size: 15px; font-weight: 400;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: background 0.15s;
+  }
+  .btn-ghost:hover { background: rgba(83,58,253,0.04); }
+
+  /* HERO */
+  .hero {
+    max-width: 1080px; margin: 0 auto;
+    padding: 120px 24px 100px;
+    text-align: center;
+  }
+  .hero-eyebrow {
+    font-size: 14px; font-weight: 400; color: var(--purple);
+    letter-spacing: 0.5px; text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: 56px; font-weight: 300; color: var(--navy);
+    line-height: 1.05; letter-spacing: -1.4px;
+    margin-bottom: 24px;
+  }
+  .hero p {
+    font-size: 20px; font-weight: 300; color: var(--body);
+    line-height: 1.5; max-width: 600px; margin: 0 auto 44px;
+  }
+  .hero-actions { display: flex; gap: 16px; justify-content: center; }
+
+  /* TRUST BAR */
+  .trust {
+    max-width: 1080px; margin: 0 auto;
+    padding: 0 24px 80px; text-align: center;
+  }
+  .trust p {
+    font-size: 13px; font-weight: 400; color: var(--body);
+    margin-bottom: 24px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .trust-logos {
+    display: flex; gap: 48px; justify-content: center; align-items: center;
+    flex-wrap: wrap;
+  }
+  .trust-logos span {
+    font-size: 18px; font-weight: 300; color: #c0c8d4;
+    letter-spacing: -0.3px;
+  }
+
+  /* CODE */
+  .code-section {
+    background: var(--brand-dark);
+    padding: 100px 24px;
+  }
+  .code-inner {
+    max-width: 1080px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 64px; align-items: center;
+  }
+  .code-text h2 {
+    font-size: 36px; font-weight: 300; color: var(--white);
+    letter-spacing: -0.64px; line-height: 1.15;
+    margin-bottom: 16px;
+  }
+  .code-text p {
+    font-size: 17px; font-weight: 300; color: rgba(255,255,255,0.65);
+    line-height: 1.5; margin-bottom: 32px;
+  }
+  .btn-white-ghost {
+    background: transparent; color: var(--white);
+    padding: 10px 20px; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.2);
+    font: inherit; font-size: 15px; font-weight: 400;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: border-color 0.15s;
+  }
+  .btn-white-ghost:hover { border-color: rgba(255,255,255,0.4); }
+  .code-window {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; overflow: hidden;
+  }
+  .code-titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .code-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+  }
+  .code-filename {
+    font-family: 'SF Mono', ui-monospace, monospace;
+    font-size: 12px; font-weight: 400; color: rgba(255,255,255,0.4);
+    margin-left: 8px;
+  }
+  .code-body {
+    padding: 24px;
+    font-family: 'SF Mono', ui-monospace, monospace;
+    font-size: 13px; line-height: 1.8; color: rgba(255,255,255,0.7);
+    overflow-x: auto;
+  }
+  .code-body .kw { color: var(--purple-light); }
+  .code-body .str { color: #7dd3a0; }
+  .code-body .cmt { color: rgba(255,255,255,0.3); }
+  .code-body .tag { color: #f0abfc; }
+
+  /* FEATURES */
+  .features {
+    max-width: 1080px; margin: 0 auto;
+    padding: 100px 24px;
+  }
+  .features-header {
+    text-align: center; margin-bottom: 64px;
+  }
+  .features-header h2 {
+    font-size: 40px; font-weight: 300; color: var(--navy);
+    letter-spacing: -0.8px; margin-bottom: 16px;
+  }
+  .features-header p {
+    font-size: 18px; font-weight: 300; color: var(--body);
+  }
+  .features-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .feature-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 8px; padding: 32px;
+    transition: box-shadow 0.2s;
+  }
+  .feature-card:hover {
+    box-shadow: var(--shadow-blue) 0px 15px 30px -15px, var(--shadow-black) 0px 8px 16px -8px;
+  }
+  .feature-icon {
+    width: 40px; height: 40px; border-radius: 6px;
+    background: linear-gradient(135deg, rgba(83,58,253,0.1), rgba(249,107,238,0.1));
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 20px; font-size: 18px;
+  }
+  .feature-card h3 {
+    font-size: 18px; font-weight: 400; color: var(--navy);
+    margin-bottom: 8px; letter-spacing: -0.2px;
+  }
+  .feature-card p {
+    font-size: 15px; font-weight: 300; color: var(--body);
+    line-height: 1.5;
+  }
+
+  /* CTA */
+  .cta-section {
+    background: var(--brand-dark);
+    padding: 100px 24px; text-align: center;
+  }
+  .cta-section h2 {
+    font-size: 44px; font-weight: 300; color: var(--white);
+    letter-spacing: -0.88px; margin-bottom: 16px;
+  }
+  .cta-section p {
+    font-size: 18px; font-weight: 300; color: rgba(255,255,255,0.6);
+    margin-bottom: 40px;
+  }
+  .btn-white {
+    background: var(--white); color: var(--brand-dark);
+    padding: 12px 28px; border-radius: 4px; border: none;
+    font: inherit; font-size: 16px; font-weight: 400;
+    cursor: pointer; text-decoration: none; display: inline-block;
+    transition: opacity 0.15s;
+    box-shadow: var(--shadow-blue) 0px 6px 16px -6px;
+  }
+  .btn-white:hover { opacity: 0.92; }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 24px; text-align: center;
+    font-size: 13px; color: var(--body);
+  }
+
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 36px; letter-spacing: -0.72px; }
+    .hero p { font-size: 17px; }
+    .features-grid { grid-template-columns: 1fr; }
+    .code-inner { grid-template-columns: 1fr; }
+    .features-header h2 { font-size: 28px; }
+    .cta-section h2 { font-size: 32px; }
+    .trust-logos { gap: 24px; }
+    .nav-links a:not(.btn-purple) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="logo"><strong>open</strong>Draftly</a>
+    <div class="nav-links">
+      <a href="#">Features</a>
+      <a href="#">Documentation</a>
+      <a href="#">Pricing</a>
+      <a href="#" class="btn-purple">Get started</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-eyebrow">Diagram infrastructure for engineers</div>
+  <h1>Architecture diagrams,<br>beautifully automated</h1>
+  <p>Write your system architecture in a human-readable spec. openDraftly renders it natively, exports everywhere, and keeps it in version control alongside your code.</p>
+  <div class="hero-actions">
+    <a href="#" class="btn-purple">Download for macOS</a>
+    <a href="#" class="btn-ghost">Read the docs</a>
+  </div>
+</section>
+
+<section class="trust">
+  <p>Built for teams that think in systems</p>
+  <div class="trust-logos">
+    <span>Startups</span>
+    <span>Platform teams</span>
+    <span>DevOps</span>
+    <span>SRE</span>
+    <span>Architects</span>
+  </div>
+</section>
+
+<section class="code-section">
+  <div class="code-inner">
+    <div class="code-text">
+      <h2>Your diagrams are code.<br>Treat them that way.</h2>
+      <p>HRF is a human-readable format designed for architecture diagrams. It's plain text, git-friendly, and LLM-compatible. Describe systems in English and let AI do the rest.</p>
+      <a href="#" class="btn-white-ghost">Explore HRF syntax</a>
+    </div>
+    <div class="code-window">
+      <div class="code-titlebar">
+        <div class="code-dot"></div><div class="code-dot"></div><div class="code-dot"></div>
+        <span class="code-filename">infra.hrf</span>
+      </div>
+      <div class="code-body">
+<span class="cmt"># Infrastructure overview</span>
+<span class="kw">Title:</span> Cloud Platform
+
+<span class="kw">Steps:</span>
+  <span class="tag">CDN</span> {shape: cloud}
+  <span class="tag">Load Balancer</span> {shape: hexagon}
+  <span class="tag">API Cluster</span> {fill: blue}
+  <span class="tag">Cache</span> {shape: diamond}
+  <span class="tag">Primary DB</span> {shape: cylinder}
+  <span class="tag">Replica DB</span> {shape: cylinder}
+
+<span class="kw">Flow:</span>
+  <span class="tag">CDN</span> -> <span class="tag">Load Balancer</span>
+  <span class="tag">Load Balancer</span> -> <span class="tag">API Cluster</span>
+  <span class="tag">API Cluster</span> -> <span class="tag">Cache</span>
+  <span class="tag">API Cluster</span> -> <span class="tag">Primary DB</span>
+  <span class="tag">Primary DB</span> -> <span class="tag">Replica DB</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="features-header">
+    <h2>Built to scale with your systems</h2>
+    <p>From a quick sketch to a full platform architecture.</p>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">&#9889;</div>
+      <h3>Native Rust engine</h3>
+      <p>60fps rendering powered by egui. Handles thousand-node diagrams without lag.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#129302;</div>
+      <h3>AI-powered generation</h3>
+      <p>Describe your architecture in plain English. The LLM pipeline generates production-ready specs.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#127912;</div>
+      <h3>3D system views</h3>
+      <p>Unique layered visualization that shows your entire stack in three dimensions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128640;</div>
+      <h3>Multi-format export</h3>
+      <p>SVG, PNG, PDF, and Mermaid. Embed diagrams anywhere with a single CLI command.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#9000;</div>
+      <h3>Full CLI toolkit</h3>
+      <p>Render, validate, diff, lint, and watch. Integrates with CI/CD pipelines out of the box.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128736;</div>
+      <h3>Template library</h3>
+      <p>Pre-built templates for microservices, data pipelines, cloud infra, and more.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <h2>Ready to diagram differently?</h2>
+  <p>Open source, offline-first, and free forever for individual use.</p>
+  <a href="#" class="btn-white">Download openDraftly</a>
+</section>
+
+<footer>
+  <p>&copy; 2026 openDraftly &middot; Open Source &middot; MIT License</p>
+</footer>
+
+</body>
+</html>
