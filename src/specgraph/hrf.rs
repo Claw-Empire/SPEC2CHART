@@ -1336,75 +1336,92 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                         (raw_label_and_tags.to_string(), None)
                     }
                 };
-                // Find shape tag — use the full `tag_to_shape_opt` alias vocabulary
-                // for consistency with `parse_node_line`. The previous inline
-                // `matches!(...)` list only recognized a tiny subset of names
-                // (`diamond`, `circle`, `rectangle`, etc.) and silently fell
-                // through to `RoundedRect` for valid aliases like `oval`,
-                // `rhombus`, `db`, `pyramid`, `cloud`. A typo like `{diamon}`
-                // was equally invisible — no warning, no visual signal.
+                // Single-pass tag processing for Steps. The previous
+                // implementation split tag handling across two loops: one for
+                // shape detection (with meta-prefixed tags explicitly skipped)
+                // and one for `fill:`. Every other tag — `z:`, `metric:`,
+                // `icon:`, `pinned`, `tier-color`, `dep:`, `id:`, plus any
+                // `bold`/`status:done`/`progress:50%` style shorthand — was
+                // silently dropped. Users writing
+                //   `1. Deploy backend {z:2}`
+                //   `2. Launch {metric:$50M ARR}`
+                //   `3. Monitor {pinned}`
+                // got zero effect AND zero warnings.
                 //
-                // Fix:
-                //   1. Iterate tags and resolve shape via `tag_to_shape_opt` (last
-                //      match wins, matching `parse_node_line` semantics).
-                //   2. For tags that do NOT resolve as a shape AND are not a
-                //      known meta-prefix (`fill:`, `z:`, `dep:`, `id:`, `metric:`,
-                //      `pinned`), check `suggest_shape_alias` — if it returns
-                //      Some, the tag is shape-ish (close Levenshtein distance to
-                //      a known alias), so preserve it in `node.unknown_tags`
-                //      where `cli_lint`'s existing suggest_shape_alias walk will
-                //      emit a did-you-mean warning automatically.
-                //
-                // Meta-prefixed tags and other non-shape-ish tokens are left
-                // unhandled to avoid changing existing Steps behavior beyond the
-                // shape silent-drop fix that is the scope of this round.
+                // Round 53 fix: implement parity handlers for the most common
+                // meta-tags (z, metric, icon, pinned, tier-color, dep, id)
+                // directly on the Step node, and push any remaining unrecognised
+                // tags into `node.unknown_tags` so cli_lint's generic fallback
+                // surfaces them instead of silent-dropping.
                 let mut shape = NodeShape::RoundedRect;
-                let mut step_shape_typos: Vec<String> = Vec::new();
-                for t in &tags {
-                    // Skip meta-prefixed tags — not this round's scope.
-                    if t.starts_with("fill:")
-                        || t.starts_with("z:")
-                        || t.starts_with("dep:")
-                        || t.starts_with("id:")
-                        || t.starts_with("metric:")
-                        || t.starts_with("icon:")
-                        || t == "pinned"
-                        || t == "tier-color"
-                    {
-                        continue;
-                    }
-                    if let Some(s) = tag_to_shape_opt(t) {
-                        shape = s;
-                    } else if suggest_shape_alias(t).is_some() {
-                        // Shape-ish typo (close distance to a known shape
-                        // alias). Record so cli_lint surfaces it.
-                        step_shape_typos.push(t.clone());
-                    }
-                }
-                // Resolve {fill:X}. On typo (`{fill:blu}`, `{fill:gren}`,
-                // bad hex) the old code used `find().and_then(tag_to_fill_color)`
-                // which silently dropped the value — the step rendered with the
-                // default fill and the user got no feedback. Now we record
-                // every unresolved fill tag into `node.unknown_tags` so the
-                // existing cli_lint color walk (main.rs:1497) surfaces a
-                // did-you-mean hint against the built-in color vocabulary and
-                // the palette map.
+                let mut step_unknown_tags: Vec<String> = Vec::new();
+                let mut step_z_override: Option<f32> = None;
+                let mut step_metric: Option<String> = None;
+                let mut step_icon: Option<String> = None;
+                let mut step_pinned = false;
+                let mut step_tier_color = false;
+                let mut step_dep_targets: Vec<String> = Vec::new();
+                let mut step_hrf_id_override: Option<String> = None;
                 let mut fill: Option<[u8; 4]> = None;
-                let mut step_fill_typos: Vec<String> = Vec::new();
                 for t in &tags {
                     if let Some(v) = t.strip_prefix("fill:") {
+                        // Resolve {fill:X}. On typo (`{fill:blu}`, `{fill:gren}`,
+                        // bad hex) the old code used `find().and_then(tag_to_fill_color)`
+                        // which silently dropped the value — the step rendered with the
+                        // default fill and the user got no feedback. Now we record
+                        // every unresolved fill tag into `node.unknown_tags` so the
+                        // existing cli_lint color walk (main.rs:1497) surfaces a
+                        // did-you-mean hint against the built-in color vocabulary and
+                        // the palette map.
                         match tag_to_fill_color(v.trim()) {
                             Some(c) => fill = Some(c),
-                            None => step_fill_typos.push(t.clone()),
+                            None => step_unknown_tags.push(t.clone()),
                         }
+                    } else if let Some(v) = t.strip_prefix("z:") {
+                        match v.trim().parse::<f32>() {
+                            Ok(z) => step_z_override = Some(z),
+                            Err(_) => step_unknown_tags.push(t.clone()),
+                        }
+                    } else if let Some(v) = t.strip_prefix("metric:") {
+                        step_metric = Some(v.to_string());
+                    } else if let Some(v) = t.strip_prefix("icon:") {
+                        let iv = v.trim().to_string();
+                        if !iv.is_empty() { step_icon = Some(iv); }
+                    } else if let Some(v) = t.strip_prefix("dep:") {
+                        let dv = v.trim().to_string();
+                        if !dv.is_empty() { step_dep_targets.push(dv); }
+                    } else if let Some(v) = t.strip_prefix("id:") {
+                        let iv = v.trim().to_string();
+                        if !iv.is_empty() { step_hrf_id_override = Some(iv); }
+                    } else if t == "pinned" || t == "pin" {
+                        step_pinned = true;
+                    } else if t == "tier-color" || t == "auto-color" || t == "tint" || t == "tier-tint" {
+                        step_tier_color = true;
+                    } else if let Some(s) = tag_to_shape_opt(t) {
+                        shape = s;
+                    } else if let Some((preset_shape, preset_color)) = tag_to_preset(t) {
+                        // Semantic preset: sets shape AND fill color at once.
+                        // Covers canonical names like `start`, `end`, `process`,
+                        // `task`, `load-balancer`, `cache`, `decision`, etc.
+                        // that `tag_to_shape_opt` doesn't catch but are treated
+                        // as shape-ish in parse_node_line.
+                        shape = preset_shape;
+                        if fill.is_none() {
+                            fill = Some(preset_color);
+                        }
+                    } else {
+                        // Not a shape, not a handled meta-tag. Preserve so
+                        // cli_lint surfaces it — the generic "unknown node tag"
+                        // fallback will fire, and `suggest_shape_alias` (for
+                        // shape-ish typos like `diamon`) runs first and
+                        // dominates the message.
+                        step_unknown_tags.push(t.clone());
                     }
                 }
                 let mut node = Node::new(shape, egui::Pos2::ZERO);
-                // Preserve shape-ish typo tags for cli_lint's suggest_shape_alias
-                // walk and fill-typo tags for cli_lint's color walk. Regular
-                // `node.unknown_tags` field; no new model field.
-                node.unknown_tags.extend(step_shape_typos);
-                node.unknown_tags.extend(step_fill_typos);
+                // Preserve all unknown tags so cli_lint's walks (shape alias,
+                // color, generic fallback) fire on them.
+                node.unknown_tags.extend(step_unknown_tags);
                 if let NodeKind::Shape { label: lbl, .. } = &mut node.kind {
                     *lbl = label.trim().to_string();
                 }
@@ -1414,11 +1431,45 @@ pub fn parse_hrf(input: &str) -> Result<FlowchartDocument, String> {
                 } else if node.sublabel.is_empty() {
                     node.sublabel = format!("Step {}", current_step);
                 }
-                node.z_offset = s_default_z;
-                if let Some(fc) = fill { node.style.fill_color = fc; }
+                // Apply z override (explicit {z:N} wins over section default_z).
+                node.z_offset = step_z_override.unwrap_or(s_default_z);
+                // Apply tier-color: if {tier-color} AND no explicit fill, derive
+                // the fill from the effective z_offset tier.
+                if step_tier_color && fill.is_none() {
+                    fill = Some(z_tier_fill_color(node.z_offset));
+                }
+                if let Some(fc) = fill {
+                    node.style.fill_color = fc;
+                    // Auto-contrast text color mirrors parse_node_line.
+                    let luma = 0.299 * fc[0] as f32 + 0.587 * fc[1] as f32 + 0.114 * fc[2] as f32;
+                    node.style.text_color = if luma > 140.0 { [15, 15, 20, 255] } else { [220, 220, 230, 255] };
+                }
+                if step_pinned { node.pinned = true; }
+                if let Some(mv) = step_metric { node.metric = Some(mv); }
+                if let Some(ic) = step_icon { node.icon = ic; }
+                // Use the {id:X} override as the HRF id if provided, else
+                // fall back to the auto-generated `stepN` id. The id_map
+                // key also switches so that {dep:X} / Flow references can
+                // resolve via the user-chosen id.
+                let effective_id = step_hrf_id_override.clone().unwrap_or_else(|| auto_id.clone());
+                node.hrf_id = effective_id.clone();
                 let node_id = node.id;
+                // Insert BOTH the auto step id and the override id (if any)
+                // into id_map so Flow-section edges can reference the step by
+                // either name — matches how Nodes section double-registers
+                // ids via id_map + label_map.
                 id_map.insert(auto_id, node_id);
+                if let Some(ref oid) = step_hrf_id_override {
+                    id_map.insert(oid.clone(), node_id);
+                }
                 label_map.insert(slugify(node.display_label(), 0), node_id);
+                // Push dep targets into the shared post-pass so
+                // `{dep:stepN}` / `{dep:other-id}` become dashed edges the
+                // same way as in the Nodes section. Unresolved targets go
+                // to `import_hints.unresolved_dep_targets` for cli_lint.
+                for dep in step_dep_targets {
+                    node_deps.push((node_id, dep));
+                }
                 if let Some(prev_id) = s_last_id {
                     let e = Edge::new(
                         Port { node_id: prev_id, side: PortSide::Right },

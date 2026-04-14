@@ -10961,4 +10961,185 @@ mod cli_tests {
             "expected invalid-port-side hint for src-port:topleft, got: {stdout}"
         );
     }
+
+    #[test]
+    fn test_lint_step_meta_tag_fallback_via_cli() {
+        // Round 53: meta-prefixed tags in ## Steps used to silently drop
+        // because the Steps parser had a hard-coded skip list
+        // (`fill:`, `z:`, `dep:`, `id:`, `metric:`, `icon:`, `pinned`,
+        // `tier-color`). The first loop ignored them (shape detection) and
+        // the code after had no corresponding handler, so `{z:2}`,
+        // `{metric:$50M}`, `{pinned}`, `{icon:📊}` all vanished with zero
+        // lint feedback. Now they are APPLIED to the step node, and
+        // unknown non-shape-ish tags like `{foobar}` hit the generic
+        // fallback warning.
+        let spec = "## Steps\n\
+                    1. Plan\n\
+                    2. Ship {foobar}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_meta_fallback_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("{foobar}") && joined.contains("ignored"),
+            "expected generic 'unknown node tag ignored' fallback for {{foobar}} in Steps, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_z_override_applied_via_cli() {
+        // Round 53: `{z:N}` on a Step must produce NO warning (it is now
+        // applied to the step node). Typos like `{z:notnum}` must STILL
+        // surface the numeric did-you-mean warning.
+        let spec = "## Steps\n\
+                    1. Plan {z:100}\n\
+                    2. Ship {z:notnum}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_z_override_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Valid {z:100} must NOT warn.
+        assert!(
+            !joined.contains("{z:100}"),
+            "valid {{z:100}} must not warn in Steps, got: {stdout}"
+        );
+        // Typo {z:notnum} must surface the numeric did-you-mean warning.
+        assert!(
+            joined.contains("{z:notnum}") && joined.contains("number"),
+            "typo {{z:notnum}} must surface numeric hint in Steps, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_dep_resolves_via_cli() {
+        // Round 53: `{dep:X}` on a Step used to be silently dropped. Now
+        // it creates a dashed dep edge the same as in the Nodes section.
+        // Verify that `{dep:step1}` resolves (edge_count bumps) and
+        // `{dep:nonexistent}` surfaces a did-you-mean warning.
+        let spec = "## Steps\n\
+                    1. Kickoff\n\
+                    2. Build\n\
+                    3. Ship {dep:step1}\n\
+                    4. Retro {dep:nonexistent}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_dep_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        // edge_count: 3 auto-chain edges (1→2, 2→3, 3→4) + 1 dep edge
+        // (step3 → step1) = 4. The {dep:nonexistent} does NOT create an
+        // edge but does fire an import_hints warning.
+        let edge_count = v["edge_count"].as_u64().unwrap_or(0);
+        assert_eq!(
+            edge_count, 4,
+            "expected 4 edges (3 auto-chain + 1 dep:step1), got edge_count={edge_count}: {stdout}"
+        );
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("nonexistent") && joined.contains("does not resolve"),
+            "expected unresolved-dep-target hint for {{dep:nonexistent}}, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_lint_step_pinned_metric_icon_not_flagged_via_cli() {
+        // Round 53 regression guard: `{pinned}`, `{metric:X}`, `{icon:Y}`,
+        // `{tier-color}` on Steps must apply silently without a warning.
+        // Previously these were silent-dropped AND invisible; after the
+        // fix they must be applied AND still produce no lint warning.
+        let spec = "## Steps\n\
+                    1. Plan {pinned}\n\
+                    2. Ship {metric:$50M ARR}\n\
+                    3. Monitor {icon:chart}\n\
+                    4. Scale {tier-color}\n";
+        let uid = uuid::Uuid::new_v4();
+        let tmp = std::env::temp_dir().join(format!("step_pinned_metric_{}.spec", uid));
+        std::fs::write(&tmp, spec).unwrap();
+        let bin = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| p.join("open-draftly"));
+        let Some(bin) = bin else { let _ = std::fs::remove_file(&tmp); return; };
+        if !bin.exists() { let _ = std::fs::remove_file(&tmp); return; }
+        let out = std::process::Command::new(&bin)
+            .args(["lint", "--json", tmp.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&tmp);
+        let v: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|_| panic!("lint --json not valid JSON: {stdout}"));
+        let warnings = v["warnings"].as_array().expect("warnings array");
+        let joined: String = warnings
+            .iter()
+            .filter_map(|w| w.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for bad in &["{pinned}", "{metric:", "{icon:", "{tier-color}"] {
+            assert!(
+                !joined.contains(bad),
+                "valid meta tag {} must not warn in Steps, got: {stdout}",
+                bad
+            );
+        }
+    }
 }
